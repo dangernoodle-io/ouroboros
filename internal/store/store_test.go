@@ -348,3 +348,157 @@ func TestClampLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestTokenizeQuery(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    string
+		expected []string
+	}{
+		{
+			name:     "normal words",
+			query:    "postgresql database performance",
+			expected: []string{"postgresql", "database", "performance"},
+		},
+		{
+			name:     "mixed case normalized to lowercase",
+			query:    "PostgreSQL Database PERFORMANCE",
+			expected: []string{"postgresql", "database", "performance"},
+		},
+		{
+			name:     "stop words filtered",
+			query:    "what is the best database for performance",
+			expected: []string{"best", "database", "performance"},
+		},
+		{
+			name:     "punctuation stripped",
+			query:    "postgresql, database! (performance)",
+			expected: []string{"postgresql", "database", "performance"},
+		},
+		{
+			name:     "all stop words returns empty",
+			query:    "the is an a are you they we",
+			expected: []string{},
+		},
+		{
+			name:     "empty query",
+			query:    "",
+			expected: []string{},
+		},
+		{
+			name:     "only whitespace",
+			query:    "   ",
+			expected: []string{},
+		},
+		{
+			name:     "mixed punctuation and stop words",
+			query:    "how do we deploy the service to production?",
+			expected: []string{"deploy", "service", "production"},
+		},
+		{
+			name:     "hyphenated words",
+			query:    "release-process ci-cd",
+			expected: []string{"release-process", "ci-cd"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := store.TokenizeQuery(tt.query)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestKeywordSearch(t *testing.T) {
+	db := testDB(t)
+
+	// Insert test documents
+	doc1 := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Database Choice",
+		Content: "We chose PostgreSQL for ACID guarantees",
+		Tags:    []string{"database", "infrastructure"},
+	}
+	doc2 := store.Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "DB Host",
+		Content: "prod-db.example.com postgresql instance",
+		Tags:    []string{"database", "production"},
+	}
+	doc3 := store.Document{
+		Type:    "note",
+		Project: "example-org",
+		Title:   "API Design",
+		Content: "REST endpoints for service discovery",
+		Tags:    []string{"api"},
+	}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc3)
+	require.NoError(t, err)
+
+	t.Run("basic keyword search", func(t *testing.T) {
+		summaries, err := store.KeywordSearch(db, "postgresql", "", 50)
+		require.NoError(t, err)
+		require.Len(t, summaries, 2)
+		// Should match both doc1 and doc2
+		titles := []string{summaries[0].Title, summaries[1].Title}
+		assert.Contains(t, titles, "Database Choice")
+		assert.Contains(t, titles, "DB Host")
+	})
+
+	t.Run("keyword search with project filter", func(t *testing.T) {
+		summaries, err := store.KeywordSearch(db, "postgresql", "acme-corp", 50)
+		require.NoError(t, err)
+		require.Len(t, summaries, 2)
+		for _, s := range summaries {
+			assert.Equal(t, "acme-corp", s.Project)
+		}
+	})
+
+	t.Run("keyword search OR matching", func(t *testing.T) {
+		summaries, err := store.KeywordSearch(db, "postgresql acid", "", 50)
+		require.NoError(t, err)
+		// Should match doc1 and doc2 (both have postgresql), and doc1 (has acid)
+		require.Len(t, summaries, 2)
+	})
+
+	t.Run("keyword search with stop words filtered", func(t *testing.T) {
+		// Query: "the best database" -> stops words removed -> "best database"
+		// Only "database" remains as "best" is not in our docs
+		summaries, err := store.KeywordSearch(db, "the best database", "", 50)
+		require.NoError(t, err)
+		// Should find doc1 and doc2 which contain "database"
+		require.Greater(t, len(summaries), 0)
+	})
+
+	t.Run("keyword search no matches", func(t *testing.T) {
+		summaries, err := store.KeywordSearch(db, "kubernetes", "", 50)
+		require.NoError(t, err)
+		require.Len(t, summaries, 0)
+	})
+
+	t.Run("keyword search all stop words", func(t *testing.T) {
+		summaries, err := store.KeywordSearch(db, "the is a an are", "", 50)
+		require.NoError(t, err)
+		require.Nil(t, summaries)
+	})
+
+	t.Run("keyword search empty query", func(t *testing.T) {
+		summaries, err := store.KeywordSearch(db, "", "", 50)
+		require.NoError(t, err)
+		require.Nil(t, summaries)
+	})
+
+	t.Run("keyword search respects limit", func(t *testing.T) {
+		summaries, err := store.KeywordSearch(db, "example", "", 1)
+		require.NoError(t, err)
+		require.Len(t, summaries, 1)
+	})
+}

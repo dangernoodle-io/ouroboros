@@ -264,6 +264,7 @@ func handleImport(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 type queryArgs struct {
 	project string
 	docType string
+	search  string
 	limit   int
 }
 
@@ -281,6 +282,11 @@ func parseQueryArgs(args []string) queryArgs {
 				qa.docType = args[i+1]
 				i++
 			}
+		case "--search":
+			if i+1 < len(args) {
+				qa.search = args[i+1]
+				i++
+			}
 		case "--limit":
 			if i+1 < len(args) {
 				if n, err := fmt.Sscanf(args[i+1], "%d", &qa.limit); err != nil || n != 1 {
@@ -293,7 +299,7 @@ func parseQueryArgs(args []string) queryArgs {
 	return qa
 }
 
-// runQuery handles CLI query mode: ouroboros query --project <name> [--type <type>] [--limit N]
+// runQuery handles CLI query mode: ouroboros query --project <name> [--type <type>] [--search <query>] [--limit N]
 // Outputs JSON array of document summaries to stdout.
 func runQuery(args []string) {
 	qa := parseQueryArgs(args)
@@ -305,9 +311,18 @@ func runQuery(args []string) {
 	}
 	defer db.Close()
 
-	summaries, err := store.QueryDocuments(db, qa.docType, qa.project, "", "", nil, qa.limit)
-	if err != nil {
-		log.Fatalf("query failed: %v", err)
+	var summaries []store.DocumentSummary
+
+	if qa.search != "" {
+		summaries, err = store.KeywordSearch(db, qa.search, qa.project, qa.limit)
+		if err != nil {
+			log.Fatalf("search failed: %v", err)
+		}
+	} else {
+		summaries, err = store.QueryDocuments(db, qa.docType, qa.project, "", "", nil, qa.limit)
+		if err != nil {
+			log.Fatalf("query failed: %v", err)
+		}
 	}
 
 	data, err := json.Marshal(summaries)

@@ -4,8 +4,100 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// stopWords are filtered from keyword search queries to reduce noise from natural-language prompts.
+var stopWords = map[string]bool{
+	"a": true, "an": true, "the": true, "is": true, "are": true,
+	"was": true, "were": true, "be": true, "been": true, "being": true,
+	"have": true, "has": true, "had": true, "do": true, "does": true,
+	"did": true, "will": true, "would": true, "could": true, "should": true,
+	"may": true, "might": true, "can": true, "shall": true,
+	"i": true, "you": true, "he": true, "she": true, "it": true,
+	"we": true, "they": true, "me": true, "him": true, "her": true,
+	"us": true, "them": true, "my": true, "your": true, "our": true,
+	"this": true, "that": true, "these": true, "those": true,
+	"in": true, "on": true, "at": true, "to": true, "for": true,
+	"of": true, "with": true, "from": true, "by": true, "about": true,
+	"and": true, "or": true, "but": true, "not": true, "no": true,
+	"if": true, "then": true, "so": true, "just": true,
+	"let": true, "lets": true, "let's": true, "what": true, "how": true,
+	"why": true, "when": true, "where": true, "which": true, "who": true,
+}
+
+// TokenizeQuery splits a query string into meaningful search terms,
+// stripping punctuation and stop words.
+func TokenizeQuery(query string) []string {
+	words := strings.Fields(strings.ToLower(query))
+	terms := []string{}
+	for _, w := range words {
+		// Strip leading/trailing punctuation
+		w = strings.Trim(w, ".,;:!?\"'`()[]{}/-")
+		if w == "" || stopWords[w] {
+			continue
+		}
+		terms = append(terms, w)
+	}
+	return terms
+}
+
+// KeywordSearch performs a keyword-based FTS5 search with BM25 ranking.
+// Terms are ORed together so any match counts. Returns results ranked by relevance.
+// Returns nil if no meaningful terms after stop word removal.
+func KeywordSearch(db *sql.DB, query, project string, limit int) ([]DocumentSummary, error) {
+	terms := TokenizeQuery(query)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+
+	// Build FTS5 query: term1 OR term2 OR term3
+	// Each term is quoted to handle special chars
+	var quoted []string
+	for _, t := range terms {
+		quoted = append(quoted, "\""+strings.ReplaceAll(t, "\"", "\"\"")+"\"")
+	}
+	ftsQuery := strings.Join(quoted, " OR ")
+
+	limit = ClampLimit(limit, 50, 500)
+
+	sqlQuery := `SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at
+		FROM documents d
+		JOIN documents_fts fts ON d.id = fts.rowid
+		WHERE fts.documents_fts MATCH ?`
+	args := []interface{}{ftsQuery}
+
+	if project != "" {
+		sqlQuery += " AND d.project = ?"
+		args = append(args, project)
+	}
+
+	sqlQuery += " ORDER BY bm25(documents_fts) LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("keyword search: %w", err)
+	}
+	defer rows.Close()
+
+	var results []DocumentSummary
+	for rows.Next() {
+		var s DocumentSummary
+		var tagsJSON sql.NullString
+		if err := rows.Scan(&s.ID, &s.Type, &s.Project, &s.Category, &s.Title, &tagsJSON, &s.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		if tagsJSON.Valid && tagsJSON.String != "" {
+			if err := json.Unmarshal([]byte(tagsJSON.String), &s.Tags); err != nil {
+				s.Tags = []string{}
+			}
+		}
+		results = append(results, s)
+	}
+	return results, rows.Err()
+}
 
 // UpsertDocument inserts or updates a document record using ON CONFLICT.
 // Returns the ID of the inserted/updated document.
