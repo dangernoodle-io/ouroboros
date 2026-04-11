@@ -83,12 +83,20 @@ Store immediately (put):
 - Always search first to avoid duplicates — upsert by type+project+category+title
 - When a prior decision changes, search for and update the existing entry — do not create a duplicate
 
+Checkpoints:
+- After completing a multi-step task, review what you decided and why — persist anything non-obvious before moving on
+- After a plan is finalized or abandoned, persist the key decisions and trade-offs
+- Before reporting a task as complete to the user, ask yourself: "if a new conversation started this task from scratch, what would it need to know?" — persist that
+
 Query (get/search):
 - Before making decisions that may have prior context
 - When the user asks about past decisions, project history, or "why" questions
 - Prefer search for broad queries, get with filters for known types/projects
 - get without id returns compact summaries (no content) — use get with id only when full content is needed
 - After modifying code, check if related KB entries need updating
+
+Staleness:
+- When a KB entry informs your current work, verify it's still accurate — update or delete if stale
 
 Do not store: trivial implementation details, information derivable from code or git history, temporary debugging state.
 
