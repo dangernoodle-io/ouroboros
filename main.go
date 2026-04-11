@@ -13,6 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/kb"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -52,6 +53,12 @@ func main() {
 	// CLI query mode: ouroboros query --project <name> [--type <type>] [--limit N]
 	if len(os.Args) > 1 && os.Args[1] == "query" {
 		runQuery(os.Args[2:])
+		return
+	}
+
+	// CLI items mode: ouroboros items --project <name> [--status <open|done>] [--limit N]
+	if len(os.Args) > 1 && os.Args[1] == "items" {
+		runItems(os.Args[2:])
 		return
 	}
 
@@ -356,6 +363,78 @@ func runQuery(args []string) {
 	}
 
 	data, err := json.Marshal(summaries)
+	if err != nil {
+		log.Fatalf("marshal failed: %v", err)
+	}
+
+	fmt.Println(string(data))
+}
+
+type itemsArgs struct {
+	project string
+	status  string
+	limit   int
+}
+
+func parseItemsArgs(args []string) itemsArgs {
+	ia := itemsArgs{status: "open", limit: 20}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--project":
+			if i+1 < len(args) {
+				ia.project = args[i+1]
+				i++
+			}
+		case "--status":
+			if i+1 < len(args) {
+				ia.status = args[i+1]
+				i++
+			}
+		case "--limit":
+			if i+1 < len(args) {
+				if n, err := fmt.Sscanf(args[i+1], "%d", &ia.limit); err != nil || n != 1 {
+					ia.limit = 20
+				}
+				i++
+			}
+		}
+	}
+	return ia
+}
+
+// runItems handles CLI items mode: ouroboros items --project <name> [--status <open|done>] [--limit N]
+// Outputs JSON array of backlog items to stdout.
+func runItems(args []string) {
+	ia := parseItemsArgs(args)
+
+	var err error
+	db, err = store.InitDB()
+	if err != nil {
+		log.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Look up project by name
+	project, err := backlog.GetProjectByName(db, ia.project)
+	if err != nil {
+		// Project not found — output empty array
+		fmt.Println("[]")
+		return
+	}
+
+	// Build filter with project ID and optionally status
+	filter := backlog.ItemFilter{ProjectID: &project.ID}
+	if ia.status != "" {
+		filter.Status = &ia.status
+	}
+
+	// List items
+	items, err := backlog.ListItems(db, filter)
+	if err != nil {
+		log.Fatalf("list items failed: %v", err)
+	}
+
+	data, err := json.Marshal(items)
 	if err != nil {
 		log.Fatalf("marshal failed: %v", err)
 	}

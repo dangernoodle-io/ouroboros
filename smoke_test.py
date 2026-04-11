@@ -53,6 +53,7 @@ r, err = tool(2, "put", {
     "tags": ["database", "infrastructure"],
 })
 print(json.dumps(r))
+assert not err, f"put decision failed: {r}"
 decision_id = r["id"] if not err else None
 
 print("\n--- PUT: fact type document ---")
@@ -64,6 +65,7 @@ r, err = tool(3, "put", {
     "content": "8",
 })
 print(json.dumps(r))
+assert not err, f"put fact failed: {r}"
 
 print("\n--- PUT: note type document ---")
 r, err = tool(4, "put", {
@@ -75,6 +77,7 @@ r, err = tool(4, "put", {
     "tags": ["release"],
 })
 print(json.dumps(r))
+assert not err, f"put note failed: {r}"
 
 print("\n--- PUT: relation type document ---")
 r, err = tool(5, "put", {
@@ -86,27 +89,40 @@ r, err = tool(5, "put", {
     "metadata": json.dumps({"source": "api", "target": "database"}),
 })
 print(json.dumps(r))
+assert not err, f"put relation failed: {r}"
 
 print("\n--- GET by ID (full content) ---")
 if decision_id:
     r, err = tool(6, "get", {"id": decision_id})
     print(json.dumps(r))
+    assert not err, f"get by id failed: {r}"
 
 print("\n--- GET list by type (summaries) ---")
 r, err = tool(7, "get", {"type": "decision", "project": "acme-corp"})
 print(json.dumps(r, indent=2))
+assert not err, f"get list by type failed: {r}"
 
 print("\n--- GET list by project (summaries) ---")
 r, err = tool(8, "get", {"project": "acme-corp"})
 print(json.dumps(r, indent=2) if isinstance(r, list) else json.dumps(r))
+assert not err, f"get list by project failed: {r}"
 
 print("\n--- SEARCH by query ---")
 r, err = tool(9, "search", {"query": "PostgreSQL"})
 print(json.dumps(r, indent=2) if isinstance(r, list) else json.dumps(r))
+assert not err, f"search failed: {r}"
+
+print("\n--- SEARCH wildcard query ---")
+r, err = tool(9.5, "search", {"query": "*"})
+print(json.dumps(r, indent=2) if isinstance(r, list) else json.dumps(r))
+assert not err, f"wildcard search failed: {r}"
+assert r is not None, "wildcard search returned null"
+assert isinstance(r, list), "wildcard search should return list"
 
 print("\n--- EXPORT markdown ---")
 r, err = tool(10, "export", {"project": "acme-corp", "type": "decision"})
 print(r if isinstance(r, str) else json.dumps(r, indent=2))
+assert not err, f"export failed: {r}"
 
 print("\n--- IMPORT JSON ---")
 import_data = {
@@ -132,19 +148,105 @@ r, err = tool(11, "import", {
     "project": "test-proj",
 })
 print(json.dumps(r))
+assert not err, f"import failed: {r}"
 
 print("\n--- GET imported documents ---")
 r, err = tool(12, "get", {"project": "test-proj"})
 print(json.dumps(r, indent=2) if isinstance(r, list) else json.dumps(r))
+assert not err, f"get imported failed: {r}"
 
 print("\n--- DELETE document ---")
 if decision_id:
     r, err = tool(13, "delete", {"id": decision_id})
     print(json.dumps(r))
+    assert not err, f"delete failed: {r}"
 
 print("\n--- SEARCH after delete ---")
 r, err = tool(14, "search", {"query": "PostgreSQL", "project": "acme-corp"})
 print(json.dumps(r, indent=2) if isinstance(r, list) else json.dumps(r))
+assert not err, f"search after delete failed: {r}"
+
+# --- BACKLOG TOOLS ---
+
+print("\n--- PROJECT: create ---")
+r, err = tool(15, "project", {"name": "acme-corp"})
+print(json.dumps(r))
+assert not err, f"project create failed: {r}"
+
+print("\n--- PROJECT: list ---")
+r, err = tool(16, "project")
+print(json.dumps(r, indent=2))
+assert not err, f"project list failed: {r}"
+
+print("\n--- ITEM: create ---")
+r, err = tool(17, "item", {"project": "acme-corp", "priority": "P1", "title": "Implement auth", "description": "Add OAuth2 support"})
+print(json.dumps(r))
+assert not err, f"item create failed: {r}"
+item_id = r.get("id", "AC-1")
+
+r, err = tool(18, "item", {"project": "acme-corp", "priority": "P3", "title": "Update docs"})
+print(json.dumps(r))
+assert not err, f"item create 2 failed: {r}"
+
+print("\n--- ITEM: get by id ---")
+r, err = tool(19, "item", {"id": item_id})
+print(json.dumps(r, indent=2))
+assert not err, f"item get failed: {r}"
+
+print("\n--- ITEM: list ---")
+r, err = tool(20, "item", {"project": "acme-corp"})
+print(r if isinstance(r, str) else json.dumps(r, indent=2))
+assert not err, f"item list failed: {r}"
+
+print("\n--- ITEM: update ---")
+r, err = tool(21, "item", {"id": item_id, "title": "Implement auth v2", "priority": "P0"})
+print(json.dumps(r))
+assert not err, f"item update failed: {r}"
+
+print("\n--- ITEM: mark done ---")
+r, err = tool(22, "item", {"id": "AC-2", "status": "done"})
+print(json.dumps(r))
+assert not err, f"item done failed: {r}"
+
+print("\n--- ITEM: list open only ---")
+r, err = tool(23, "item", {"project": "acme-corp", "status": "open"})
+print(r if isinstance(r, str) else json.dumps(r, indent=2))
+assert not err, f"item list open failed: {r}"
+
+print("\n--- PLAN: create ---")
+r, err = tool(24, "plan", {"title": "Auth implementation plan", "content": "## Steps\n1. Add OAuth2 provider\n2. Create middleware\n3. Write tests", "project": "acme-corp"})
+print(json.dumps(r))
+assert not err, f"plan create failed: {r}"
+
+print("\n--- PLAN: get ---")
+r, err = tool(25, "plan", {"id": 1})
+print(json.dumps(r, indent=2))
+assert not err, f"plan get failed: {r}"
+
+print("\n--- PLAN: update ---")
+r, err = tool(26, "plan", {"id": 1, "status": "active"})
+print(json.dumps(r))
+assert not err, f"plan update failed: {r}"
+
+print("\n--- PLAN: list ---")
+r, err = tool(27, "plan")
+print(json.dumps(r, indent=2))
+assert not err, f"plan list failed: {r}"
+
+print("\n--- CONFIG: set ---")
+r, err = tool(28, "config", {"key": "theme", "value": "dark"})
+print(json.dumps(r))
+assert not err, f"config set failed: {r}"
+
+print("\n--- CONFIG: get ---")
+r, err = tool(29, "config", {"key": "theme"})
+print(json.dumps(r))
+assert not err, f"config get failed: {r}"
+
+print("\n--- CONFIG: list all ---")
+r, err = tool(30, "config")
+print(json.dumps(r, indent=2))
+assert not err, f"config list failed: {r}"
 
 proc.terminate()
 print("\nDone.")
