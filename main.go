@@ -49,6 +49,12 @@ func main() {
 		}
 	}
 
+	// CLI query mode: ouroboros query --project <name> [--type <type>] [--limit N]
+	if len(os.Args) > 1 && os.Args[1] == "query" {
+		runQuery(os.Args[2:])
+		return
+	}
+
 	var err error
 	db, err = store.InitDB()
 	if err != nil {
@@ -57,6 +63,23 @@ func main() {
 
 	s := server.NewMCPServer("ouroboros", Version,
 		server.WithToolCapabilities(true),
+		server.WithInstructions(`Project knowledge base — persist and retrieve decisions, facts, notes, and relations across conversations.
+
+Store immediately (put):
+- After an architectural decision is made or confirmed — capture the choice and rationale
+- When you discover a non-obvious fact (config values, environment details, constraints)
+- When a procedure or workaround is established
+- When a project relationship or dependency is identified
+- Determine project via git rev-parse --show-toplevel | xargs basename
+- Always search first to avoid duplicates — upsert by type+project+category+title
+
+Query (get/search):
+- Before making decisions that may have prior context
+- When the user asks about past decisions, project history, or "why" questions
+- Prefer search for broad queries, get with filters for known types/projects
+- get without id returns compact summaries (no content) — use get with id only when full content is needed
+
+Do not store: trivial implementation details, information derivable from code or git history, temporary debugging state.`),
 	)
 
 	registerTools(s)
@@ -236,4 +259,61 @@ func handleImport(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 	}
 
 	return jsonResult(map[string]bool{"ok": true})
+}
+
+type queryArgs struct {
+	project string
+	docType string
+	limit   int
+}
+
+func parseQueryArgs(args []string) queryArgs {
+	qa := queryArgs{limit: 10}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--project":
+			if i+1 < len(args) {
+				qa.project = args[i+1]
+				i++
+			}
+		case "--type":
+			if i+1 < len(args) {
+				qa.docType = args[i+1]
+				i++
+			}
+		case "--limit":
+			if i+1 < len(args) {
+				if n, err := fmt.Sscanf(args[i+1], "%d", &qa.limit); err != nil || n != 1 {
+					qa.limit = 10
+				}
+				i++
+			}
+		}
+	}
+	return qa
+}
+
+// runQuery handles CLI query mode: ouroboros query --project <name> [--type <type>] [--limit N]
+// Outputs JSON array of document summaries to stdout.
+func runQuery(args []string) {
+	qa := parseQueryArgs(args)
+
+	var err error
+	db, err = store.InitDB()
+	if err != nil {
+		log.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	summaries, err := store.QueryDocuments(db, qa.docType, qa.project, "", "", nil, qa.limit)
+	if err != nil {
+		log.Fatalf("query failed: %v", err)
+	}
+
+	data, err := json.Marshal(summaries)
+	if err != nil {
+		log.Fatalf("marshal failed: %v", err)
+	}
+
+	fmt.Println(string(data))
 }
