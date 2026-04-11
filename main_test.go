@@ -437,6 +437,21 @@ func TestParseQueryArgs(t *testing.T) {
 			args: []string{"--limit", "0"},
 			want: queryArgs{limit: 0},
 		},
+		{
+			name: "search flag",
+			args: []string{"--search", "postgresql"},
+			want: queryArgs{search: "postgresql", limit: 10},
+		},
+		{
+			name: "search with project and limit",
+			args: []string{"--project", "acme-corp", "--search", "database choice", "--limit", "20"},
+			want: queryArgs{project: "acme-corp", search: "database choice", limit: 20},
+		},
+		{
+			name: "search flag with stop words",
+			args: []string{"--search", "what is the best database"},
+			want: queryArgs{search: "what is the best database", limit: 10},
+		},
 	}
 
 	for _, tt := range tests {
