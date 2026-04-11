@@ -618,3 +618,109 @@ func TestKeywordSearch(t *testing.T) {
 		require.Len(t, summaries, 1)
 	})
 }
+
+func TestSearchDocumentsWildcardFallback(t *testing.T) {
+	db := testDB(t)
+
+	// Insert a test document
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "test-document",
+		Content: "This is a test document with searchable content",
+	}
+
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	// Test wildcard query falls back to list mode
+	summaries, err := store.SearchDocuments(db, "*", "", "", 50)
+	require.NoError(t, err)
+	require.NotNil(t, summaries)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "test-document", summaries[0].Title)
+}
+
+func TestSearchDocumentsPunctuationOnlyFallback(t *testing.T) {
+	db := testDB(t)
+
+	// Insert a test document
+	doc := store.Document{
+		Type:    "note",
+		Project: "example-org",
+		Title:   "another-document",
+		Content: "Content for fallback test",
+	}
+
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	// Test punctuation-only query falls back to list mode
+	summaries, err := store.SearchDocuments(db, "!!!", "", "", 50)
+	require.NoError(t, err)
+	require.NotNil(t, summaries)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "another-document", summaries[0].Title)
+}
+
+func TestSearchDocumentsEmptyStringReturnsEmpty(t *testing.T) {
+	db := testDB(t)
+
+	// Insert a document
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "empty-query-test",
+		Content: "test content",
+	}
+
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	// Empty query should fall back and return results
+	summaries, err := store.SearchDocuments(db, "", "", "", 50)
+	require.NoError(t, err)
+	require.NotNil(t, summaries)
+	require.Len(t, summaries, 1)
+}
+
+func TestSearchDocumentsValidQueryStillWorks(t *testing.T) {
+	db := testDB(t)
+
+	// Insert documents
+	doc1 := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Language Choice",
+		Content: "We decided to use Golang for backend services",
+	}
+	doc2 := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "Setup Guide",
+		Content: "Python is used for data analysis",
+	}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	// Test valid FTS query still works
+	summaries, err := store.SearchDocuments(db, "Golang", "", "", 50)
+	require.NoError(t, err)
+	require.NotNil(t, summaries)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Language Choice", summaries[0].Title)
+}
+
+func TestSearchDocumentsReturnsEmptySliceNotNil(t *testing.T) {
+	db := testDB(t)
+
+	// Search in empty database
+	summaries, err := store.SearchDocuments(db, "nonexistent", "", "", 50)
+	require.NoError(t, err)
+	// Verify it's an empty slice, not nil
+	require.NotNil(t, summaries)
+	require.Len(t, summaries, 0)
+}

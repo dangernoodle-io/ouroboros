@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // stopWords are filtered from keyword search queries to reduce noise from natural-language prompts.
@@ -311,10 +312,27 @@ func DeleteDocument(db *sql.DB, id int64) error {
 	return nil
 }
 
+// hasSearchableTokens checks if a query string contains any alphanumeric characters.
+// Returns false if the query only contains punctuation, whitespace, or wildcards.
+func hasSearchableTokens(q string) bool {
+	for _, r := range q {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // SearchDocuments performs a full-text search across all documents.
 // Returns DocumentSummary (no content, no metadata).
 func SearchDocuments(db *sql.DB, query, docType, project string, limit int) ([]DocumentSummary, error) {
 	limit = ClampLimit(limit, 50, 500)
+
+	// If query has no searchable tokens (only punctuation/wildcards), fall back to list mode
+	if !hasSearchableTokens(query) {
+		return QueryDocuments(db, docType, project, "", "", nil, limit)
+	}
+
 	escapedQuery := FtsEscape(query)
 
 	ftQuery := `
@@ -344,7 +362,7 @@ func SearchDocuments(db *sql.DB, query, docType, project string, limit int) ([]D
 	}
 	defer rows.Close()
 
-	var summaries []DocumentSummary
+	summaries := []DocumentSummary{}
 	for rows.Next() {
 		var summary DocumentSummary
 		var tagsJSON sql.NullString
