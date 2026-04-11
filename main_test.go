@@ -26,14 +26,9 @@ func TestMain(m *testing.M) {
 
 func resetDB(t *testing.T) {
 	t.Helper()
-	tables := []string{"decisions", "facts", "relations", "notes"}
-	for _, table := range tables {
-		_, err := db.Exec("DELETE FROM " + table)
-		require.NoError(t, err)
-	}
-	require.NoError(t, rebuildFTS(db, "decisions"))
-	require.NoError(t, rebuildFTS(db, "facts"))
-	require.NoError(t, rebuildFTS(db, "notes"))
+	_, err := db.Exec("DELETE FROM documents")
+	require.NoError(t, err)
+	require.NoError(t, rebuildFTS(db))
 }
 
 func makeRequest(args map[string]interface{}) mcp.CallToolRequest {
@@ -44,17 +39,19 @@ func makeRequest(args map[string]interface{}) mcp.CallToolRequest {
 	}
 }
 
-func TestHandleLogDecision(t *testing.T) {
+func TestHandlePut(t *testing.T) {
 	resetDB(t)
 
 	req := makeRequest(map[string]interface{}{
-		"project":   "acme-corp",
-		"summary":   "Use PostgreSQL for persistence",
-		"rationale": "Superior query performance for our use case",
-		"tags":      []interface{}{"database", "infrastructure"},
+		"type":     "decision",
+		"project":  "acme-corp",
+		"title":    "Use PostgreSQL",
+		"content":  "Superior query performance for our use case",
+		"category": "",
+		"tags":     []interface{}{"database", "infrastructure"},
 	})
 
-	result, err := handleLogDecision(context.TODO(), req)
+	result, err := handlePut(context.TODO(), req)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -67,39 +64,167 @@ func TestHandleLogDecision(t *testing.T) {
 	assert.NotZero(t, resp["id"])
 }
 
-func TestHandleGetDecisions(t *testing.T) {
+func TestHandlePutUpsert(t *testing.T) {
 	resetDB(t)
 
-	// Log two decisions
-	_, err := insertDecision(db, "acme-corp", "Use PostgreSQL", "performance", []string{"database"})
+	// Put document first time
+	req1 := makeRequest(map[string]interface{}{
+		"type":     "decision",
+		"project":  "acme-corp",
+		"title":    "Use PostgreSQL",
+		"content":  "Original rationale",
+		"category": "",
+	})
+
+	result1, err := handlePut(context.TODO(), req1)
 	require.NoError(t, err)
-	_, err = insertDecision(db, "acme-corp", "Use gRPC", "low latency", []string{"api"})
+	var resp1 map[string]interface{}
+	err = unmarshalResult(result1, &resp1)
+	require.NoError(t, err)
+	id1Float, ok := resp1["id"].(float64)
+	require.True(t, ok)
+	id1 := int64(id1Float)
+
+	// Put same document with updated content
+	req2 := makeRequest(map[string]interface{}{
+		"type":     "decision",
+		"project":  "acme-corp",
+		"title":    "Use PostgreSQL",
+		"content":  "Updated rationale",
+		"category": "",
+	})
+
+	result2, err := handlePut(context.TODO(), req2)
+	require.NoError(t, err)
+	var resp2 map[string]interface{}
+	err = unmarshalResult(result2, &resp2)
+	require.NoError(t, err)
+	id2Float, ok := resp2["id"].(float64)
+	require.True(t, ok)
+	id2 := int64(id2Float)
+
+	// IDs should match (upsert)
+	assert.Equal(t, id1, id2)
+
+	// Content should be updated
+	doc, err := getDocument(db, id1)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated rationale", doc.Content)
+}
+
+func TestHandleGetByID(t *testing.T) {
+	resetDB(t)
+
+	// Insert document
+	doc := Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+		Content: "Full rationale content here",
+		Tags:    []string{"database"},
+	}
+	id, err := upsertDocument(db, doc)
 	require.NoError(t, err)
 
+	// Get by ID
 	req := makeRequest(map[string]interface{}{
+		"id": float64(id),
+	})
+
+	result, err := handleGet(context.TODO(), req)
+	require.NoError(t, err)
+
+	var retrieved Document
+	err = unmarshalResult(result, &retrieved)
+	require.NoError(t, err)
+	assert.Equal(t, "Use PostgreSQL", retrieved.Title)
+	assert.Equal(t, "Full rationale content here", retrieved.Content)
+}
+
+func TestHandleGetList(t *testing.T) {
+	resetDB(t)
+
+	// Insert multiple documents
+	_, err := upsertDocument(db, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+	})
+	require.NoError(t, err)
+	_, err = upsertDocument(db, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use gRPC",
+	})
+	require.NoError(t, err)
+
+	// Get list (no id)
+	req := makeRequest(map[string]interface{}{
+		"type":    "decision",
 		"project": "acme-corp",
 	})
 
-	result, err := handleGetDecisions(context.TODO(), req)
+	result, err := handleGet(context.TODO(), req)
 	require.NoError(t, err)
 
-	var decisions []DecisionSummary
-	err = unmarshalResult(result, &decisions)
+	var summaries []DocumentSummary
+	err = unmarshalResult(result, &summaries)
 	require.NoError(t, err)
-	assert.Len(t, decisions, 2)
+	assert.Len(t, summaries, 2)
+	// DocumentSummary type has no Content field — type system enforces token conservation
+	for _, s := range summaries {
+		assert.NotEmpty(t, s.Title)
+		assert.Equal(t, "decision", s.Type)
+	}
 }
 
-func TestHandleDeleteDecision(t *testing.T) {
+func TestHandleGetByType(t *testing.T) {
 	resetDB(t)
 
-	id, err := insertDecision(db, "acme-corp", "Use PostgreSQL", "", nil)
+	// Insert different types
+	_, err := upsertDocument(db, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Decision 1",
+	})
+	require.NoError(t, err)
+	_, err = upsertDocument(db, Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "Fact 1",
+	})
+	require.NoError(t, err)
+
+	// Filter by type
+	req := makeRequest(map[string]interface{}{
+		"type": "decision",
+	})
+
+	result, err := handleGet(context.TODO(), req)
+	require.NoError(t, err)
+
+	var summaries []DocumentSummary
+	err = unmarshalResult(result, &summaries)
+	require.NoError(t, err)
+	assert.Len(t, summaries, 1)
+	assert.Equal(t, "decision", summaries[0].Type)
+}
+
+func TestHandleDelete(t *testing.T) {
+	resetDB(t)
+
+	id, err := upsertDocument(db, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+	})
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
 		"id": float64(id),
 	})
 
-	result, err := handleDeleteDecision(context.TODO(), req)
+	result, err := handleDelete(context.TODO(), req)
 	require.NoError(t, err)
 
 	var resp map[string]bool
@@ -108,156 +233,27 @@ func TestHandleDeleteDecision(t *testing.T) {
 	assert.True(t, resp["ok"])
 
 	// Verify deletion
-	decisions, err := queryDecisions(db, "acme-corp", nil, "", 0)
+	doc, err := getDocument(db, id)
 	require.NoError(t, err)
-	assert.Len(t, decisions, 0)
-}
-
-func TestHandleSetFact(t *testing.T) {
-	resetDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"category": "hardware",
-		"key":      "cpu_cores",
-		"value":    "8",
-	})
-
-	result, err := handleSetFact(context.TODO(), req)
-	require.NoError(t, err)
-
-	var resp map[string]interface{}
-	err = unmarshalResult(result, &resp)
-	require.NoError(t, err)
-	ok, okExists := resp["ok"].(bool)
-	require.True(t, okExists)
-	assert.True(t, ok)
-	assert.NotZero(t, resp["id"])
-}
-
-func TestHandleGetFacts(t *testing.T) {
-	resetDB(t)
-
-	_, err := upsertFact(db, "acme-corp", "hardware", "cpu_cores", "8")
-	require.NoError(t, err)
-	_, err = upsertFact(db, "acme-corp", "hardware", "ram_gb", "16")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"category": "hardware",
-	})
-
-	result, err := handleGetFacts(context.TODO(), req)
-	require.NoError(t, err)
-
-	var facts []Fact
-	err = unmarshalResult(result, &facts)
-	require.NoError(t, err)
-	assert.Len(t, facts, 2)
-}
-
-func TestHandleDeleteFact(t *testing.T) {
-	resetDB(t)
-
-	_, err := upsertFact(db, "acme-corp", "hardware", "cpu_cores", "8")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"category": "hardware",
-		"key":      "cpu_cores",
-	})
-
-	result, err := handleDeleteFact(context.TODO(), req)
-	require.NoError(t, err)
-
-	var resp map[string]bool
-	err = unmarshalResult(result, &resp)
-	require.NoError(t, err)
-	assert.True(t, resp["ok"])
-
-	// Verify deletion
-	facts, err := queryFacts(db, "acme-corp", "hardware", "cpu_cores", "", 0)
-	require.NoError(t, err)
-	assert.Len(t, facts, 0)
-}
-
-func TestHandleLink(t *testing.T) {
-	resetDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"source_project": "acme-corp",
-		"source":         "backend-api",
-		"target_project": "acme-corp",
-		"target":         "postgres-db",
-		"relation_type":  "depends_on",
-		"description":    "Backend API queries the database",
-	})
-
-	result, err := handleLink(context.TODO(), req)
-	require.NoError(t, err)
-
-	var resp map[string]interface{}
-	err = unmarshalResult(result, &resp)
-	require.NoError(t, err)
-	ok, okExists := resp["ok"].(bool)
-	require.True(t, okExists)
-	assert.True(t, ok)
-	assert.NotZero(t, resp["id"])
-}
-
-func TestHandleGetLinks(t *testing.T) {
-	resetDB(t)
-
-	_, err := insertRelation(db, "acme-corp", "backend-api", "acme-corp", "postgres-db", "depends_on", "")
-	require.NoError(t, err)
-	_, err = insertRelation(db, "acme-corp", "backend-api", "acme-corp", "redis-cache", "uses", "")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"project": "acme-corp",
-	})
-
-	result, err := handleGetLinks(context.TODO(), req)
-	require.NoError(t, err)
-
-	var relations []Relation
-	err = unmarshalResult(result, &relations)
-	require.NoError(t, err)
-	assert.Len(t, relations, 2)
-}
-
-func TestHandleDeleteLink(t *testing.T) {
-	resetDB(t)
-
-	id, err := insertRelation(db, "acme-corp", "backend-api", "acme-corp", "postgres-db", "depends_on", "")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"id": float64(id),
-	})
-
-	result, err := handleDeleteLink(context.TODO(), req)
-	require.NoError(t, err)
-
-	var resp map[string]bool
-	err = unmarshalResult(result, &resp)
-	require.NoError(t, err)
-	assert.True(t, resp["ok"])
-
-	// Verify deletion
-	relations, err := queryRelations(db, "acme-corp", "", "", 0)
-	require.NoError(t, err)
-	assert.Len(t, relations, 0)
+	assert.Nil(t, doc)
 }
 
 func TestHandleSearch(t *testing.T) {
 	resetDB(t)
 
-	_, err := insertDecision(db, "acme-corp", "Use PostgreSQL", "performance for queries", nil)
+	_, err := upsertDocument(db, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+		Content: "Performance benefits",
+	})
 	require.NoError(t, err)
-	_, err = upsertFact(db, "acme-corp", "database", "type", "PostgreSQL")
+	_, err = upsertDocument(db, Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "Database Type",
+		Content: "PostgreSQL",
+	})
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -267,23 +263,27 @@ func TestHandleSearch(t *testing.T) {
 	result, err := handleSearch(context.TODO(), req)
 	require.NoError(t, err)
 
-	var searchResult SearchResult
-	err = unmarshalResult(result, &searchResult)
+	var summaries []DocumentSummary
+	err = unmarshalResult(result, &summaries)
 	require.NoError(t, err)
-	assert.Len(t, searchResult.Decisions, 1)
-	assert.Len(t, searchResult.Facts, 1)
+	assert.Len(t, summaries, 2)
 }
 
 func TestHandleExport(t *testing.T) {
 	resetDB(t)
 
-	_, err := insertDecision(db, "acme-corp", "Use PostgreSQL", "good performance", []string{"database"})
-	require.NoError(t, err)
-	_, err = upsertFact(db, "acme-corp", "hardware", "cpu_cores", "8")
+	_, err := upsertDocument(db, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+		Content: "Good performance",
+		Tags:    []string{"database"},
+	})
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
 		"project": "acme-corp",
+		"type":    "decision",
 	})
 
 	result, err := handleExport(context.TODO(), req)
@@ -305,18 +305,26 @@ func TestHandleImport(t *testing.T) {
 	resetDB(t)
 
 	importJSON := `{
-		"decisions": [
-			{"project": "acme-corp", "summary": "Use PostgreSQL", "rationale": "good performance"}
-		],
-		"facts": [
-			{"project": "acme-corp", "category": "hardware", "key": "cpu_cores", "value": "8"}
-		],
-		"relations": []
+		"documents": [
+			{
+				"type": "decision",
+				"project": "acme-corp",
+				"title": "Use PostgreSQL",
+				"content": "Good performance"
+			},
+			{
+				"type": "fact",
+				"project": "acme-corp",
+				"category": "hardware",
+				"title": "cpu_cores",
+				"content": "8"
+			}
+		]
 	}`
 
 	req := makeRequest(map[string]interface{}{
-		"project": "acme-corp",
 		"content": importJSON,
+		"project": "acme-corp",
 	})
 
 	result, err := handleImport(context.TODO(), req)
@@ -328,145 +336,35 @@ func TestHandleImport(t *testing.T) {
 	assert.True(t, resp["ok"])
 
 	// Verify import
-	decisions, err := queryDecisions(db, "acme-corp", nil, "", 0)
+	summaries, err := queryDocuments(db, "decision", "acme-corp", "", "", nil, 0)
 	require.NoError(t, err)
-	assert.Len(t, decisions, 1)
+	assert.Len(t, summaries, 1)
 
-	facts, err := queryFacts(db, "acme-corp", "", "", "", 0)
+	facts, err := queryDocuments(db, "fact", "acme-corp", "", "", nil, 0)
 	require.NoError(t, err)
 	assert.Len(t, facts, 1)
-}
-
-func TestHandleSetNote(t *testing.T) {
-	resetDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"category": "procedure",
-		"title":    "release-process",
-		"body":     "1. Tag version\n2. Push tag\n3. Monitor CI",
-		"tags":     []interface{}{"release", "ci"},
-	})
-
-	result, err := handleSetNote(context.TODO(), req)
-	require.NoError(t, err)
-
-	var resp map[string]interface{}
-	err = unmarshalResult(result, &resp)
-	require.NoError(t, err)
-	ok, okExists := resp["ok"].(bool)
-	require.True(t, okExists)
-	assert.True(t, ok)
-	assert.NotZero(t, resp["id"])
-}
-
-func TestHandleGetNotesListMode(t *testing.T) {
-	resetDB(t)
-
-	_, err := upsertNote(db, "acme-corp", "procedure", "release-process", "long body content here", []string{"release"})
-	require.NoError(t, err)
-	_, err = upsertNote(db, "acme-corp", "guide", "onboarding", "welcome guide body", nil)
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"project": "acme-corp",
-	})
-
-	result, err := handleGetNotes(context.TODO(), req)
-	require.NoError(t, err)
-
-	var summaries []NoteSummary
-	err = unmarshalResult(result, &summaries)
-	require.NoError(t, err)
-	assert.Len(t, summaries, 2)
-}
-
-func TestHandleGetNotesDetailMode(t *testing.T) {
-	resetDB(t)
-
-	id, err := upsertNote(db, "acme-corp", "procedure", "release-process", "1. Tag\n2. Push", []string{"release"})
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"id": float64(id),
-	})
-
-	result, err := handleGetNotes(context.TODO(), req)
-	require.NoError(t, err)
-
-	var note Note
-	err = unmarshalResult(result, &note)
-	require.NoError(t, err)
-	assert.Equal(t, "release-process", note.Title)
-	assert.Equal(t, "1. Tag\n2. Push", note.Body)
-	assert.ElementsMatch(t, []string{"release"}, note.Tags)
-}
-
-func TestHandleGetNotesNotFound(t *testing.T) {
-	resetDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"id": float64(999),
-	})
-
-	result, err := handleGetNotes(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-}
-
-func TestHandleDeleteNote(t *testing.T) {
-	resetDB(t)
-
-	id, err := upsertNote(db, "acme-corp", "procedure", "release-process", "body", nil)
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"id": float64(id),
-	})
-
-	result, err := handleDeleteNote(context.TODO(), req)
-	require.NoError(t, err)
-
-	var resp map[string]bool
-	err = unmarshalResult(result, &resp)
-	require.NoError(t, err)
-	assert.True(t, resp["ok"])
-
-	note, err := getNote(db, id)
-	require.NoError(t, err)
-	assert.Nil(t, note)
 }
 
 func TestHandleMissingRequiredParams(t *testing.T) {
 	resetDB(t)
 
-	// Test missing project in log decision
-	result, err := handleLogDecision(context.TODO(), makeRequest(map[string]interface{}{"summary": "test"}))
+	// Test missing type in put
+	result, err := handlePut(context.TODO(), makeRequest(map[string]interface{}{"project": "p", "title": "t"}))
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 
-	// Test missing summary in log decision
-	result, err = handleLogDecision(context.TODO(), makeRequest(map[string]interface{}{"project": "test-proj"}))
+	// Test missing project in put
+	result, err = handlePut(context.TODO(), makeRequest(map[string]interface{}{"type": "decision", "title": "t"}))
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 
-	// Test missing id in delete decision
-	result, err = handleDeleteDecision(context.TODO(), makeRequest(map[string]interface{}{}))
+	// Test missing title in put
+	result, err = handlePut(context.TODO(), makeRequest(map[string]interface{}{"type": "decision", "project": "p"}))
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 
-	// Test missing project in set fact
-	result, err = handleSetFact(context.TODO(), makeRequest(map[string]interface{}{"category": "hw", "key": "k", "value": "v"}))
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-
-	// Test missing key in delete fact
-	result, err = handleDeleteFact(context.TODO(), makeRequest(map[string]interface{}{"project": "p", "category": "c"}))
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-
-	// Test missing source_project in link
-	result, err = handleLink(context.TODO(), makeRequest(map[string]interface{}{"source": "a", "target_project": "p", "target": "b", "relation_type": "depends_on"}))
+	// Test missing id in delete
+	result, err = handleDelete(context.TODO(), makeRequest(map[string]interface{}{}))
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 
@@ -475,8 +373,8 @@ func TestHandleMissingRequiredParams(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 
-	// Test missing project in import
-	result, err = handleImport(context.TODO(), makeRequest(map[string]interface{}{"content": "{}"}))
+	// Test missing content in import
+	result, err = handleImport(context.TODO(), makeRequest(map[string]interface{}{"project": "p"}))
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
