@@ -1,141 +1,15 @@
-package main
+package store
 
 import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
-// dbMu serializes write operations to avoid SQLITE_BUSY under concurrent MCP requests.
-var dbMu sync.Mutex
-
-// Document represents a single knowledge base entry with unified schema.
-type Document struct {
-	ID        int64             `json:"id"`
-	Type      string            `json:"type"`
-	Project   string            `json:"project"`
-	Category  string            `json:"category,omitempty"`
-	Title     string            `json:"title"`
-	Content   string            `json:"content,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	Tags      []string          `json:"tags,omitempty"`
-	CreatedAt string            `json:"created_at"`
-	UpdatedAt string            `json:"updated_at"`
-}
-
-// DocumentSummary is a compact representation without content/metadata for list queries.
-type DocumentSummary struct {
-	ID        int64    `json:"id"`
-	Type      string   `json:"type"`
-	Project   string   `json:"project"`
-	Category  string   `json:"category,omitempty"`
-	Title     string   `json:"title"`
-	Tags      []string `json:"tags,omitempty"`
-	UpdatedAt string   `json:"updated_at"`
-}
-
-// initDB initializes the database connection and applies schema.
-// nolint:unused
-func initDB() (*sql.DB, error) {
-	dbPath := os.Getenv("PROJECT_KB_PATH")
-	if dbPath == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to determine home directory: %w", err)
-		}
-		dbPath = filepath.Join(homeDir, ".local", "share", "ouroboros", "kb.db")
-	}
-
-	// Create parent directories
-	parentDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(parentDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create database directory: %w", err)
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Set pragmas.
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return nil, fmt.Errorf("failed to set journal mode: %w", err)
-	}
-
-	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
-	}
-
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
-	}
-
-	if err := applySchema(db); err != nil {
-		return nil, err
-	}
-
-	return db, nil
-}
-
-// applySchema creates the documents table and FTS index.
-func applySchema(db *sql.DB) error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS documents (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		type       TEXT NOT NULL,
-		project    TEXT NOT NULL DEFAULT '',
-		category   TEXT NOT NULL DEFAULT '',
-		title      TEXT NOT NULL,
-		content    TEXT NOT NULL DEFAULT '',
-		metadata   TEXT,
-		tags       TEXT,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL,
-		UNIQUE(type, project, category, title)
-	);
-
-	CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-		title, content, tags,
-		content=documents, content_rowid=id
-	);
-	`
-
-	_, err := db.Exec(schema)
-	return err
-}
-
-// rebuildFTS rebuilds the unified documents_fts FTS index.
-func rebuildFTS(db *sql.DB) error {
-	_, err := db.Exec("INSERT INTO documents_fts(documents_fts) VALUES('rebuild')")
-	return err
-}
-
-// ftsEscape escapes a query string for FTS5 matching.
-func ftsEscape(q string) string {
-	return "\"" + strings.ReplaceAll(q, "\"", "\"\"") + "\""
-}
-
-// clampLimit clamps a limit to a range with a default value.
-func clampLimit(limit, defaultVal, maxVal int) int {
-	if limit <= 0 {
-		return defaultVal
-	}
-	if limit > maxVal {
-		return maxVal
-	}
-	return limit
-}
-
-// upsertDocument inserts or updates a document record using ON CONFLICT.
+// UpsertDocument inserts or updates a document record using ON CONFLICT.
 // Returns the ID of the inserted/updated document.
-func upsertDocument(db *sql.DB, doc Document) (int64, error) {
+func UpsertDocument(db *sql.DB, doc Document) (int64, error) {
 	dbMu.Lock()
 	defer dbMu.Unlock()
 
@@ -161,7 +35,7 @@ func upsertDocument(db *sql.DB, doc Document) (int64, error) {
 		return 0, fmt.Errorf("failed to upsert document: %w", err)
 	}
 
-	if err := rebuildFTS(db); err != nil {
+	if err := RebuildFTS(db); err != nil {
 		return 0, fmt.Errorf("failed to rebuild FTS: %w", err)
 	}
 
@@ -178,8 +52,8 @@ func upsertDocument(db *sql.DB, doc Document) (int64, error) {
 	return id, nil
 }
 
-// getDocument returns a full Document by ID. Returns nil, nil if not found.
-func getDocument(db *sql.DB, id int64) (*Document, error) {
+// GetDocument returns a full Document by ID. Returns nil, nil if not found.
+func GetDocument(db *sql.DB, id int64) (*Document, error) {
 	var doc Document
 	var metadataJSON sql.NullString
 	var tagsJSON sql.NullString
@@ -211,10 +85,10 @@ func getDocument(db *sql.DB, id int64) (*Document, error) {
 	return &doc, nil
 }
 
-// queryDocuments queries documents with optional filters (type, project, category, FTS, tags).
+// QueryDocuments queries documents with optional filters (type, project, category, FTS, tags).
 // Returns DocumentSummary (no content, no metadata) to conserve tokens.
-func queryDocuments(db *sql.DB, docType, project, category, ftsQuery string, tags []string, limit int) ([]DocumentSummary, error) {
-	limit = clampLimit(limit, 50, 500)
+func QueryDocuments(db *sql.DB, docType, project, category, ftsQuery string, tags []string, limit int) ([]DocumentSummary, error) {
+	limit = ClampLimit(limit, 50, 500)
 
 	var query string
 	var args []interface{}
@@ -227,7 +101,7 @@ func queryDocuments(db *sql.DB, docType, project, category, ftsQuery string, tag
 			JOIN documents_fts fts ON d.id = fts.rowid
 			WHERE fts.documents_fts MATCH ?
 		`
-		args = append(args, ftsEscape(ftsQuery))
+		args = append(args, FtsEscape(ftsQuery))
 
 		if docType != "" {
 			query += " AND d.type = ?"
@@ -328,8 +202,8 @@ func queryDocuments(db *sql.DB, docType, project, category, ftsQuery string, tag
 	return summaries, nil
 }
 
-// deleteDocument deletes a document by ID.
-func deleteDocument(db *sql.DB, id int64) error {
+// DeleteDocument deletes a document by ID.
+func DeleteDocument(db *sql.DB, id int64) error {
 	dbMu.Lock()
 	defer dbMu.Unlock()
 
@@ -338,18 +212,18 @@ func deleteDocument(db *sql.DB, id int64) error {
 		return fmt.Errorf("failed to delete document: %w", err)
 	}
 
-	if err := rebuildFTS(db); err != nil {
+	if err := RebuildFTS(db); err != nil {
 		return fmt.Errorf("failed to rebuild FTS: %w", err)
 	}
 
 	return nil
 }
 
-// searchDocuments performs a full-text search across all documents.
+// SearchDocuments performs a full-text search across all documents.
 // Returns DocumentSummary (no content, no metadata).
-func searchDocuments(db *sql.DB, query, docType, project string, limit int) ([]DocumentSummary, error) {
-	limit = clampLimit(limit, 50, 500)
-	escapedQuery := ftsEscape(query)
+func SearchDocuments(db *sql.DB, query, docType, project string, limit int) ([]DocumentSummary, error) {
+	limit = ClampLimit(limit, 50, 500)
+	escapedQuery := FtsEscape(query)
 
 	ftQuery := `
 		SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at

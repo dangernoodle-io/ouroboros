@@ -1,17 +1,31 @@
-package main
+package kb_test
 
 import (
+	"database/sql"
 	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"dangernoodle.io/ouroboros/internal/kb"
+	"dangernoodle.io/ouroboros/internal/store"
 )
+
+func testDB(t *testing.T) *sql.DB {
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+
+	err = store.ApplySchema(db)
+	require.NoError(t, err)
+
+	return db
+}
 
 func TestExportMarkdownEmpty(t *testing.T) {
 	testdb := testDB(t)
 
-	markdown, err := exportMarkdown(testdb, "", "")
+	markdown, err := kb.ExportMarkdown(testdb, "", "")
 	require.NoError(t, err)
 
 	// Verify header is present
@@ -24,7 +38,7 @@ func TestExportMarkdownWithData(t *testing.T) {
 	testdb := testDB(t)
 
 	// Insert test data
-	_, err := upsertDocument(testdb, Document{
+	_, err := store.UpsertDocument(testdb, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
@@ -33,7 +47,7 @@ func TestExportMarkdownWithData(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = upsertDocument(testdb, Document{
+	_, err = store.UpsertDocument(testdb, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Containerize services",
@@ -42,7 +56,7 @@ func TestExportMarkdownWithData(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = upsertDocument(testdb, Document{
+	_, err = store.UpsertDocument(testdb, store.Document{
 		Type:     "fact",
 		Project:  "acme-corp",
 		Category: "config",
@@ -52,7 +66,7 @@ func TestExportMarkdownWithData(t *testing.T) {
 	require.NoError(t, err)
 
 	// Export
-	markdown, err := exportMarkdown(testdb, "acme-corp", "")
+	markdown, err := kb.ExportMarkdown(testdb, "acme-corp", "")
 	require.NoError(t, err)
 
 	// Verify content sections
@@ -70,14 +84,14 @@ func TestExportMarkdownProjectFilter(t *testing.T) {
 	testdb := testDB(t)
 
 	// Insert data for two projects
-	_, err := upsertDocument(testdb, Document{
+	_, err := store.UpsertDocument(testdb, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Decision 1",
 	})
 	require.NoError(t, err)
 
-	_, err = upsertDocument(testdb, Document{
+	_, err = store.UpsertDocument(testdb, store.Document{
 		Type:    "decision",
 		Project: "other-proj",
 		Title:   "Decision 2",
@@ -85,7 +99,7 @@ func TestExportMarkdownProjectFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Export for specific project
-	markdown, err := exportMarkdown(testdb, "acme-corp", "")
+	markdown, err := kb.ExportMarkdown(testdb, "acme-corp", "")
 	require.NoError(t, err)
 
 	// Verify only acme-corp decision is present
@@ -98,14 +112,14 @@ func TestExportMarkdownTypeFilter(t *testing.T) {
 	testdb := testDB(t)
 
 	// Insert different types
-	_, err := upsertDocument(testdb, Document{
+	_, err := store.UpsertDocument(testdb, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Decision 1",
 	})
 	require.NoError(t, err)
 
-	_, err = upsertDocument(testdb, Document{
+	_, err = store.UpsertDocument(testdb, store.Document{
 		Type:    "fact",
 		Project: "acme-corp",
 		Title:   "Fact 1",
@@ -113,7 +127,7 @@ func TestExportMarkdownTypeFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Export only decisions
-	markdown, err := exportMarkdown(testdb, "", "decision")
+	markdown, err := kb.ExportMarkdown(testdb, "", "decision")
 	require.NoError(t, err)
 
 	assert.Contains(t, markdown, "Decision 1")
@@ -125,8 +139,8 @@ func TestImportJSON(t *testing.T) {
 	testdb := testDB(t)
 
 	// Create import payload
-	payload := ImportData{
-		Documents: []ImportDocument{
+	payload := kb.ImportData{
+		Documents: []kb.ImportDocument{
 			{
 				Type:    "decision",
 				Project: "acme-corp",
@@ -148,17 +162,17 @@ func TestImportJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import
-	err = importJSON(testdb, "", data)
+	err = kb.ImportJSON(testdb, "", data)
 	require.NoError(t, err)
 
 	// Verify decision imported
-	decisions, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
+	decisions, err := store.QueryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 	assert.Equal(t, "Use PostgreSQL", decisions[0].Title)
 
 	// Verify fact imported
-	facts, err := queryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
+	facts, err := store.QueryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, facts, 1)
 	assert.Equal(t, "db-host", facts[0].Title)
@@ -168,8 +182,8 @@ func TestImportJSONDefaultProject(t *testing.T) {
 	testdb := testDB(t)
 
 	// Create import payload with items missing project field
-	payload := ImportData{
-		Documents: []ImportDocument{
+	payload := kb.ImportData{
+		Documents: []kb.ImportDocument{
 			{
 				Type:  "decision",
 				Title: "Decision 1",
@@ -187,17 +201,17 @@ func TestImportJSONDefaultProject(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import with default project
-	err = importJSON(testdb, "acme-corp", data)
+	err = kb.ImportJSON(testdb, "acme-corp", data)
 	require.NoError(t, err)
 
 	// Verify decision used default project
-	decisions, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
+	decisions, err := store.QueryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 	assert.Equal(t, "acme-corp", decisions[0].Project)
 
 	// Verify fact used default project
-	facts, err := queryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
+	facts, err := store.QueryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, facts, 1)
 	assert.Equal(t, "acme-corp", facts[0].Project)
@@ -207,8 +221,8 @@ func TestImportJSONMissingProject(t *testing.T) {
 	testdb := testDB(t)
 
 	// Create payload with missing project and no default
-	payload := ImportData{
-		Documents: []ImportDocument{
+	payload := kb.ImportData{
+		Documents: []kb.ImportDocument{
 			{
 				Type:  "decision",
 				Title: "Decision without project",
@@ -220,7 +234,7 @@ func TestImportJSONMissingProject(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import should fail
-	err = importJSON(testdb, "", data)
+	err = kb.ImportJSON(testdb, "", data)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing project")
 }
@@ -229,8 +243,8 @@ func TestImportDataAutoDetectJSON(t *testing.T) {
 	testdb := testDB(t)
 
 	// Create JSON string
-	payload := ImportData{
-		Documents: []ImportDocument{
+	payload := kb.ImportData{
+		Documents: []kb.ImportDocument{
 			{
 				Type:    "decision",
 				Project: "acme-corp",
@@ -242,11 +256,11 @@ func TestImportDataAutoDetectJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import with auto-detection
-	err = importData(testdb, "", string(data))
+	err = kb.Import(testdb, "", string(data))
 	require.NoError(t, err)
 
 	// Verify imported
-	docs, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
+	docs, err := store.QueryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 }
@@ -260,7 +274,7 @@ func TestImportDataUnsupportedFormat(t *testing.T) {
 ## Decision 1
 Summary: Test decision`
 
-	err := importData(testdb, "", markdown)
+	err := kb.Import(testdb, "", markdown)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported format")
 	assert.Contains(t, err.Error(), "JSON")
@@ -269,7 +283,7 @@ Summary: Test decision`
 func TestImportDataEmpty(t *testing.T) {
 	testdb := testDB(t)
 
-	err := importData(testdb, "", "")
+	err := kb.Import(testdb, "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "empty")
 }
@@ -279,7 +293,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	testdb2 := testDB(t)
 
 	// Insert data into db1
-	_, err := upsertDocument(testdb1, Document{
+	_, err := store.UpsertDocument(testdb1, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
@@ -288,7 +302,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = upsertDocument(testdb1, Document{
+	_, err = store.UpsertDocument(testdb1, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Docker deployment",
@@ -297,7 +311,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = upsertDocument(testdb1, Document{
+	_, err = store.UpsertDocument(testdb1, store.Document{
 		Type:     "fact",
 		Project:  "acme-corp",
 		Category: "config",
@@ -307,15 +321,15 @@ func TestExportImportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Export markdown from db1 (verify it works)
-	markdown, err := exportMarkdown(testdb1, "acme-corp", "")
+	markdown, err := kb.ExportMarkdown(testdb1, "acme-corp", "")
 	require.NoError(t, err)
 	assert.NotEmpty(t, markdown)
 	assert.Contains(t, markdown, "Use PostgreSQL")
 	assert.Contains(t, markdown, "Docker deployment")
 
 	// Manually create JSON with same data for import into db2
-	importPayload := ImportData{
-		Documents: []ImportDocument{
+	importPayload := kb.ImportData{
+		Documents: []kb.ImportDocument{
 			{
 				Type:    "decision",
 				Project: "acme-corp",
@@ -344,14 +358,14 @@ func TestExportImportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import into db2
-	err = importJSON(testdb2, "", data)
+	err = kb.ImportJSON(testdb2, "", data)
 	require.NoError(t, err)
 
 	// Verify counts match between databases
-	docs1, err := queryDocuments(testdb1, "", "acme-corp", "", "", nil, 500)
+	docs1, err := store.QueryDocuments(testdb1, "", "acme-corp", "", "", nil, 500)
 	require.NoError(t, err)
 
-	docs2, err := queryDocuments(testdb2, "", "acme-corp", "", "", nil, 500)
+	docs2, err := store.QueryDocuments(testdb2, "", "acme-corp", "", "", nil, 500)
 	require.NoError(t, err)
 
 	assert.Equal(t, len(docs1), len(docs2))
@@ -373,10 +387,10 @@ func TestImportJSONWhitespace(t *testing.T) {
 		]
 	}`
 
-	err := importData(testdb, "", jsonStr)
+	err := kb.Import(testdb, "", jsonStr)
 	require.NoError(t, err)
 
-	docs, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
+	docs, err := store.QueryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 	assert.Equal(t, "Test Decision", docs[0].Title)
@@ -386,8 +400,8 @@ func TestImportMultipleProjects(t *testing.T) {
 	testdb := testDB(t)
 
 	// Create import payload with multiple projects
-	payload := ImportData{
-		Documents: []ImportDocument{
+	payload := kb.ImportData{
+		Documents: []kb.ImportDocument{
 			{
 				Type:    "decision",
 				Project: "acme-corp",
@@ -418,23 +432,23 @@ func TestImportMultipleProjects(t *testing.T) {
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	err = importJSON(testdb, "", data)
+	err = kb.ImportJSON(testdb, "", data)
 	require.NoError(t, err)
 
 	// Verify both projects have data
-	docs1, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
+	docs1, err := store.QueryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, docs1, 1)
 
-	docs2, err := queryDocuments(testdb, "decision", "other-proj", "", "", nil, 50)
+	docs2, err := store.QueryDocuments(testdb, "decision", "other-proj", "", "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, docs2, 1)
 
-	facts1, err := queryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
+	facts1, err := store.QueryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, facts1, 1)
 
-	facts2, err := queryDocuments(testdb, "fact", "other-proj", "", "", nil, 50)
+	facts2, err := store.QueryDocuments(testdb, "fact", "other-proj", "", "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, facts2, 1)
 }
