@@ -63,7 +63,9 @@ func main() {
 
 	s := server.NewMCPServer("ouroboros", Version,
 		server.WithToolCapabilities(true),
-		server.WithInstructions(`Project knowledge base — persist and retrieve decisions, facts, notes, and relations across conversations.
+		server.WithInstructions(`Project knowledge base and backlog management — persist decisions across conversations and track work items.
+
+KNOWLEDGE BASE (put, get, delete, search, export, import):
 
 Store immediately (put):
 - After an architectural decision is made or confirmed — capture the choice and rationale
@@ -81,7 +83,33 @@ Query (get/search):
 - get without id returns compact summaries (no content) — use get with id only when full content is needed
 - After modifying code, check if related KB entries need updating
 
-Do not store: trivial implementation details, information derivable from code or git history, temporary debugging state.`),
+Do not store: trivial implementation details, information derivable from code or git history, temporary debugging state.
+
+BACKLOG (project, item, plan, config):
+
+Projects:
+- Use project tool to create and list projects
+- Projects have a name and auto-derived prefix (e.g., acme-corp → AC)
+
+Items:
+- Use item tool — mode determined by inputs:
+  - id + fields → update (set status to "done" to close)
+  - id only → get full detail
+  - project + priority + title → create new item
+  - filters only → list compact summaries
+- Priority scale: P0 (critical/blocking) through P6 (someday/maybe)
+- Item IDs are project-prefix + seq (e.g., AC-1, AC-2)
+
+Plans:
+- Use plan tool — mode determined by inputs:
+  - id + fields → update
+  - id only → get full plan
+  - title (no id) → create (optionally link to project/item)
+  - no id or title → list
+- Status lifecycle: draft → active → complete
+
+Config:
+- Use config tool for key-value settings (no args = list all, key = get, key + value = set)`),
 	)
 
 	registerTools(s)
