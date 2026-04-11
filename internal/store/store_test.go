@@ -1,4 +1,4 @@
-package main
+package store_test
 
 import (
 	"database/sql"
@@ -6,13 +6,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"dangernoodle.io/ouroboros/internal/store"
 )
 
 // testDB creates an in-memory database for testing.
 func testDB(t *testing.T) *sql.DB {
 	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
-	require.NoError(t, applySchema(db))
+	require.NoError(t, store.ApplySchema(db))
 	t.Cleanup(func() { db.Close() })
 	return db
 }
@@ -20,7 +22,7 @@ func testDB(t *testing.T) *sql.DB {
 func TestUpsertAndGetDocument(t *testing.T) {
 	db := testDB(t)
 
-	doc := Document{
+	doc := store.Document{
 		Type:     "note",
 		Project:  "acme-corp",
 		Category: "procedure",
@@ -30,12 +32,12 @@ func TestUpsertAndGetDocument(t *testing.T) {
 		Tags:     []string{"release", "ci"},
 	}
 
-	id, err := upsertDocument(db, doc)
+	id, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
 	require.Greater(t, id, int64(0))
 
 	// Verify full document includes content and metadata
-	retrieved, err := getDocument(db, id)
+	retrieved, err := store.GetDocument(db, id)
 	require.NoError(t, err)
 	require.NotNil(t, retrieved)
 
@@ -53,7 +55,7 @@ func TestUpsertAndGetDocument(t *testing.T) {
 func TestUpsertUpdatesExisting(t *testing.T) {
 	db := testDB(t)
 
-	doc1 := Document{
+	doc1 := store.Document{
 		Type:     "note",
 		Project:  "acme-corp",
 		Category: "guide",
@@ -62,15 +64,15 @@ func TestUpsertUpdatesExisting(t *testing.T) {
 		Tags:     []string{"team", "new-hire"},
 	}
 
-	id1, err := upsertDocument(db, doc1)
+	id1, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
 
-	retrieved1, err := getDocument(db, id1)
+	retrieved1, err := store.GetDocument(db, id1)
 	require.NoError(t, err)
 	firstUpdatedAt := retrieved1.UpdatedAt
 
 	// Upsert same document with different content
-	doc2 := Document{
+	doc2 := store.Document{
 		Type:     "note",
 		Project:  "acme-corp",
 		Category: "guide",
@@ -79,13 +81,13 @@ func TestUpsertUpdatesExisting(t *testing.T) {
 		Tags:     []string{"team"},
 	}
 
-	id2, err := upsertDocument(db, doc2)
+	id2, err := store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
 	// Should be same ID
 	assert.Equal(t, id1, id2)
 
-	retrieved2, err := getDocument(db, id1)
+	retrieved2, err := store.GetDocument(db, id1)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Welcome! Updated guide.", retrieved2.Content)
@@ -100,19 +102,19 @@ func TestQueryDocumentsByType(t *testing.T) {
 	db := testDB(t)
 
 	// Insert documents of different types
-	doc1 := Document{Type: "decision", Project: "acme-corp", Title: "Use PostgreSQL"}
-	doc2 := Document{Type: "fact", Project: "acme-corp", Title: "DB Host"}
-	doc3 := Document{Type: "note", Project: "acme-corp", Title: "Release Notes"}
+	doc1 := store.Document{Type: "decision", Project: "acme-corp", Title: "Use PostgreSQL"}
+	doc2 := store.Document{Type: "fact", Project: "acme-corp", Title: "DB Host"}
+	doc3 := store.Document{Type: "note", Project: "acme-corp", Title: "Release Notes"}
 
-	_, err := upsertDocument(db, doc1)
+	_, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc2)
+	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc3)
+	_, err = store.UpsertDocument(db, doc3)
 	require.NoError(t, err)
 
 	// Query by type
-	summaries, err := queryDocuments(db, "note", "", "", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, "note", "", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "note", summaries[0].Type)
@@ -122,15 +124,15 @@ func TestQueryDocumentsByType(t *testing.T) {
 func TestQueryDocumentsByProject(t *testing.T) {
 	db := testDB(t)
 
-	doc1 := Document{Type: "note", Project: "acme-corp", Title: "Notes 1"}
-	doc2 := Document{Type: "note", Project: "example-org", Title: "Notes 2"}
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "Notes 1"}
+	doc2 := store.Document{Type: "note", Project: "example-org", Title: "Notes 2"}
 
-	_, err := upsertDocument(db, doc1)
+	_, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc2)
+	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := queryDocuments(db, "", "acme-corp", "", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, "", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "acme-corp", summaries[0].Project)
@@ -139,15 +141,15 @@ func TestQueryDocumentsByProject(t *testing.T) {
 func TestQueryDocumentsByCategory(t *testing.T) {
 	db := testDB(t)
 
-	doc1 := Document{Type: "fact", Project: "acme-corp", Category: "config", Title: "App Name"}
-	doc2 := Document{Type: "fact", Project: "acme-corp", Category: "deployment", Title: "Region"}
+	doc1 := store.Document{Type: "fact", Project: "acme-corp", Category: "config", Title: "App Name"}
+	doc2 := store.Document{Type: "fact", Project: "acme-corp", Category: "deployment", Title: "Region"}
 
-	_, err := upsertDocument(db, doc1)
+	_, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc2)
+	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := queryDocuments(db, "", "", "config", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, "", "", "config", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "config", summaries[0].Category)
@@ -156,25 +158,25 @@ func TestQueryDocumentsByCategory(t *testing.T) {
 func TestQueryDocumentsFTS(t *testing.T) {
 	db := testDB(t)
 
-	doc1 := Document{
+	doc1 := store.Document{
 		Type:    "note",
 		Project: "acme-corp",
 		Title:   "release-process",
 		Content: "Tag and push to trigger goreleaser",
 	}
-	doc2 := Document{
+	doc2 := store.Document{
 		Type:    "note",
 		Project: "acme-corp",
 		Title:   "deployment",
 		Content: "Deploy to production",
 	}
 
-	_, err := upsertDocument(db, doc1)
+	_, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc2)
+	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := queryDocuments(db, "", "", "", "goreleaser", nil, 50)
+	summaries, err := store.QueryDocuments(db, "", "", "", "goreleaser", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "release-process", summaries[0].Title)
@@ -183,19 +185,19 @@ func TestQueryDocumentsFTS(t *testing.T) {
 func TestQueryDocumentsTagFilter(t *testing.T) {
 	db := testDB(t)
 
-	doc1 := Document{Type: "note", Project: "acme-corp", Title: "Release", Tags: []string{"ci", "release"}}
-	doc2 := Document{Type: "note", Project: "acme-corp", Title: "Deploy", Tags: []string{"ci"}}
-	doc3 := Document{Type: "note", Project: "acme-corp", Title: "Monitor", Tags: []string{"ops"}}
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "Release", Tags: []string{"ci", "release"}}
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "Deploy", Tags: []string{"ci"}}
+	doc3 := store.Document{Type: "note", Project: "acme-corp", Title: "Monitor", Tags: []string{"ops"}}
 
-	_, err := upsertDocument(db, doc1)
+	_, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc2)
+	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc3)
+	_, err = store.UpsertDocument(db, doc3)
 	require.NoError(t, err)
 
 	// Query for documents with both ci AND release tags
-	summaries, err := queryDocuments(db, "", "", "", "", []string{"ci", "release"}, 50)
+	summaries, err := store.QueryDocuments(db, "", "", "", "", []string{"ci", "release"}, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "Release", summaries[0].Title)
@@ -204,7 +206,7 @@ func TestQueryDocumentsTagFilter(t *testing.T) {
 func TestQueryDocumentsReturnsNoContent(t *testing.T) {
 	db := testDB(t)
 
-	doc := Document{
+	doc := store.Document{
 		Type:     "note",
 		Project:  "acme-corp",
 		Title:    "test",
@@ -212,10 +214,10 @@ func TestQueryDocumentsReturnsNoContent(t *testing.T) {
 		Metadata: map[string]string{"key": "value"},
 	}
 
-	_, err := upsertDocument(db, doc)
+	_, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
 
-	summaries, err := queryDocuments(db, "", "", "", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, "", "", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 
@@ -228,21 +230,21 @@ func TestQueryDocumentsReturnsNoContent(t *testing.T) {
 func TestDeleteDocument(t *testing.T) {
 	db := testDB(t)
 
-	doc := Document{Type: "note", Project: "acme-corp", Title: "to-delete", Content: "content"}
-	id, err := upsertDocument(db, doc)
+	doc := store.Document{Type: "note", Project: "acme-corp", Title: "to-delete", Content: "content"}
+	id, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
 
 	// Verify it exists
-	retrieved, err := getDocument(db, id)
+	retrieved, err := store.GetDocument(db, id)
 	require.NoError(t, err)
 	assert.NotNil(t, retrieved)
 
 	// Delete it
-	err = deleteDocument(db, id)
+	err = store.DeleteDocument(db, id)
 	require.NoError(t, err)
 
 	// Verify it's gone
-	retrieved, err = getDocument(db, id)
+	retrieved, err = store.GetDocument(db, id)
 	require.NoError(t, err)
 	assert.Nil(t, retrieved)
 }
@@ -250,7 +252,7 @@ func TestDeleteDocument(t *testing.T) {
 func TestGetDocumentNotFound(t *testing.T) {
 	db := testDB(t)
 
-	doc, err := getDocument(db, 999)
+	doc, err := store.GetDocument(db, 999)
 	require.NoError(t, err)
 	assert.Nil(t, doc)
 }
@@ -258,33 +260,33 @@ func TestGetDocumentNotFound(t *testing.T) {
 func TestSearchDocuments(t *testing.T) {
 	db := testDB(t)
 
-	doc1 := Document{
+	doc1 := store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Database Choice",
 		Content: "We chose PostgreSQL for its ACID guarantees",
 	}
-	doc2 := Document{
+	doc2 := store.Document{
 		Type:    "fact",
 		Project: "acme-corp",
 		Title:   "DB Host",
 		Content: "prod-db.example.com",
 	}
-	doc3 := Document{
+	doc3 := store.Document{
 		Type:    "note",
 		Project: "example-org",
 		Title:   "API Design",
 		Content: "REST endpoints for service discovery",
 	}
 
-	_, err := upsertDocument(db, doc1)
+	_, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc2)
+	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc3)
+	_, err = store.UpsertDocument(db, doc3)
 	require.NoError(t, err)
 
-	summaries, err := searchDocuments(db, "PostgreSQL", "", "", 50)
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", "", "", 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "Database Choice", summaries[0].Title)
@@ -293,15 +295,15 @@ func TestSearchDocuments(t *testing.T) {
 func TestSearchDocumentsWithTypeFilter(t *testing.T) {
 	db := testDB(t)
 
-	doc1 := Document{Type: "decision", Project: "acme-corp", Title: "DB", Content: "PostgreSQL"}
-	doc2 := Document{Type: "note", Project: "acme-corp", Title: "Note", Content: "PostgreSQL info"}
+	doc1 := store.Document{Type: "decision", Project: "acme-corp", Title: "DB", Content: "PostgreSQL"}
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "Note", Content: "PostgreSQL info"}
 
-	_, err := upsertDocument(db, doc1)
+	_, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc2)
+	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := searchDocuments(db, "PostgreSQL", "decision", "", 50)
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", "decision", "", 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "decision", summaries[0].Type)
@@ -310,15 +312,15 @@ func TestSearchDocumentsWithTypeFilter(t *testing.T) {
 func TestSearchDocumentsWithProjectFilter(t *testing.T) {
 	db := testDB(t)
 
-	doc1 := Document{Type: "note", Project: "acme-corp", Title: "Note 1", Content: "PostgreSQL"}
-	doc2 := Document{Type: "note", Project: "other-proj", Title: "Note 2", Content: "PostgreSQL"}
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "Note 1", Content: "PostgreSQL"}
+	doc2 := store.Document{Type: "note", Project: "other-proj", Title: "Note 2", Content: "PostgreSQL"}
 
-	_, err := upsertDocument(db, doc1)
+	_, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
-	_, err = upsertDocument(db, doc2)
+	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := searchDocuments(db, "PostgreSQL", "", "acme-corp", 50)
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", "", "acme-corp", 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "acme-corp", summaries[0].Project)
@@ -341,7 +343,7 @@ func TestClampLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := clampLimit(tt.limit, tt.defaultVal, tt.maxVal)
+			result := store.ClampLimit(tt.limit, tt.defaultVal, tt.maxVal)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

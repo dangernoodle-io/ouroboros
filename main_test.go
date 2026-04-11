@@ -10,6 +10,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"dangernoodle.io/ouroboros/internal/store"
 )
 
 func TestMain(m *testing.M) {
@@ -18,7 +20,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	if err = applySchema(db); err != nil {
+	if err = store.ApplySchema(db); err != nil {
 		panic(err)
 	}
 	os.Exit(m.Run())
@@ -28,7 +30,7 @@ func resetDB(t *testing.T) {
 	t.Helper()
 	_, err := db.Exec("DELETE FROM documents")
 	require.NoError(t, err)
-	require.NoError(t, rebuildFTS(db))
+	require.NoError(t, store.RebuildFTS(db))
 }
 
 func makeRequest(args map[string]interface{}) mcp.CallToolRequest {
@@ -107,7 +109,7 @@ func TestHandlePutUpsert(t *testing.T) {
 	assert.Equal(t, id1, id2)
 
 	// Content should be updated
-	doc, err := getDocument(db, id1)
+	doc, err := store.GetDocument(db, id1)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated rationale", doc.Content)
 }
@@ -116,14 +118,14 @@ func TestHandleGetByID(t *testing.T) {
 	resetDB(t)
 
 	// Insert document
-	doc := Document{
+	doc := store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
 		Content: "Full rationale content here",
 		Tags:    []string{"database"},
 	}
-	id, err := upsertDocument(db, doc)
+	id, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
 
 	// Get by ID
@@ -134,7 +136,7 @@ func TestHandleGetByID(t *testing.T) {
 	result, err := handleGet(context.TODO(), req)
 	require.NoError(t, err)
 
-	var retrieved Document
+	var retrieved store.Document
 	err = unmarshalResult(result, &retrieved)
 	require.NoError(t, err)
 	assert.Equal(t, "Use PostgreSQL", retrieved.Title)
@@ -145,13 +147,13 @@ func TestHandleGetList(t *testing.T) {
 	resetDB(t)
 
 	// Insert multiple documents
-	_, err := upsertDocument(db, Document{
+	_, err := store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
 	})
 	require.NoError(t, err)
-	_, err = upsertDocument(db, Document{
+	_, err = store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use gRPC",
@@ -167,7 +169,7 @@ func TestHandleGetList(t *testing.T) {
 	result, err := handleGet(context.TODO(), req)
 	require.NoError(t, err)
 
-	var summaries []DocumentSummary
+	var summaries []store.DocumentSummary
 	err = unmarshalResult(result, &summaries)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 2)
@@ -182,13 +184,13 @@ func TestHandleGetByType(t *testing.T) {
 	resetDB(t)
 
 	// Insert different types
-	_, err := upsertDocument(db, Document{
+	_, err := store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Decision 1",
 	})
 	require.NoError(t, err)
-	_, err = upsertDocument(db, Document{
+	_, err = store.UpsertDocument(db, store.Document{
 		Type:    "fact",
 		Project: "acme-corp",
 		Title:   "Fact 1",
@@ -203,7 +205,7 @@ func TestHandleGetByType(t *testing.T) {
 	result, err := handleGet(context.TODO(), req)
 	require.NoError(t, err)
 
-	var summaries []DocumentSummary
+	var summaries []store.DocumentSummary
 	err = unmarshalResult(result, &summaries)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 1)
@@ -213,7 +215,7 @@ func TestHandleGetByType(t *testing.T) {
 func TestHandleDelete(t *testing.T) {
 	resetDB(t)
 
-	id, err := upsertDocument(db, Document{
+	id, err := store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
@@ -233,7 +235,7 @@ func TestHandleDelete(t *testing.T) {
 	assert.True(t, resp["ok"])
 
 	// Verify deletion
-	doc, err := getDocument(db, id)
+	doc, err := store.GetDocument(db, id)
 	require.NoError(t, err)
 	assert.Nil(t, doc)
 }
@@ -241,14 +243,14 @@ func TestHandleDelete(t *testing.T) {
 func TestHandleSearch(t *testing.T) {
 	resetDB(t)
 
-	_, err := upsertDocument(db, Document{
+	_, err := store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
 		Content: "Performance benefits",
 	})
 	require.NoError(t, err)
-	_, err = upsertDocument(db, Document{
+	_, err = store.UpsertDocument(db, store.Document{
 		Type:    "fact",
 		Project: "acme-corp",
 		Title:   "Database Type",
@@ -263,7 +265,7 @@ func TestHandleSearch(t *testing.T) {
 	result, err := handleSearch(context.TODO(), req)
 	require.NoError(t, err)
 
-	var summaries []DocumentSummary
+	var summaries []store.DocumentSummary
 	err = unmarshalResult(result, &summaries)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 2)
@@ -272,7 +274,7 @@ func TestHandleSearch(t *testing.T) {
 func TestHandleExport(t *testing.T) {
 	resetDB(t)
 
-	_, err := upsertDocument(db, Document{
+	_, err := store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
@@ -336,11 +338,11 @@ func TestHandleImport(t *testing.T) {
 	assert.True(t, resp["ok"])
 
 	// Verify import
-	summaries, err := queryDocuments(db, "decision", "acme-corp", "", "", nil, 0)
+	summaries, err := store.QueryDocuments(db, "decision", "acme-corp", "", "", nil, 0)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 1)
 
-	facts, err := queryDocuments(db, "fact", "acme-corp", "", "", nil, 0)
+	facts, err := store.QueryDocuments(db, "fact", "acme-corp", "", "", nil, 0)
 	require.NoError(t, err)
 	assert.Len(t, facts, 1)
 }

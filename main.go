@@ -12,6 +12,9 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	"dangernoodle.io/ouroboros/internal/kb"
+	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var Version = "dev"
@@ -47,7 +50,7 @@ func main() {
 	}
 
 	var err error
-	db, err = initDB()
+	db, err = store.InitDB()
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
@@ -112,7 +115,7 @@ func handlePut(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 		}
 	}
 
-	doc := Document{
+	doc := store.Document{
 		Type:     docType,
 		Project:  project,
 		Category: category,
@@ -122,7 +125,7 @@ func handlePut(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 		Tags:     tags,
 	}
 
-	id, err := upsertDocument(db, doc)
+	id, err := store.UpsertDocument(db, doc)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -133,7 +136,7 @@ func handlePut(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 func handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// If id provided, return full document
 	if idFloat, ok := req.GetArguments()["id"].(float64); ok {
-		doc, err := getDocument(db, int64(idFloat))
+		doc, err := store.GetDocument(db, int64(idFloat))
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -163,7 +166,7 @@ func handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 		limit = int(v)
 	}
 
-	summaries, err := queryDocuments(db, docType, project, category, query, tags, limit)
+	summaries, err := store.QueryDocuments(db, docType, project, category, query, tags, limit)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -177,7 +180,7 @@ func handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
 	}
 
-	err := deleteDocument(db, int64(idFloat))
+	err := store.DeleteDocument(db, int64(idFloat))
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -199,7 +202,7 @@ func handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 		limit = int(v)
 	}
 
-	summaries, err := searchDocuments(db, query, docType, project, limit)
+	summaries, err := store.SearchDocuments(db, query, docType, project, limit)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -211,7 +214,7 @@ func handleExport(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 	project, _ := req.GetArguments()["project"].(string)
 	docType, _ := req.GetArguments()["type"].(string)
 
-	markdown, err := exportMarkdown(db, project, docType)
+	markdown, err := kb.ExportMarkdown(db, project, docType)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -227,7 +230,7 @@ func handleImport(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 
 	project, _ := req.GetArguments()["project"].(string)
 
-	err = importData(db, project, content)
+	err = kb.Import(db, project, content)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
