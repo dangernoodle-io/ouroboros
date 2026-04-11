@@ -72,12 +72,14 @@ Store immediately (put):
 - When a project relationship or dependency is identified
 - Determine project via git rev-parse --show-toplevel | xargs basename
 - Always search first to avoid duplicates — upsert by type+project+category+title
+- When a prior decision changes, search for and update the existing entry — do not create a duplicate
 
 Query (get/search):
 - Before making decisions that may have prior context
 - When the user asks about past decisions, project history, or "why" questions
 - Prefer search for broad queries, get with filters for known types/projects
 - get without id returns compact summaries (no content) — use get with id only when full content is needed
+- After modifying code, check if related KB entries need updating
 
 Do not store: trivial implementation details, information derivable from code or git history, temporary debugging state.`),
 	)
