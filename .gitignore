@@ -1,3 +1,4 @@
 ouroboros
 coverage.out
 *.db
+.code-graph/

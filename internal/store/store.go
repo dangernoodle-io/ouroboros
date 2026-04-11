@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -81,31 +82,124 @@ func InitDB() (*sql.DB, error) {
 	return db, nil
 }
 
-// ApplySchema creates the documents table and FTS index.
+// migrations defines the schema evolution with versioned SQL.
+var migrations = []struct {
+	version int
+	sql     string
+}{
+	{
+		version: 1,
+		sql: `CREATE TABLE IF NOT EXISTS documents (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			type       TEXT NOT NULL,
+			project    TEXT NOT NULL DEFAULT '',
+			category   TEXT NOT NULL DEFAULT '',
+			title      TEXT NOT NULL,
+			content    TEXT NOT NULL DEFAULT '',
+			metadata   TEXT,
+			tags       TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE(type, project, category, title)
+		);
+
+		CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+			title, content, tags,
+			content=documents, content_rowid=id
+		);`,
+	},
+	{
+		version: 2,
+		sql: `CREATE TABLE IF NOT EXISTS config (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS projects (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			prefix TEXT NOT NULL UNIQUE,
+			created TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS items (
+			id TEXT PRIMARY KEY,
+			project_id INTEGER NOT NULL REFERENCES projects(id),
+			seq INTEGER NOT NULL,
+			priority TEXT NOT NULL,
+			title TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'open',
+			created TEXT NOT NULL,
+			updated TEXT NOT NULL,
+			UNIQUE(project_id, seq)
+		);
+
+		CREATE TABLE IF NOT EXISTS plans (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER REFERENCES projects(id),
+			item_id TEXT REFERENCES items(id),
+			title TEXT NOT NULL,
+			content TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'draft',
+			created TEXT NOT NULL,
+			updated TEXT NOT NULL
+		);`,
+	},
+	{
+		version: 3,
+		sql:     `ALTER TABLE documents ADD COLUMN project_id INTEGER REFERENCES projects(id);`,
+	},
+}
+
+// ApplySchema applies all pending migrations to the database.
 func ApplySchema(db *sql.DB) error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS documents (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		type       TEXT NOT NULL,
-		project    TEXT NOT NULL DEFAULT '',
-		category   TEXT NOT NULL DEFAULT '',
-		title      TEXT NOT NULL,
-		content    TEXT NOT NULL DEFAULT '',
-		metadata   TEXT,
-		tags       TEXT,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL,
-		UNIQUE(type, project, category, title)
-	);
+	// Create schema_migrations table to track applied migrations
+	createMigrationsTable := `
+	CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY,
+		applied_at TEXT NOT NULL
+	);`
 
-	CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-		title, content, tags,
-		content=documents, content_rowid=id
-	);
-	`
+	if _, err := db.Exec(createMigrationsTable); err != nil {
+		return fmt.Errorf("failed to create schema_migrations table: %w", err)
+	}
 
-	_, err := db.Exec(schema)
-	return err
+	// Get the maximum applied version
+	var maxVersion int
+	err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&maxVersion)
+	if err != nil {
+		return fmt.Errorf("failed to query max migration version: %w", err)
+	}
+
+	// Apply pending migrations
+	for _, m := range migrations {
+		if m.version <= maxVersion {
+			continue
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction for migration %d: %w", m.version, err)
+		}
+
+		if _, err := tx.Exec(m.sql); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("failed to execute migration %d: %w", m.version, err)
+		}
+
+		if _, err := tx.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+			m.version, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("failed to record migration %d: %w", m.version, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit migration %d: %w", m.version, err)
+		}
+	}
+
+	return nil
 }
 
 // RebuildFTS rebuilds the unified documents_fts FTS index.

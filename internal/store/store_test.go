@@ -410,6 +410,122 @@ func TestTokenizeQuery(t *testing.T) {
 	}
 }
 
+func TestApplySchemaCreatesAllTables(t *testing.T) {
+	db := testDB(t)
+
+	// Check that documents table exists
+	var result string
+	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='documents'").Scan(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "documents", result)
+
+	// Check that documents_fts table exists
+	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='documents_fts'").Scan(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "documents_fts", result)
+
+	// Check that config table exists
+	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='config'").Scan(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "config", result)
+
+	// Check that projects table exists
+	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").Scan(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "projects", result)
+
+	// Check that items table exists
+	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='items'").Scan(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "items", result)
+
+	// Check that plans table exists
+	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='plans'").Scan(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "plans", result)
+
+	// Check that schema_migrations table exists
+	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'").Scan(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "schema_migrations", result)
+}
+
+func TestApplySchemaIdempotent(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+
+	// Apply schema first time
+	require.NoError(t, store.ApplySchema(db))
+
+	// Apply schema second time - should not error
+	require.NoError(t, store.ApplySchema(db))
+}
+
+func TestMigrationVersionTracking(t *testing.T) {
+	db := testDB(t)
+
+	// Query the schema_migrations table to verify versions were recorded
+	rows, err := db.Query("SELECT version FROM schema_migrations ORDER BY version")
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var versions []int
+	for rows.Next() {
+		var v int
+		require.NoError(t, rows.Scan(&v))
+		versions = append(versions, v)
+	}
+
+	// Should have recorded migrations 1, 2, and 3
+	assert.Equal(t, []int{1, 2, 3}, versions)
+
+	// Verify applied_at is set (not NULL)
+	var appliedAt string
+	err = db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version=1").Scan(&appliedAt)
+	require.NoError(t, err)
+	assert.NotEmpty(t, appliedAt)
+}
+
+func TestProjectIdColumnExists(t *testing.T) {
+	db := testDB(t)
+
+	// Insert a document
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "test-doc",
+		Content: "test content",
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	// Verify project_id column exists and is NULL by default
+	var projectID *int64
+	err = db.QueryRow("SELECT project_id FROM documents WHERE title='test-doc'").Scan(&projectID)
+	require.NoError(t, err)
+	assert.Nil(t, projectID)
+
+	// Verify schema for documents includes project_id column
+	rows, err := db.Query("PRAGMA table_info(documents)")
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var columnNames []string
+	for rows.Next() {
+		var cid int
+		var name string
+		var typ string
+		var notnull int
+		var dfltValue *string
+		var pk int
+		require.NoError(t, rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk))
+		columnNames = append(columnNames, name)
+	}
+
+	assert.Contains(t, columnNames, "project_id")
+}
+
 func TestKeywordSearch(t *testing.T) {
 	db := testDB(t)
 
