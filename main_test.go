@@ -381,6 +381,72 @@ func TestHandleMissingRequiredParams(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
+func TestParseQueryArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want queryArgs
+	}{
+		{
+			name: "all flags",
+			args: []string{"--project", "acme-corp", "--type", "decision", "--limit", "5"},
+			want: queryArgs{project: "acme-corp", docType: "decision", limit: 5},
+		},
+		{
+			name: "project only",
+			args: []string{"--project", "acme-corp"},
+			want: queryArgs{project: "acme-corp", limit: 10},
+		},
+		{
+			name: "type only",
+			args: []string{"--type", "fact"},
+			want: queryArgs{docType: "fact", limit: 10},
+		},
+		{
+			name: "limit only",
+			args: []string{"--limit", "25"},
+			want: queryArgs{limit: 25},
+		},
+		{
+			name: "no flags",
+			args: []string{},
+			want: queryArgs{limit: 10},
+		},
+		{
+			name: "invalid limit falls back to default",
+			args: []string{"--limit", "abc"},
+			want: queryArgs{limit: 10},
+		},
+		{
+			name: "missing flag value at end",
+			args: []string{"--project"},
+			want: queryArgs{limit: 10},
+		},
+		{
+			name: "missing flag value in middle",
+			args: []string{"--project", "--type", "decision"},
+			want: queryArgs{project: "--type", limit: 10},
+		},
+		{
+			name: "duplicate flags uses last value",
+			args: []string{"--project", "acme-corp", "--project", "test-co"},
+			want: queryArgs{project: "test-co", limit: 10},
+		},
+		{
+			name: "limit zero",
+			args: []string{"--limit", "0"},
+			want: queryArgs{limit: 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseQueryArgs(tt.args)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // Helper to extract text from tool result and unmarshal JSON.
 func unmarshalResult(result *mcp.CallToolResult, v interface{}) error {
 	if len(result.Content) == 0 {
