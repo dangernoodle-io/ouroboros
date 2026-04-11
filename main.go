@@ -75,19 +75,34 @@ func main() {
 
 // Handler functions
 
-func handleLogDecision(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handlePut(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	docType, err := req.RequireString("type")
+	if err != nil {
+		return mcp.NewToolResultError("type is required"), nil //nolint:nilerr
+	}
+
 	project, err := req.RequireString("project")
 	if err != nil {
 		return mcp.NewToolResultError("project is required"), nil //nolint:nilerr
 	}
 
-	summary, err := req.RequireString("summary")
+	title, err := req.RequireString("title")
 	if err != nil {
-		return mcp.NewToolResultError("summary is required"), nil //nolint:nilerr
+		return mcp.NewToolResultError("title is required"), nil //nolint:nilerr
 	}
 
-	rationale, _ := req.GetArguments()["rationale"].(string)
+	content, _ := req.GetArguments()["content"].(string)
+	category, _ := req.GetArguments()["category"].(string)
 
+	// Parse metadata from JSON string
+	var metadata map[string]string
+	if metadataStr, ok := req.GetArguments()["metadata"].(string); ok && metadataStr != "" {
+		if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+			return mcp.NewToolResultError("invalid metadata JSON"), nil //nolint:nilerr
+		}
+	}
+
+	// Parse tags from array
 	var tags []string
 	if rawTags, ok := req.GetArguments()["tags"].([]interface{}); ok {
 		for _, t := range rawTags {
@@ -97,7 +112,17 @@ func handleLogDecision(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		}
 	}
 
-	id, err := insertDecision(db, project, summary, rationale, tags)
+	doc := Document{
+		Type:     docType,
+		Project:  project,
+		Category: category,
+		Title:    title,
+		Content:  content,
+		Metadata: metadata,
+		Tags:     tags,
+	}
+
+	id, err := upsertDocument(db, doc)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -105,21 +130,23 @@ func handleLogDecision(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	return jsonResult(map[string]interface{}{"id": id, "ok": true})
 }
 
-func handleGetDecisions(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// If id is provided, return full decision with rationale.
+func handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// If id provided, return full document
 	if idFloat, ok := req.GetArguments()["id"].(float64); ok {
-		decision, err := getDecision(db, int64(idFloat))
+		doc, err := getDocument(db, int64(idFloat))
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if decision == nil {
-			return mcp.NewToolResultError("decision not found"), nil
+		if doc == nil {
+			return mcp.NewToolResultError("document not found"), nil
 		}
-		return jsonResult(decision)
+		return jsonResult(doc)
 	}
 
-	// Otherwise return summaries (no rationale).
+	// Otherwise return summaries by filters
+	docType, _ := req.GetArguments()["type"].(string)
 	project, _ := req.GetArguments()["project"].(string)
+	category, _ := req.GetArguments()["category"].(string)
 	query, _ := req.GetArguments()["query"].(string)
 
 	var tags []string
@@ -136,163 +163,21 @@ func handleGetDecisions(ctx context.Context, req mcp.CallToolRequest) (*mcp.Call
 		limit = int(v)
 	}
 
-	decisions, err := queryDecisions(db, project, tags, query, limit)
+	summaries, err := queryDocuments(db, docType, project, category, query, tags, limit)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return jsonResult(decisions)
+	return jsonResult(summaries)
 }
 
-func handleDeleteDecision(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	idFloat, ok := req.GetArguments()["id"].(float64)
 	if !ok {
 		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
 	}
-	id := int64(idFloat)
 
-	err := deleteDecision(db, id)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	return jsonResult(map[string]bool{"ok": true})
-}
-
-func handleSetFact(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	project, err := req.RequireString("project")
-	if err != nil {
-		return mcp.NewToolResultError("project is required"), nil //nolint:nilerr
-	}
-
-	category, err := req.RequireString("category")
-	if err != nil {
-		return mcp.NewToolResultError("category is required"), nil //nolint:nilerr
-	}
-
-	key, err := req.RequireString("key")
-	if err != nil {
-		return mcp.NewToolResultError("key is required"), nil //nolint:nilerr
-	}
-
-	value, err := req.RequireString("value")
-	if err != nil {
-		return mcp.NewToolResultError("value is required"), nil //nolint:nilerr
-	}
-
-	id, err := upsertFact(db, project, category, key, value)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	return jsonResult(map[string]interface{}{"id": id, "ok": true})
-}
-
-func handleGetFacts(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	project, _ := req.GetArguments()["project"].(string)
-	category, _ := req.GetArguments()["category"].(string)
-	key, _ := req.GetArguments()["key"].(string)
-	query, _ := req.GetArguments()["query"].(string)
-
-	limit := 0
-	if v, ok := req.GetArguments()["limit"].(float64); ok {
-		limit = int(v)
-	}
-
-	facts, err := queryFacts(db, project, category, key, query, limit)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	return jsonResult(facts)
-}
-
-func handleDeleteFact(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	project, err := req.RequireString("project")
-	if err != nil {
-		return mcp.NewToolResultError("project is required"), nil //nolint:nilerr
-	}
-
-	category, err := req.RequireString("category")
-	if err != nil {
-		return mcp.NewToolResultError("category is required"), nil //nolint:nilerr
-	}
-
-	key, err := req.RequireString("key")
-	if err != nil {
-		return mcp.NewToolResultError("key is required"), nil //nolint:nilerr
-	}
-
-	err = deleteFact(db, project, category, key)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	return jsonResult(map[string]bool{"ok": true})
-}
-
-func handleLink(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	sourceProject, err := req.RequireString("source_project")
-	if err != nil {
-		return mcp.NewToolResultError("source_project is required"), nil //nolint:nilerr
-	}
-
-	source, err := req.RequireString("source")
-	if err != nil {
-		return mcp.NewToolResultError("source is required"), nil //nolint:nilerr
-	}
-
-	targetProject, err := req.RequireString("target_project")
-	if err != nil {
-		return mcp.NewToolResultError("target_project is required"), nil //nolint:nilerr
-	}
-
-	target, err := req.RequireString("target")
-	if err != nil {
-		return mcp.NewToolResultError("target is required"), nil //nolint:nilerr
-	}
-
-	relationType, err := req.RequireString("relation_type")
-	if err != nil {
-		return mcp.NewToolResultError("relation_type is required"), nil //nolint:nilerr
-	}
-
-	description, _ := req.GetArguments()["description"].(string)
-
-	id, err := insertRelation(db, sourceProject, source, targetProject, target, relationType, description)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	return jsonResult(map[string]interface{}{"id": id, "ok": true})
-}
-
-func handleGetLinks(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	project, _ := req.GetArguments()["project"].(string)
-	entity, _ := req.GetArguments()["entity"].(string)
-	relationType, _ := req.GetArguments()["relation_type"].(string)
-
-	limit := 0
-	if v, ok := req.GetArguments()["limit"].(float64); ok {
-		limit = int(v)
-	}
-
-	relations, err := queryRelations(db, project, entity, relationType, limit)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	return jsonResult(relations)
-}
-
-func handleDeleteLink(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	idFloat, ok := req.GetArguments()["id"].(float64)
-	if !ok {
-		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
-	}
-	id := int64(idFloat)
-
-	err := deleteRelation(db, id)
+	err := deleteDocument(db, int64(idFloat))
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -306,6 +191,7 @@ func handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 		return mcp.NewToolResultError("query is required"), nil //nolint:nilerr
 	}
 
+	docType, _ := req.GetArguments()["type"].(string)
 	project, _ := req.GetArguments()["project"].(string)
 
 	limit := 0
@@ -313,18 +199,19 @@ func handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 		limit = int(v)
 	}
 
-	result, err := searchAll(db, query, project, limit)
+	summaries, err := searchDocuments(db, query, docType, project, limit)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return jsonResult(result)
+	return jsonResult(summaries)
 }
 
 func handleExport(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	project, _ := req.GetArguments()["project"].(string)
+	docType, _ := req.GetArguments()["type"].(string)
 
-	markdown, err := exportMarkdown(db, project)
+	markdown, err := exportMarkdown(db, project, docType)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -333,104 +220,17 @@ func handleExport(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolRe
 }
 
 func handleImport(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	project, err := req.RequireString("project")
-	if err != nil {
-		return mcp.NewToolResultError("project is required"), nil //nolint:nilerr
-	}
-
 	content, err := req.RequireString("content")
 	if err != nil {
 		return mcp.NewToolResultError("content is required"), nil //nolint:nilerr
 	}
+
+	project, _ := req.GetArguments()["project"].(string)
 
 	err = importData(db, project, content)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return jsonResult(map[string]bool{"ok": true})
-}
-
-func handleSetNote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	project, err := req.RequireString("project")
-	if err != nil {
-		return mcp.NewToolResultError("project is required"), nil //nolint:nilerr
-	}
-	category, err := req.RequireString("category")
-	if err != nil {
-		return mcp.NewToolResultError("category is required"), nil //nolint:nilerr
-	}
-	title, err := req.RequireString("title")
-	if err != nil {
-		return mcp.NewToolResultError("title is required"), nil //nolint:nilerr
-	}
-	body, err := req.RequireString("body")
-	if err != nil {
-		return mcp.NewToolResultError("body is required"), nil //nolint:nilerr
-	}
-
-	var tags []string
-	if rawTags, ok := req.GetArguments()["tags"].([]interface{}); ok {
-		for _, t := range rawTags {
-			if s, ok := t.(string); ok {
-				tags = append(tags, s)
-			}
-		}
-	}
-
-	id, err := upsertNote(db, project, category, title, body, tags)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	return jsonResult(map[string]interface{}{"id": id, "ok": true})
-}
-
-func handleGetNotes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// If id is provided, return full note with body
-	if idFloat, ok := req.GetArguments()["id"].(float64); ok {
-		note, err := getNote(db, int64(idFloat))
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		if note == nil {
-			return mcp.NewToolResultError("note not found"), nil
-		}
-		return jsonResult(note)
-	}
-
-	// Otherwise return summaries (no body)
-	project, _ := req.GetArguments()["project"].(string)
-	category, _ := req.GetArguments()["category"].(string)
-	query, _ := req.GetArguments()["query"].(string)
-
-	var tags []string
-	if rawTags, ok := req.GetArguments()["tags"].([]interface{}); ok {
-		for _, t := range rawTags {
-			if s, ok := t.(string); ok {
-				tags = append(tags, s)
-			}
-		}
-	}
-
-	limit := 0
-	if v, ok := req.GetArguments()["limit"].(float64); ok {
-		limit = int(v)
-	}
-
-	notes, err := queryNotes(db, project, category, query, tags, limit)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	return jsonResult(notes)
-}
-
-func handleDeleteNote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	idFloat, ok := req.GetArguments()["id"].(float64)
-	if !ok {
-		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
-	}
-	if err := deleteNote(db, int64(idFloat)); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
 	return jsonResult(map[string]bool{"ok": true})
 }

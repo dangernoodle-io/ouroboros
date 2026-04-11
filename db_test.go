@@ -17,269 +17,311 @@ func testDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func TestInsertAndQueryDecision(t *testing.T) {
+func TestUpsertAndGetDocument(t *testing.T) {
 	db := testDB(t)
 
-	id, err := insertDecision(db, "acme-corp", "Use PostgreSQL for main datastore", "Better ACID guarantees", []string{"database", "architecture"})
+	doc := Document{
+		Type:     "note",
+		Project:  "acme-corp",
+		Category: "procedure",
+		Title:    "release-process",
+		Content:  "1. Tag\n2. Push\n3. Monitor",
+		Metadata: map[string]string{"version": "1.0"},
+		Tags:     []string{"release", "ci"},
+	}
+
+	id, err := upsertDocument(db, doc)
 	require.NoError(t, err)
 	require.Greater(t, id, int64(0))
 
-	decisions, err := queryDecisions(db, "acme-corp", []string{}, "", 50)
+	// Verify full document includes content and metadata
+	retrieved, err := getDocument(db, id)
 	require.NoError(t, err)
-	require.Len(t, decisions, 1)
+	require.NotNil(t, retrieved)
 
-	d := decisions[0]
-	assert.Equal(t, id, d.ID)
-	assert.Equal(t, "acme-corp", d.Project)
-	assert.Equal(t, "Use PostgreSQL for main datastore", d.Summary)
-	assert.ElementsMatch(t, []string{"database", "architecture"}, d.Tags)
-	assert.NotEmpty(t, d.CreatedAt)
-
-	// Verify full decision via getDecision includes rationale.
-	full, err := getDecision(db, id)
-	require.NoError(t, err)
-	require.NotNil(t, full)
-	assert.Equal(t, "Better ACID guarantees", full.Rationale)
+	assert.Equal(t, "note", retrieved.Type)
+	assert.Equal(t, "acme-corp", retrieved.Project)
+	assert.Equal(t, "procedure", retrieved.Category)
+	assert.Equal(t, "release-process", retrieved.Title)
+	assert.Equal(t, "1. Tag\n2. Push\n3. Monitor", retrieved.Content)
+	assert.Equal(t, map[string]string{"version": "1.0"}, retrieved.Metadata)
+	assert.ElementsMatch(t, []string{"release", "ci"}, retrieved.Tags)
+	assert.NotEmpty(t, retrieved.CreatedAt)
+	assert.NotEmpty(t, retrieved.UpdatedAt)
 }
 
-func TestDecisionFTSSearch(t *testing.T) {
+func TestUpsertUpdatesExisting(t *testing.T) {
 	db := testDB(t)
 
-	_, err := insertDecision(db, "acme-corp", "Use PostgreSQL for performance", "ACID compliance", []string{"database"})
+	doc1 := Document{
+		Type:     "note",
+		Project:  "acme-corp",
+		Category: "guide",
+		Title:    "onboarding",
+		Content:  "Welcome to acme-corp",
+		Tags:     []string{"team", "new-hire"},
+	}
+
+	id1, err := upsertDocument(db, doc1)
 	require.NoError(t, err)
 
-	_, err = insertDecision(db, "acme-corp", "Migrate to Kubernetes", "Container orchestration", []string{"infrastructure"})
+	retrieved1, err := getDocument(db, id1)
 	require.NoError(t, err)
+	firstUpdatedAt := retrieved1.UpdatedAt
 
-	// Search by FTS query
-	decisions, err := queryDecisions(db, "", []string{}, "PostgreSQL", 50)
-	require.NoError(t, err)
-	require.Len(t, decisions, 1)
-	assert.Contains(t, decisions[0].Summary, "PostgreSQL")
-}
+	// Upsert same document with different content
+	doc2 := Document{
+		Type:     "note",
+		Project:  "acme-corp",
+		Category: "guide",
+		Title:    "onboarding",
+		Content:  "Welcome! Updated guide.",
+		Tags:     []string{"team"},
+	}
 
-func TestDecisionTagFilter(t *testing.T) {
-	db := testDB(t)
-
-	_, err := insertDecision(db, "acme-corp", "Decision 1", "", []string{"database", "performance"})
-	require.NoError(t, err)
-
-	_, err = insertDecision(db, "acme-corp", "Decision 2", "", []string{"database"})
-	require.NoError(t, err)
-
-	_, err = insertDecision(db, "acme-corp", "Decision 3", "", []string{"api", "performance"})
-	require.NoError(t, err)
-
-	// Query with tag filter
-	decisions, err := queryDecisions(db, "acme-corp", []string{"database", "performance"}, "", 50)
-	require.NoError(t, err)
-	require.Len(t, decisions, 1)
-	assert.Equal(t, "Decision 1", decisions[0].Summary)
-}
-
-func TestDeleteDecision(t *testing.T) {
-	db := testDB(t)
-
-	id, err := insertDecision(db, "acme-corp", "Decision to delete", "", []string{})
-	require.NoError(t, err)
-
-	err = deleteDecision(db, id)
-	require.NoError(t, err)
-
-	decisions, err := queryDecisions(db, "acme-corp", []string{}, "", 50)
-	require.NoError(t, err)
-	require.Len(t, decisions, 0)
-}
-
-func TestUpsertFact(t *testing.T) {
-	db := testDB(t)
-
-	// Insert initial fact
-	id1, err := upsertFact(db, "acme-corp", "config", "database-host", "localhost")
-	require.NoError(t, err)
-	require.Greater(t, id1, int64(0))
-
-	facts, err := queryFacts(db, "acme-corp", "config", "database-host", "", 50)
-	require.NoError(t, err)
-	require.Len(t, facts, 1)
-	assert.Equal(t, "localhost", facts[0].Value)
-	createdAt1 := facts[0].CreatedAt
-	firstUpdatedAt := facts[0].UpdatedAt
-
-	// Upsert same key with new value
-	id2, err := upsertFact(db, "acme-corp", "config", "database-host", "prod-db.acme-corp.example.com")
+	id2, err := upsertDocument(db, doc2)
 	require.NoError(t, err)
 
 	// Should be same ID
 	assert.Equal(t, id1, id2)
 
-	facts, err = queryFacts(db, "acme-corp", "config", "database-host", "", 50)
+	retrieved2, err := getDocument(db, id1)
 	require.NoError(t, err)
-	require.Len(t, facts, 1)
-	assert.Equal(t, "prod-db.acme-corp.example.com", facts[0].Value)
-	// Verify created_at unchanged but updated_at was set
-	assert.Equal(t, createdAt1, facts[0].CreatedAt)
-	assert.NotEmpty(t, facts[0].UpdatedAt)
-	assert.Equal(t, firstUpdatedAt, facts[0].UpdatedAt) // Same time on fast upsert
+
+	assert.Equal(t, "Welcome! Updated guide.", retrieved2.Content)
+	assert.ElementsMatch(t, []string{"team"}, retrieved2.Tags)
+	// CreatedAt should not change
+	assert.Equal(t, retrieved1.CreatedAt, retrieved2.CreatedAt)
+	// UpdatedAt should be updated (or at least not before the original)
+	assert.GreaterOrEqual(t, retrieved2.UpdatedAt, firstUpdatedAt)
 }
 
-func TestQueryFacts(t *testing.T) {
+func TestQueryDocumentsByType(t *testing.T) {
 	db := testDB(t)
 
-	_, err := upsertFact(db, "acme-corp", "config", "app-name", "example-service")
+	// Insert documents of different types
+	doc1 := Document{Type: "decision", Project: "acme-corp", Title: "Use PostgreSQL"}
+	doc2 := Document{Type: "fact", Project: "acme-corp", Title: "DB Host"}
+	doc3 := Document{Type: "note", Project: "acme-corp", Title: "Release Notes"}
+
+	_, err := upsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc2)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc3)
 	require.NoError(t, err)
 
-	_, err = upsertFact(db, "acme-corp", "config", "port", "8080")
+	// Query by type
+	summaries, err := queryDocuments(db, "note", "", "", "", nil, 50)
 	require.NoError(t, err)
-
-	_, err = upsertFact(db, "acme-corp", "deployment", "region", "us-west-2")
-	require.NoError(t, err)
-
-	_, err = upsertFact(db, "other-proj", "config", "app-name", "other-service")
-	require.NoError(t, err)
-
-	// Query by project only
-	facts, err := queryFacts(db, "acme-corp", "", "", "", 50)
-	require.NoError(t, err)
-	require.Len(t, facts, 3)
-
-	// Query by project and category
-	facts, err = queryFacts(db, "acme-corp", "config", "", "", 50)
-	require.NoError(t, err)
-	require.Len(t, facts, 2)
-
-	// Query by project, category, and key
-	facts, err = queryFacts(db, "acme-corp", "config", "app-name", "", 50)
-	require.NoError(t, err)
-	require.Len(t, facts, 1)
-	assert.Equal(t, "example-service", facts[0].Value)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "note", summaries[0].Type)
+	assert.Equal(t, "Release Notes", summaries[0].Title)
 }
 
-func TestQueryFactsFTS(t *testing.T) {
+func TestQueryDocumentsByProject(t *testing.T) {
 	db := testDB(t)
 
-	_, err := upsertFact(db, "acme-corp", "config", "database-url", "postgresql://prod.acme-corp.example.com")
+	doc1 := Document{Type: "note", Project: "acme-corp", Title: "Notes 1"}
+	doc2 := Document{Type: "note", Project: "example-org", Title: "Notes 2"}
+
+	_, err := upsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	_, err = upsertFact(db, "acme-corp", "config", "api-key", "secret123")
+	summaries, err := queryDocuments(db, "", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
-
-	// FTS search
-	facts, err := queryFacts(db, "", "", "", "postgresql", 50)
-	require.NoError(t, err)
-	require.Len(t, facts, 1)
-	assert.Equal(t, "database-url", facts[0].Key)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "acme-corp", summaries[0].Project)
 }
 
-func TestDeleteFact(t *testing.T) {
+func TestQueryDocumentsByCategory(t *testing.T) {
 	db := testDB(t)
 
-	_, err := upsertFact(db, "acme-corp", "config", "setting1", "value1")
+	doc1 := Document{Type: "fact", Project: "acme-corp", Category: "config", Title: "App Name"}
+	doc2 := Document{Type: "fact", Project: "acme-corp", Category: "deployment", Title: "Region"}
+
+	_, err := upsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	_, err = upsertFact(db, "acme-corp", "config", "setting2", "value2")
+	summaries, err := queryDocuments(db, "", "", "config", "", nil, 50)
 	require.NoError(t, err)
-
-	err = deleteFact(db, "acme-corp", "config", "setting1")
-	require.NoError(t, err)
-
-	facts, err := queryFacts(db, "acme-corp", "config", "", "", 50)
-	require.NoError(t, err)
-	require.Len(t, facts, 1)
-	assert.Equal(t, "setting2", facts[0].Key)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "config", summaries[0].Category)
 }
 
-func TestInsertAndQueryRelation(t *testing.T) {
+func TestQueryDocumentsFTS(t *testing.T) {
 	db := testDB(t)
 
-	id, err := insertRelation(db, "acme-corp", "example-service", "acme-corp", "database", "depends_on", "example-service depends on database")
-	require.NoError(t, err)
-	require.Greater(t, id, int64(0))
+	doc1 := Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "release-process",
+		Content: "Tag and push to trigger goreleaser",
+	}
+	doc2 := Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "deployment",
+		Content: "Deploy to production",
+	}
 
-	relations, err := queryRelations(db, "acme-corp", "", "", 50)
+	_, err := upsertDocument(db, doc1)
 	require.NoError(t, err)
-	require.Len(t, relations, 1)
+	_, err = upsertDocument(db, doc2)
+	require.NoError(t, err)
 
-	r := relations[0]
-	assert.Equal(t, id, r.ID)
-	assert.Equal(t, "acme-corp", r.SourceProject)
-	assert.Equal(t, "example-service", r.Source)
-	assert.Equal(t, "acme-corp", r.TargetProject)
-	assert.Equal(t, "database", r.Target)
-	assert.Equal(t, "depends_on", r.RelationType)
-	assert.Equal(t, "example-service depends on database", r.Description)
-	assert.NotEmpty(t, r.CreatedAt)
+	summaries, err := queryDocuments(db, "", "", "", "goreleaser", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "release-process", summaries[0].Title)
 }
 
-func TestQueryRelationsByEntity(t *testing.T) {
+func TestQueryDocumentsTagFilter(t *testing.T) {
 	db := testDB(t)
 
-	// Insert relations where entity is both source and target
-	id1, err := insertRelation(db, "acme-corp", "service-a", "acme-corp", "service-b", "depends_on", "")
+	doc1 := Document{Type: "note", Project: "acme-corp", Title: "Release", Tags: []string{"ci", "release"}}
+	doc2 := Document{Type: "note", Project: "acme-corp", Title: "Deploy", Tags: []string{"ci"}}
+	doc3 := Document{Type: "note", Project: "acme-corp", Title: "Monitor", Tags: []string{"ops"}}
+
+	_, err := upsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc2)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc3)
 	require.NoError(t, err)
 
-	id2, err := insertRelation(db, "acme-corp", "service-c", "acme-corp", "service-a", "depends_on", "")
+	// Query for documents with both ci AND release tags
+	summaries, err := queryDocuments(db, "", "", "", "", []string{"ci", "release"}, 50)
 	require.NoError(t, err)
-
-	// Query for service-a should return both relations (as source and as target)
-	relations, err := queryRelations(db, "acme-corp", "service-a", "", 50)
-	require.NoError(t, err)
-	require.Len(t, relations, 2)
-
-	ids := []int64{relations[0].ID, relations[1].ID}
-	assert.ElementsMatch(t, []int64{id1, id2}, ids)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Release", summaries[0].Title)
 }
 
-func TestDeleteRelation(t *testing.T) {
+func TestQueryDocumentsReturnsNoContent(t *testing.T) {
 	db := testDB(t)
 
-	id, err := insertRelation(db, "acme-corp", "service-a", "acme-corp", "service-b", "depends_on", "")
+	doc := Document{
+		Type:     "note",
+		Project:  "acme-corp",
+		Title:    "test",
+		Content:  "This is the content that should not be in summaries",
+		Metadata: map[string]string{"key": "value"},
+	}
+
+	_, err := upsertDocument(db, doc)
 	require.NoError(t, err)
 
-	err = deleteRelation(db, id)
+	summaries, err := queryDocuments(db, "", "", "", "", nil, 50)
 	require.NoError(t, err)
+	require.Len(t, summaries, 1)
 
-	relations, err := queryRelations(db, "acme-corp", "", "", 50)
-	require.NoError(t, err)
-	require.Len(t, relations, 0)
+	// Verify summary does not include content or metadata
+	assert.Equal(t, "test", summaries[0].Title)
+	// DocumentSummary type does not have Content or Metadata fields, so just verify it's a summary
+	assert.Equal(t, int64(1), summaries[0].ID)
 }
 
-func TestSearchAll(t *testing.T) {
+func TestDeleteDocument(t *testing.T) {
 	db := testDB(t)
 
-	// Insert decisions and facts
-	_, err := insertDecision(db, "acme-corp", "Use PostgreSQL", "ACID compliance", []string{"database"})
+	doc := Document{Type: "note", Project: "acme-corp", Title: "to-delete", Content: "content"}
+	id, err := upsertDocument(db, doc)
 	require.NoError(t, err)
 
-	_, err = upsertFact(db, "acme-corp", "config", "db-type", "postgresql")
+	// Verify it exists
+	retrieved, err := getDocument(db, id)
+	require.NoError(t, err)
+	assert.NotNil(t, retrieved)
+
+	// Delete it
+	err = deleteDocument(db, id)
 	require.NoError(t, err)
 
-	// Search
-	result, err := searchAll(db, "postgresql", "", 50)
+	// Verify it's gone
+	retrieved, err = getDocument(db, id)
 	require.NoError(t, err)
-
-	assert.Len(t, result.Decisions, 1)
-	assert.Equal(t, "Use PostgreSQL", result.Decisions[0].Summary)
-
-	assert.Len(t, result.Facts, 1)
-	assert.Equal(t, "db-type", result.Facts[0].Key)
+	assert.Nil(t, retrieved)
 }
 
-func TestSearchAllWithProjectFilter(t *testing.T) {
+func TestGetDocumentNotFound(t *testing.T) {
 	db := testDB(t)
 
-	_, err := insertDecision(db, "acme-corp", "Use PostgreSQL", "", []string{})
+	doc, err := getDocument(db, 999)
+	require.NoError(t, err)
+	assert.Nil(t, doc)
+}
+
+func TestSearchDocuments(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Database Choice",
+		Content: "We chose PostgreSQL for its ACID guarantees",
+	}
+	doc2 := Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "DB Host",
+		Content: "prod-db.example.com",
+	}
+	doc3 := Document{
+		Type:    "note",
+		Project: "example-org",
+		Title:   "API Design",
+		Content: "REST endpoints for service discovery",
+	}
+
+	_, err := upsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc2)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc3)
 	require.NoError(t, err)
 
-	_, err = insertDecision(db, "other-proj", "Use MySQL", "", []string{})
+	summaries, err := searchDocuments(db, "PostgreSQL", "", "", 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Database Choice", summaries[0].Title)
+}
+
+func TestSearchDocumentsWithTypeFilter(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := Document{Type: "decision", Project: "acme-corp", Title: "DB", Content: "PostgreSQL"}
+	doc2 := Document{Type: "note", Project: "acme-corp", Title: "Note", Content: "PostgreSQL info"}
+
+	_, err := upsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	// Search in specific project only
-	result, err := searchAll(db, "postgresql", "acme-corp", 50)
+	summaries, err := searchDocuments(db, "PostgreSQL", "decision", "", 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "decision", summaries[0].Type)
+}
+
+func TestSearchDocumentsWithProjectFilter(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := Document{Type: "note", Project: "acme-corp", Title: "Note 1", Content: "PostgreSQL"}
+	doc2 := Document{Type: "note", Project: "other-proj", Title: "Note 2", Content: "PostgreSQL"}
+
+	_, err := upsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = upsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	assert.Len(t, result.Decisions, 1)
-	assert.Equal(t, "acme-corp", result.Decisions[0].Project)
+	summaries, err := searchDocuments(db, "PostgreSQL", "", "acme-corp", 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "acme-corp", summaries[0].Project)
 }
 
 func TestClampLimit(t *testing.T) {
@@ -303,112 +345,4 @@ func TestClampLimit(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-func TestUpsertNote(t *testing.T) {
-	db := testDB(t)
-
-	id1, err := upsertNote(db, "acme-corp", "procedure", "release-process", "1. Tag\n2. Push\n3. Monitor", []string{"release", "ci"})
-	require.NoError(t, err)
-	require.Greater(t, id1, int64(0))
-
-	note, err := getNote(db, id1)
-	require.NoError(t, err)
-	require.NotNil(t, note)
-	assert.Equal(t, "acme-corp", note.Project)
-	assert.Equal(t, "procedure", note.Category)
-	assert.Equal(t, "release-process", note.Title)
-	assert.Equal(t, "1. Tag\n2. Push\n3. Monitor", note.Body)
-	assert.ElementsMatch(t, []string{"release", "ci"}, note.Tags)
-
-	// Upsert same key with new body
-	id2, err := upsertNote(db, "acme-corp", "procedure", "release-process", "Updated steps", []string{"release"})
-	require.NoError(t, err)
-	assert.Equal(t, id1, id2)
-
-	note, err = getNote(db, id1)
-	require.NoError(t, err)
-	assert.Equal(t, "Updated steps", note.Body)
-	assert.ElementsMatch(t, []string{"release"}, note.Tags)
-}
-
-func TestQueryNotes(t *testing.T) {
-	db := testDB(t)
-
-	_, err := upsertNote(db, "acme-corp", "procedure", "release-process", "steps here", []string{"release"})
-	require.NoError(t, err)
-	_, err = upsertNote(db, "acme-corp", "guide", "onboarding", "welcome guide", []string{"team"})
-	require.NoError(t, err)
-	_, err = upsertNote(db, "other-proj", "procedure", "deploy", "deploy steps", nil)
-	require.NoError(t, err)
-
-	// Query by project
-	notes, err := queryNotes(db, "acme-corp", "", "", nil, 50)
-	require.NoError(t, err)
-	assert.Len(t, notes, 2)
-	// Verify no body in summaries
-	for _, n := range notes {
-		assert.NotEmpty(t, n.Title)
-	}
-
-	// Query by category
-	notes, err = queryNotes(db, "", "procedure", "", nil, 50)
-	require.NoError(t, err)
-	assert.Len(t, notes, 2)
-
-	// Query by project + category
-	notes, err = queryNotes(db, "acme-corp", "procedure", "", nil, 50)
-	require.NoError(t, err)
-	assert.Len(t, notes, 1)
-	assert.Equal(t, "release-process", notes[0].Title)
-}
-
-func TestQueryNotesFTS(t *testing.T) {
-	db := testDB(t)
-
-	_, err := upsertNote(db, "acme-corp", "procedure", "release-process", "Tag and push to trigger goreleaser", nil)
-	require.NoError(t, err)
-	_, err = upsertNote(db, "acme-corp", "guide", "onboarding", "Welcome to the team", nil)
-	require.NoError(t, err)
-
-	notes, err := queryNotes(db, "", "", "goreleaser", nil, 50)
-	require.NoError(t, err)
-	assert.Len(t, notes, 1)
-	assert.Equal(t, "release-process", notes[0].Title)
-}
-
-func TestQueryNotesTagFilter(t *testing.T) {
-	db := testDB(t)
-
-	_, err := upsertNote(db, "acme-corp", "procedure", "release", "body", []string{"ci", "release"})
-	require.NoError(t, err)
-	_, err = upsertNote(db, "acme-corp", "procedure", "deploy", "body", []string{"ci"})
-	require.NoError(t, err)
-
-	notes, err := queryNotes(db, "", "", "", []string{"ci", "release"}, 50)
-	require.NoError(t, err)
-	assert.Len(t, notes, 1)
-	assert.Equal(t, "release", notes[0].Title)
-}
-
-func TestGetNoteNotFound(t *testing.T) {
-	db := testDB(t)
-
-	note, err := getNote(db, 999)
-	require.NoError(t, err)
-	assert.Nil(t, note)
-}
-
-func TestDeleteNote(t *testing.T) {
-	db := testDB(t)
-
-	id, err := upsertNote(db, "acme-corp", "procedure", "release", "body", nil)
-	require.NoError(t, err)
-
-	err = deleteNote(db, id)
-	require.NoError(t, err)
-
-	note, err := getNote(db, id)
-	require.NoError(t, err)
-	assert.Nil(t, note)
 }

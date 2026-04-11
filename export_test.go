@@ -9,87 +9,83 @@ import (
 )
 
 func TestExportMarkdownEmpty(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
-	markdown, err := exportMarkdown(db, "")
+	markdown, err := exportMarkdown(testdb, "", "")
 	require.NoError(t, err)
 
 	// Verify header is present
 	assert.Contains(t, markdown, "# Knowledge Base Export")
 	assert.Contains(t, markdown, "All Projects")
-	assert.Contains(t, markdown, "## Decisions")
-	assert.Contains(t, markdown, "## Facts")
-	assert.Contains(t, markdown, "## Relations")
-
-	// Verify empty section messages
-	assert.Contains(t, markdown, "_No decisions found._")
-	assert.Contains(t, markdown, "_No facts found._")
-	assert.Contains(t, markdown, "_No relations found._")
+	assert.Contains(t, markdown, "_No documents found._")
 }
 
 func TestExportMarkdownWithData(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// Insert test data
-	_, err := insertDecision(db, "acme-corp", "Use PostgreSQL", "ACID compliance", []string{"database", "architecture"})
+	_, err := upsertDocument(testdb, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+		Content: "ACID compliance",
+		Tags:    []string{"database", "architecture"},
+	})
 	require.NoError(t, err)
 
-	_, err = insertDecision(db, "acme-corp", "Containerize services", "Deploy with Docker", []string{"infrastructure"})
+	_, err = upsertDocument(testdb, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Containerize services",
+		Content: "Deploy with Docker",
+		Tags:    []string{"infrastructure"},
+	})
 	require.NoError(t, err)
 
-	_, err = upsertFact(db, "acme-corp", "config", "db-host", "prod.acme-corp.example.com")
-	require.NoError(t, err)
-
-	_, err = upsertFact(db, "acme-corp", "deployment", "region", "us-west-2")
-	require.NoError(t, err)
-
-	_, err = insertRelation(db, "acme-corp", "app-service", "acme-corp", "database", "depends_on", "app requires database")
+	_, err = upsertDocument(testdb, Document{
+		Type:     "fact",
+		Project:  "acme-corp",
+		Category: "config",
+		Title:    "db-host",
+		Content:  "prod.acme-corp.example.com",
+	})
 	require.NoError(t, err)
 
 	// Export
-	markdown, err := exportMarkdown(db, "acme-corp")
+	markdown, err := exportMarkdown(testdb, "acme-corp", "")
 	require.NoError(t, err)
 
-	// Verify decisions section
-	assert.Contains(t, markdown, "## Decisions")
+	// Verify content sections
 	assert.Contains(t, markdown, "Use PostgreSQL")
 	assert.Contains(t, markdown, "ACID compliance")
 	assert.Contains(t, markdown, "database, architecture")
 	assert.Contains(t, markdown, "Containerize services")
 	assert.Contains(t, markdown, "infrastructure")
-
-	// Verify facts section
-	assert.Contains(t, markdown, "## Facts")
-	assert.Contains(t, markdown, "config")
 	assert.Contains(t, markdown, "db-host")
 	assert.Contains(t, markdown, "prod.acme-corp.example.com")
-	assert.Contains(t, markdown, "deployment")
-	assert.Contains(t, markdown, "region")
-	assert.Contains(t, markdown, "us-west-2")
-
-	// Verify relations section
-	assert.Contains(t, markdown, "## Relations")
-	assert.Contains(t, markdown, "app-service")
-	assert.Contains(t, markdown, "database")
-	assert.Contains(t, markdown, "depends_on")
-	assert.Contains(t, markdown, "app requires database")
-
-	// Verify project label
 	assert.Contains(t, markdown, "Project: acme-corp")
 }
 
 func TestExportMarkdownProjectFilter(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// Insert data for two projects
-	_, err := insertDecision(db, "acme-corp", "Decision 1", "", []string{})
+	_, err := upsertDocument(testdb, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Decision 1",
+	})
 	require.NoError(t, err)
 
-	_, err = insertDecision(db, "other-proj", "Decision 2", "", []string{})
+	_, err = upsertDocument(testdb, Document{
+		Type:    "decision",
+		Project: "other-proj",
+		Title:   "Decision 2",
+	})
 	require.NoError(t, err)
 
 	// Export for specific project
-	markdown, err := exportMarkdown(db, "acme-corp")
+	markdown, err := exportMarkdown(testdb, "acme-corp", "")
 	require.NoError(t, err)
 
 	// Verify only acme-corp decision is present
@@ -98,35 +94,52 @@ func TestExportMarkdownProjectFilter(t *testing.T) {
 	assert.Contains(t, markdown, "Project: acme-corp")
 }
 
+func TestExportMarkdownTypeFilter(t *testing.T) {
+	testdb := testDB(t)
+
+	// Insert different types
+	_, err := upsertDocument(testdb, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Decision 1",
+	})
+	require.NoError(t, err)
+
+	_, err = upsertDocument(testdb, Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "Fact 1",
+	})
+	require.NoError(t, err)
+
+	// Export only decisions
+	markdown, err := exportMarkdown(testdb, "", "decision")
+	require.NoError(t, err)
+
+	assert.Contains(t, markdown, "Decision 1")
+	assert.NotContains(t, markdown, "Fact 1")
+	assert.Contains(t, markdown, "Type: decision")
+}
+
 func TestImportJSON(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// Create import payload
 	payload := ImportData{
-		Decisions: []ImportDecision{
+		Documents: []ImportDocument{
 			{
-				Project:   "acme-corp",
-				Summary:   "Use PostgreSQL",
-				Rationale: "ACID compliance",
-				Tags:      []string{"database", "architecture"},
+				Type:    "decision",
+				Project: "acme-corp",
+				Title:   "Use PostgreSQL",
+				Content: "ACID compliance",
+				Tags:    []string{"database", "architecture"},
 			},
-		},
-		Facts: []ImportFact{
 			{
+				Type:     "fact",
 				Project:  "acme-corp",
 				Category: "config",
-				Key:      "db-host",
-				Value:    "prod.acme-corp.example.com",
-			},
-		},
-		Relations: []ImportRelation{
-			{
-				SourceProject: "acme-corp",
-				Source:        "app-service",
-				TargetProject: "acme-corp",
-				Target:        "database",
-				RelationType:  "depends_on",
-				Description:   "app requires database",
+				Title:    "db-host",
+				Content:  "prod.acme-corp.example.com",
 			},
 		},
 	}
@@ -135,51 +148,37 @@ func TestImportJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import
-	err = importJSON(db, "", data)
+	err = importJSON(testdb, "", data)
 	require.NoError(t, err)
 
-	// Verify decision imported (summaries don't include rationale).
-	decisions, err := queryDecisions(db, "acme-corp", nil, "", 50)
+	// Verify decision imported
+	decisions, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
-	assert.Equal(t, "Use PostgreSQL", decisions[0].Summary)
-	assert.ElementsMatch(t, []string{"database", "architecture"}, decisions[0].Tags)
-
-	// Verify rationale via getDecision.
-	full, err := getDecision(db, decisions[0].ID)
-	require.NoError(t, err)
-	assert.Equal(t, "ACID compliance", full.Rationale)
+	assert.Equal(t, "Use PostgreSQL", decisions[0].Title)
 
 	// Verify fact imported
-	facts, err := queryFacts(db, "acme-corp", "config", "db-host", "", 50)
+	facts, err := queryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, facts, 1)
-	assert.Equal(t, "prod.acme-corp.example.com", facts[0].Value)
-
-	// Verify relation imported
-	relations, err := queryRelations(db, "acme-corp", "", "", 50)
-	require.NoError(t, err)
-	require.Len(t, relations, 1)
-	assert.Equal(t, "app-service", relations[0].Source)
-	assert.Equal(t, "database", relations[0].Target)
-	assert.Equal(t, "depends_on", relations[0].RelationType)
+	assert.Equal(t, "db-host", facts[0].Title)
 }
 
 func TestImportJSONDefaultProject(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// Create import payload with items missing project field
 	payload := ImportData{
-		Decisions: []ImportDecision{
+		Documents: []ImportDocument{
 			{
-				Summary: "Decision 1",
+				Type:  "decision",
+				Title: "Decision 1",
 			},
-		},
-		Facts: []ImportFact{
 			{
+				Type:     "fact",
 				Category: "config",
-				Key:      "setting",
-				Value:    "value",
+				Title:    "setting",
+				Content:  "value",
 			},
 		},
 	}
@@ -188,30 +187,31 @@ func TestImportJSONDefaultProject(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import with default project
-	err = importJSON(db, "acme-corp", data)
+	err = importJSON(testdb, "acme-corp", data)
 	require.NoError(t, err)
 
 	// Verify decision used default project
-	decisions, err := queryDecisions(db, "acme-corp", nil, "", 50)
+	decisions, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 	assert.Equal(t, "acme-corp", decisions[0].Project)
 
 	// Verify fact used default project
-	facts, err := queryFacts(db, "acme-corp", "", "", "", 50)
+	facts, err := queryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, facts, 1)
 	assert.Equal(t, "acme-corp", facts[0].Project)
 }
 
 func TestImportJSONMissingProject(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// Create payload with missing project and no default
 	payload := ImportData{
-		Decisions: []ImportDecision{
+		Documents: []ImportDocument{
 			{
-				Summary: "Decision without project",
+				Type:  "decision",
+				Title: "Decision without project",
 			},
 		},
 	}
@@ -220,20 +220,21 @@ func TestImportJSONMissingProject(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import should fail
-	err = importJSON(db, "", data)
+	err = importJSON(testdb, "", data)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing project")
 }
 
 func TestImportDataAutoDetectJSON(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// Create JSON string
 	payload := ImportData{
-		Decisions: []ImportDecision{
+		Documents: []ImportDocument{
 			{
+				Type:    "decision",
 				Project: "acme-corp",
-				Summary: "Decision 1",
+				Title:   "Decision 1",
 			},
 		},
 	}
@@ -241,28 +242,17 @@ func TestImportDataAutoDetectJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import with auto-detection
-	err = importData(db, "", string(data))
+	err = importData(testdb, "", string(data))
 	require.NoError(t, err)
 
 	// Verify imported
-	decisions, err := queryDecisions(db, "acme-corp", nil, "", 50)
+	docs, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
-	require.Len(t, decisions, 1)
-}
-
-func TestImportDataAutoDetectJSONArray(t *testing.T) {
-	db := testDB(t)
-
-	// Create JSON array string
-	jsonStr := `[{"project": "acme-corp", "summary": "Decision"}]`
-
-	// Import with auto-detection (should fail because format is not ImportData)
-	err := importData(db, "", jsonStr)
-	require.Error(t, err)
+	require.Len(t, docs, 1)
 }
 
 func TestImportDataUnsupportedFormat(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// Try to import markdown
 	markdown := `# Decisions
@@ -270,42 +260,54 @@ func TestImportDataUnsupportedFormat(t *testing.T) {
 ## Decision 1
 Summary: Test decision`
 
-	err := importData(db, "", markdown)
+	err := importData(testdb, "", markdown)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported format")
 	assert.Contains(t, err.Error(), "JSON")
 }
 
 func TestImportDataEmpty(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
-	err := importData(db, "", "")
+	err := importData(testdb, "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "empty")
 }
 
-func TestRoundTripExportAndImport(t *testing.T) {
-	db1 := testDB(t)
-	db2 := testDB(t)
+func TestExportImportRoundTrip(t *testing.T) {
+	testdb1 := testDB(t)
+	testdb2 := testDB(t)
 
 	// Insert data into db1
-	_, err := insertDecision(db1, "acme-corp", "Use PostgreSQL", "ACID compliance", []string{"database"})
+	_, err := upsertDocument(testdb1, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+		Content: "ACID compliance",
+		Tags:    []string{"database"},
+	})
 	require.NoError(t, err)
 
-	_, err = insertDecision(db1, "acme-corp", "Docker deployment", "Container orchestration", []string{"infrastructure"})
+	_, err = upsertDocument(testdb1, Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Docker deployment",
+		Content: "Container orchestration",
+		Tags:    []string{"infrastructure"},
+	})
 	require.NoError(t, err)
 
-	_, err = upsertFact(db1, "acme-corp", "config", "db-host", "prod.acme-corp.example.com")
+	_, err = upsertDocument(testdb1, Document{
+		Type:     "fact",
+		Project:  "acme-corp",
+		Category: "config",
+		Title:    "db-host",
+		Content:  "prod.acme-corp.example.com",
+	})
 	require.NoError(t, err)
 
-	_, err = upsertFact(db1, "acme-corp", "deployment", "region", "us-west-2")
-	require.NoError(t, err)
-
-	_, err = insertRelation(db1, "acme-corp", "app", "acme-corp", "database", "depends_on", "")
-	require.NoError(t, err)
-
-	// Export markdown from db1
-	markdown, err := exportMarkdown(db1, "acme-corp")
+	// Export markdown from db1 (verify it works)
+	markdown, err := exportMarkdown(testdb1, "acme-corp", "")
 	require.NoError(t, err)
 	assert.NotEmpty(t, markdown)
 	assert.Contains(t, markdown, "Use PostgreSQL")
@@ -313,41 +315,27 @@ func TestRoundTripExportAndImport(t *testing.T) {
 
 	// Manually create JSON with same data for import into db2
 	importPayload := ImportData{
-		Decisions: []ImportDecision{
+		Documents: []ImportDocument{
 			{
-				Project:   "acme-corp",
-				Summary:   "Use PostgreSQL",
-				Rationale: "ACID compliance",
-				Tags:      []string{"database"},
+				Type:    "decision",
+				Project: "acme-corp",
+				Title:   "Use PostgreSQL",
+				Content: "ACID compliance",
+				Tags:    []string{"database"},
 			},
 			{
-				Project:   "acme-corp",
-				Summary:   "Docker deployment",
-				Rationale: "Container orchestration",
-				Tags:      []string{"infrastructure"},
+				Type:    "decision",
+				Project: "acme-corp",
+				Title:   "Docker deployment",
+				Content: "Container orchestration",
+				Tags:    []string{"infrastructure"},
 			},
-		},
-		Facts: []ImportFact{
 			{
+				Type:     "fact",
 				Project:  "acme-corp",
 				Category: "config",
-				Key:      "db-host",
-				Value:    "prod.acme-corp.example.com",
-			},
-			{
-				Project:  "acme-corp",
-				Category: "deployment",
-				Key:      "region",
-				Value:    "us-west-2",
-			},
-		},
-		Relations: []ImportRelation{
-			{
-				SourceProject: "acme-corp",
-				Source:        "app",
-				TargetProject: "acme-corp",
-				Target:        "database",
-				RelationType:  "depends_on",
+				Title:    "db-host",
+				Content:  "prod.acme-corp.example.com",
 			},
 		},
 	}
@@ -356,105 +344,73 @@ func TestRoundTripExportAndImport(t *testing.T) {
 	require.NoError(t, err)
 
 	// Import into db2
-	err = importJSON(db2, "", data)
+	err = importJSON(testdb2, "", data)
 	require.NoError(t, err)
 
 	// Verify counts match between databases
-	decisions1, err := queryDecisions(db1, "acme-corp", nil, "", 500)
+	docs1, err := queryDocuments(testdb1, "", "acme-corp", "", "", nil, 500)
 	require.NoError(t, err)
 
-	decisions2, err := queryDecisions(db2, "acme-corp", nil, "", 500)
+	docs2, err := queryDocuments(testdb2, "", "acme-corp", "", "", nil, 500)
 	require.NoError(t, err)
 
-	assert.Equal(t, len(decisions1), len(decisions2))
-	assert.Equal(t, 2, len(decisions2))
-
-	facts1, err := queryFacts(db1, "acme-corp", "", "", "", 500)
-	require.NoError(t, err)
-
-	facts2, err := queryFacts(db2, "acme-corp", "", "", "", 500)
-	require.NoError(t, err)
-
-	assert.Equal(t, len(facts1), len(facts2))
-	assert.Equal(t, 2, len(facts2))
-
-	relations1, err := queryRelations(db1, "acme-corp", "", "", 500)
-	require.NoError(t, err)
-
-	relations2, err := queryRelations(db2, "acme-corp", "", "", 500)
-	require.NoError(t, err)
-
-	assert.Equal(t, len(relations1), len(relations2))
-	assert.Equal(t, 1, len(relations2))
+	assert.Equal(t, len(docs1), len(docs2))
+	assert.Equal(t, 3, len(docs2))
 }
 
 func TestImportJSONWhitespace(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// JSON with extra whitespace
 	jsonStr := `
 	{
-		"decisions": [
+		"documents": [
 			{
+				"type": "decision",
 				"project": "acme-corp",
-				"summary": "Test Decision"
+				"title": "Test Decision"
 			}
-		],
-		"facts": [],
-		"relations": []
+		]
 	}`
 
-	err := importData(db, "", jsonStr)
+	err := importData(testdb, "", jsonStr)
 	require.NoError(t, err)
 
-	decisions, err := queryDecisions(db, "acme-corp", nil, "", 50)
+	docs, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
-	require.Len(t, decisions, 1)
-	assert.Equal(t, "Test Decision", decisions[0].Summary)
-}
-
-func TestExportMarkdownEscaping(t *testing.T) {
-	db := testDB(t)
-
-	// Insert data with special markdown characters
-	_, err := insertDecision(db, "acme-corp", "Use | pipe symbol", "Test & ampersand", []string{"tag1", "tag2"})
-	require.NoError(t, err)
-
-	markdown, err := exportMarkdown(db, "acme-corp")
-	require.NoError(t, err)
-
-	// Verify the data is present (markdown tables will handle pipes naturally)
-	assert.Contains(t, markdown, "Use | pipe symbol")
-	assert.Contains(t, markdown, "Test & ampersand")
+	require.Len(t, docs, 1)
+	assert.Equal(t, "Test Decision", docs[0].Title)
 }
 
 func TestImportMultipleProjects(t *testing.T) {
-	db := testDB(t)
+	testdb := testDB(t)
 
 	// Create import payload with multiple projects
 	payload := ImportData{
-		Decisions: []ImportDecision{
+		Documents: []ImportDocument{
 			{
+				Type:    "decision",
 				Project: "acme-corp",
-				Summary: "Decision 1",
+				Title:   "Decision 1",
 			},
 			{
+				Type:    "decision",
 				Project: "other-proj",
-				Summary: "Decision 2",
+				Title:   "Decision 2",
 			},
-		},
-		Facts: []ImportFact{
 			{
+				Type:     "fact",
 				Project:  "acme-corp",
 				Category: "config",
-				Key:      "key1",
-				Value:    "value1",
+				Title:    "key1",
+				Content:  "value1",
 			},
 			{
+				Type:     "fact",
 				Project:  "other-proj",
 				Category: "config",
-				Key:      "key2",
-				Value:    "value2",
+				Title:    "key2",
+				Content:  "value2",
 			},
 		},
 	}
@@ -462,23 +418,23 @@ func TestImportMultipleProjects(t *testing.T) {
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
 
-	err = importJSON(db, "", data)
+	err = importJSON(testdb, "", data)
 	require.NoError(t, err)
 
 	// Verify both projects have data
-	decisions1, err := queryDecisions(db, "acme-corp", nil, "", 50)
+	docs1, err := queryDocuments(testdb, "decision", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
-	assert.Len(t, decisions1, 1)
+	assert.Len(t, docs1, 1)
 
-	decisions2, err := queryDecisions(db, "other-proj", nil, "", 50)
+	docs2, err := queryDocuments(testdb, "decision", "other-proj", "", "", nil, 50)
 	require.NoError(t, err)
-	assert.Len(t, decisions2, 1)
+	assert.Len(t, docs2, 1)
 
-	facts1, err := queryFacts(db, "acme-corp", "", "", "", 50)
+	facts1, err := queryDocuments(testdb, "fact", "acme-corp", "", "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, facts1, 1)
 
-	facts2, err := queryFacts(db, "other-proj", "", "", "", 50)
+	facts2, err := queryDocuments(testdb, "fact", "other-proj", "", "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, facts2, 1)
 }
