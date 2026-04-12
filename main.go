@@ -72,6 +72,8 @@ func main() {
 		server.WithToolCapabilities(true),
 		server.WithInstructions(`Project knowledge base and backlog management — persist decisions across conversations and track work items.
 
+All tools below are MCP tools — call them directly, not via CLI. The ouroboros binary only supports "query" and "items" subcommands for hook integration; it has no CLI for project/item/plan/config management.
+
 KNOWLEDGE BASE (put, get, delete, search, export, import):
 
 Store immediately (put):
