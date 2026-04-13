@@ -60,9 +60,9 @@ func TestHandlePut(t *testing.T) {
 	var resp map[string]interface{}
 	err = unmarshalResult(result, &resp)
 	require.NoError(t, err)
-	ok, okExists := resp["ok"].(bool)
-	require.True(t, okExists)
-	assert.True(t, ok)
+	action, actionExists := resp["action"].(string)
+	require.True(t, actionExists)
+	assert.Equal(t, "created", action)
 	assert.NotZero(t, resp["id"])
 }
 
@@ -86,6 +86,9 @@ func TestHandlePutUpsert(t *testing.T) {
 	id1Float, ok := resp1["id"].(float64)
 	require.True(t, ok)
 	id1 := int64(id1Float)
+	action1, ok := resp1["action"].(string)
+	require.True(t, ok, "action must be a string")
+	assert.Equal(t, "created", action1)
 
 	// Put same document with updated content
 	req2 := makeRequest(map[string]interface{}{
@@ -104,6 +107,9 @@ func TestHandlePutUpsert(t *testing.T) {
 	id2Float, ok := resp2["id"].(float64)
 	require.True(t, ok)
 	id2 := int64(id2Float)
+	action2, ok := resp2["action"].(string)
+	require.True(t, ok, "action must be a string")
+	assert.Equal(t, "updated", action2)
 
 	// IDs should match (upsert)
 	assert.Equal(t, id1, id2)
@@ -125,8 +131,9 @@ func TestHandleGetByID(t *testing.T) {
 		Content: "Full rationale content here",
 		Tags:    []string{"database"},
 	}
-	id, err := store.UpsertDocument(db, doc)
+	upsertResult, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
+	id := upsertResult.ID
 
 	// Get by ID
 	req := makeRequest(map[string]interface{}{
@@ -153,12 +160,13 @@ func TestHandleGetList(t *testing.T) {
 		Title:   "Use PostgreSQL",
 	})
 	require.NoError(t, err)
-	_, err = store.UpsertDocument(db, store.Document{
+	result2, err := store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use gRPC",
 	})
 	require.NoError(t, err)
+	_ = result2
 
 	// Get list (no id)
 	req := makeRequest(map[string]interface{}{
@@ -190,12 +198,13 @@ func TestHandleGetByType(t *testing.T) {
 		Title:   "Decision 1",
 	})
 	require.NoError(t, err)
-	_, err = store.UpsertDocument(db, store.Document{
+	result2, err := store.UpsertDocument(db, store.Document{
 		Type:    "fact",
 		Project: "acme-corp",
 		Title:   "Fact 1",
 	})
 	require.NoError(t, err)
+	_ = result2
 
 	// Filter by type
 	req := makeRequest(map[string]interface{}{
@@ -215,12 +224,13 @@ func TestHandleGetByType(t *testing.T) {
 func TestHandleDelete(t *testing.T) {
 	resetDB(t)
 
-	id, err := store.UpsertDocument(db, store.Document{
+	upsertResult, err := store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
 	})
 	require.NoError(t, err)
+	id := upsertResult.ID
 
 	req := makeRequest(map[string]interface{}{
 		"id": float64(id),
@@ -250,13 +260,14 @@ func TestHandleSearch(t *testing.T) {
 		Content: "Performance benefits",
 	})
 	require.NoError(t, err)
-	_, err = store.UpsertDocument(db, store.Document{
+	result2, err := store.UpsertDocument(db, store.Document{
 		Type:    "fact",
 		Project: "acme-corp",
 		Title:   "Database Type",
 		Content: "PostgreSQL",
 	})
 	require.NoError(t, err)
+	_ = result2
 
 	req := makeRequest(map[string]interface{}{
 		"query": "PostgreSQL",
@@ -274,7 +285,7 @@ func TestHandleSearch(t *testing.T) {
 func TestHandleExport(t *testing.T) {
 	resetDB(t)
 
-	_, err := store.UpsertDocument(db, store.Document{
+	result, err := store.UpsertDocument(db, store.Document{
 		Type:    "decision",
 		Project: "acme-corp",
 		Title:   "Use PostgreSQL",
@@ -282,19 +293,20 @@ func TestHandleExport(t *testing.T) {
 		Tags:    []string{"database"},
 	})
 	require.NoError(t, err)
+	_ = result
 
 	req := makeRequest(map[string]interface{}{
 		"project": "acme-corp",
 		"type":    "decision",
 	})
 
-	result, err := handleExport(context.TODO(), req)
+	exportResult, err := handleExport(context.TODO(), req)
 	require.NoError(t, err)
-	require.NotNil(t, result)
+	require.NotNil(t, exportResult)
 
 	// Extract markdown text from result
-	require.Len(t, result.Content, 1)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.Len(t, exportResult.Content, 1)
+	textContent, ok := mcp.AsTextContent(exportResult.Content[0])
 	require.True(t, ok)
 	markdown := textContent.Text
 
@@ -460,6 +472,129 @@ func TestParseQueryArgs(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestHandlePutWithNotes(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"type":    "decision",
+		"project": "acme-corp",
+		"title":   "Use PostgreSQL",
+		"content": "Superior performance",
+		"notes":   "We chose PostgreSQL because of better query optimization and advanced features.",
+	})
+
+	result, err := handlePut(context.TODO(), req)
+	require.NoError(t, err)
+	var resp map[string]interface{}
+	err = unmarshalResult(result, &resp)
+	require.NoError(t, err)
+	idFloat, ok := resp["id"].(float64)
+	require.True(t, ok)
+	id := int64(idFloat)
+
+	// Get with verbose=true should include notes
+	getReq := makeRequest(map[string]interface{}{
+		"id":      float64(id),
+		"verbose": true,
+	})
+
+	getResult, err := handleGet(context.TODO(), getReq)
+	require.NoError(t, err)
+	var doc store.Document
+	err = unmarshalResult(getResult, &doc)
+	require.NoError(t, err)
+	assert.Equal(t, "Use PostgreSQL", doc.Title)
+	assert.Equal(t, "We chose PostgreSQL because of better query optimization and advanced features.", doc.Notes)
+}
+
+func TestHandleGetVerboseFalse(t *testing.T) {
+	resetDB(t)
+
+	// Insert document with notes
+	result, err := store.UpsertDocument(db, store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+		Content: "Superior performance",
+		Notes:   "Human readable rationale",
+	})
+	require.NoError(t, err)
+	id := result.ID
+
+	// Get with verbose=false (default) should NOT include notes
+	getReq := makeRequest(map[string]interface{}{
+		"id":      float64(id),
+		"verbose": false,
+	})
+
+	getResult, err := handleGet(context.TODO(), getReq)
+	require.NoError(t, err)
+	var doc store.Document
+	err = unmarshalResult(getResult, &doc)
+	require.NoError(t, err)
+	assert.Equal(t, "Use PostgreSQL", doc.Title)
+	assert.Equal(t, "", doc.Notes)
+}
+
+func TestHandlePutContentCap(t *testing.T) {
+	resetDB(t)
+
+	// Create content that exceeds 500 chars
+	longContent := string(make([]byte, 501))
+	for i := 0; i < 501; i++ {
+		longContent = longContent[:i] + "x"
+	}
+
+	req := makeRequest(map[string]interface{}{
+		"type":    "decision",
+		"project": "acme-corp",
+		"title":   "Test",
+		"content": longContent,
+	})
+
+	result, err := handlePut(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+func TestHandlePutAction(t *testing.T) {
+	resetDB(t)
+
+	// First put should return action=created
+	req1 := makeRequest(map[string]interface{}{
+		"type":    "decision",
+		"project": "test-proj",
+		"title":   "Test decision",
+		"content": "Content v1",
+	})
+
+	result1, err := handlePut(context.TODO(), req1)
+	require.NoError(t, err)
+	var resp1 map[string]interface{}
+	err = unmarshalResult(result1, &resp1)
+	require.NoError(t, err)
+	action1, ok := resp1["action"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "created", action1)
+
+	// Second put with same title should return action=updated
+	req2 := makeRequest(map[string]interface{}{
+		"type":    "decision",
+		"project": "test-proj",
+		"title":   "Test decision",
+		"content": "Content v2",
+	})
+
+	result2, err := handlePut(context.TODO(), req2)
+	require.NoError(t, err)
+	var resp2 map[string]interface{}
+	err = unmarshalResult(result2, &resp2)
+	require.NoError(t, err)
+	action2, ok := resp2["action"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "updated", action2)
 }
 
 // Helper to extract text from tool result and unmarshal JSON.

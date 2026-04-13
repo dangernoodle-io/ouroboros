@@ -60,3 +60,14 @@ Default DB path: `~/.local/share/ouroboros/kb.db`
 
 - `github.com/mark3labs/mcp-go` — MCP server framework
 - `modernc.org/sqlite` — pure Go SQLite driver (CGO_ENABLED=0 safe)
+
+## Guiding principle: token conservation
+
+ouroboros exists to replace ~14K tokens of unconditional project context loading with on-demand queryable retrieval. Every tool, output format, and default must honor that reason for existing. Concretely:
+
+- **Compact by default.** List/search operations return ID + title + priority/tags only — never full content. Full content is fetched by explicit ID (`get id=...`, `item id=...`) and only when the caller has already decided it's needed.
+- **Summaries have a hard ceiling.** Keep one-line summaries scannable; prefer a short title over a paragraph. Detailed context belongs in the body, fetched on demand.
+- **Design changes must not bloat default output.** Any new field added to list responses is a cost multiplier across every call — justify it or put it behind an explicit flag.
+- **Tool descriptions are context too.** MCP tool descriptions load on every session — keep them tight. One sentence of purpose, one sentence of mode-selection if the tool is overloaded.
+
+When in doubt: the caller can always ask for more. They cannot un-spend tokens on output they didn't need.

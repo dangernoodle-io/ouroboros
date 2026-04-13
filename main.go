@@ -91,10 +91,9 @@ Checkpoints:
 - Before reporting a task as complete to the user, ask yourself: "if a new conversation started this task from scratch, what would it need to know?" — persist that
 
 Query (get/search):
-- Before making decisions that may have prior context
-- When the user asks about past decisions, project history, or "why" questions
+- Before decisions that may have prior context, when user asks about past decisions/history
+- get without id returns summaries; verbose=false (default) for routine lookups; verbose=true for "why" questions
 - Prefer search for broad queries, get with filters for known types/projects
-- get without id returns compact summaries (no content) — use get with id only when full content is needed
 - After modifying code, check if related KB entries need updating
 
 Staleness:
@@ -104,9 +103,7 @@ Do not store: trivial implementation details, information derivable from code or
 
 BACKLOG (project, item, plan, config):
 
-Projects:
-- Use project tool to create and list projects
-- Projects have a name and auto-derived prefix (e.g., acme-corp → AC)
+Projects: Use project tool to create and list. Projects have a name and auto-derived prefix (e.g., acme-corp → AC).
 
 Items:
 - Use item tool — mode determined by inputs:
@@ -125,8 +122,7 @@ Plans:
   - no id or title → list
 - Status lifecycle: draft → active → complete
 
-Config:
-- Use config tool for key-value settings (no args = list all, key = get, key + value = set)`),
+Config: Use config tool for key-value settings (no args = list all, key = get, key + value = set).`),
 	)
 
 	registerTools(s)
@@ -165,7 +161,13 @@ func handlePut(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 	}
 
 	content, _ := req.GetArguments()["content"].(string)
+	notes, _ := req.GetArguments()["notes"].(string)
 	category, _ := req.GetArguments()["category"].(string)
+
+	// Enforce 500-char hard cap on content
+	if len(content) > 500 {
+		return mcp.NewToolResultError(fmt.Sprintf("content exceeds 500 char hard cap (got %d). Move narrative into notes field.", len(content))), nil //nolint:nilerr
+	}
 
 	// Parse metadata from JSON string
 	var metadata map[string]string
@@ -191,16 +193,17 @@ func handlePut(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 		Category: category,
 		Title:    title,
 		Content:  content,
+		Notes:    notes,
 		Metadata: metadata,
 		Tags:     tags,
 	}
 
-	id, err := store.UpsertDocument(db, doc)
+	result, err := store.UpsertDocument(db, doc)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return jsonResult(map[string]interface{}{"id": id, "ok": true})
+	return jsonResult(map[string]interface{}{"id": result.ID, "action": result.Action})
 }
 
 func handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -213,6 +216,13 @@ func handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 		if doc == nil {
 			return mcp.NewToolResultError("document not found"), nil
 		}
+
+		// Check verbose flag
+		verbose, _ := req.GetArguments()["verbose"].(bool)
+		if !verbose {
+			doc.Notes = ""
+		}
+
 		return jsonResult(doc)
 	}
 

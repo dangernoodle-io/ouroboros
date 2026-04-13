@@ -32,12 +32,14 @@ func TestUpsertAndGetDocument(t *testing.T) {
 		Tags:     []string{"release", "ci"},
 	}
 
-	id, err := store.UpsertDocument(db, doc)
+	result, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
-	require.Greater(t, id, int64(0))
+	require.NotNil(t, result)
+	require.Greater(t, result.ID, int64(0))
+	assert.Equal(t, "created", result.Action)
 
 	// Verify full document includes content and metadata
-	retrieved, err := store.GetDocument(db, id)
+	retrieved, err := store.GetDocument(db, result.ID)
 	require.NoError(t, err)
 	require.NotNil(t, retrieved)
 
@@ -64,8 +66,10 @@ func TestUpsertUpdatesExisting(t *testing.T) {
 		Tags:     []string{"team", "new-hire"},
 	}
 
-	id1, err := store.UpsertDocument(db, doc1)
+	result1, err := store.UpsertDocument(db, doc1)
 	require.NoError(t, err)
+	assert.Equal(t, "created", result1.Action)
+	id1 := result1.ID
 
 	retrieved1, err := store.GetDocument(db, id1)
 	require.NoError(t, err)
@@ -81,11 +85,12 @@ func TestUpsertUpdatesExisting(t *testing.T) {
 		Tags:     []string{"team"},
 	}
 
-	id2, err := store.UpsertDocument(db, doc2)
+	result2, err := store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
+	assert.Equal(t, "updated", result2.Action)
 
 	// Should be same ID
-	assert.Equal(t, id1, id2)
+	assert.Equal(t, id1, result2.ID)
 
 	retrieved2, err := store.GetDocument(db, id1)
 	require.NoError(t, err)
@@ -231,8 +236,9 @@ func TestDeleteDocument(t *testing.T) {
 	db := testDB(t)
 
 	doc := store.Document{Type: "note", Project: "acme-corp", Title: "to-delete", Content: "content"}
-	id, err := store.UpsertDocument(db, doc)
+	result, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
+	id := result.ID
 
 	// Verify it exists
 	retrieved, err := store.GetDocument(db, id)
@@ -477,8 +483,8 @@ func TestMigrationVersionTracking(t *testing.T) {
 		versions = append(versions, v)
 	}
 
-	// Should have recorded migrations 1, 2, and 3
-	assert.Equal(t, []int{1, 2, 3}, versions)
+	// Should have recorded migrations 1, 2, 3, and 4
+	assert.Equal(t, []int{1, 2, 3, 4}, versions)
 
 	// Verify applied_at is set (not NULL)
 	var appliedAt string
@@ -524,6 +530,45 @@ func TestProjectIdColumnExists(t *testing.T) {
 	}
 
 	assert.Contains(t, columnNames, "project_id")
+}
+
+func TestNotesColumnExists(t *testing.T) {
+	db := testDB(t)
+
+	// Insert document with notes
+	doc := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+		Content: "Superior performance",
+		Notes:   "Chosen for ACID guarantees and advanced features",
+	}
+	result, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	// Retrieve and verify notes are persisted
+	retrieved, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Chosen for ACID guarantees and advanced features", retrieved.Notes)
+
+	// Verify notes column exists in schema
+	rows, err := db.Query("PRAGMA table_info(documents)")
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var columnNames []string
+	for rows.Next() {
+		var cid int
+		var name string
+		var typ string
+		var notnull int
+		var dfltValue *string
+		var pk int
+		require.NoError(t, rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk))
+		columnNames = append(columnNames, name)
+	}
+
+	assert.Contains(t, columnNames, "notes")
 }
 
 func TestKeywordSearch(t *testing.T) {

@@ -23,6 +23,7 @@ type Document struct {
 	Category  string            `json:"category,omitempty"`
 	Title     string            `json:"title"`
 	Content   string            `json:"content,omitempty"`
+	Notes     string            `json:"notes,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	Tags      []string          `json:"tags,omitempty"`
 	CreatedAt string            `json:"created_at"`
@@ -149,6 +150,10 @@ var migrations = []struct {
 	{
 		version: 3,
 		sql:     `ALTER TABLE documents ADD COLUMN project_id INTEGER REFERENCES projects(id);`,
+	},
+	{
+		version: 4,
+		sql:     `ALTER TABLE documents ADD COLUMN notes TEXT NOT NULL DEFAULT '';`,
 	},
 }
 
