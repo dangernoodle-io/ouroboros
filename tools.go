@@ -66,15 +66,17 @@ func registerTools(s *server.MCPServer) {
 	), withRecover(handleProject(db, bk)))
 
 	s.AddTool(mcp.NewTool("item",
-		mcp.WithDescription("Manage backlog items. With id + fields: update. With id only: get full detail. With project + priority + title: create. With filters only: list compact summaries. Set status to 'done' to close an item."),
+		mcp.WithDescription("Manage backlog items. description is terse agent-facing body; notes is optional human narrative. With id + fields: update. With id only: get full detail. With project + priority + title: create. With filters only: list compact summaries. Set status to 'done' to close an item."),
 		mcp.WithString("id", mcp.Description("Item ID (e.g., AC-1) for get/update")),
 		mcp.WithString("project", mcp.Description("Project name (create or filter)")),
 		mcp.WithString("priority", mcp.Description("Priority P0-P6 (create or update)")),
 		mcp.WithString("title", mcp.Description("Item title (create or update)")),
-		mcp.WithString("description", mcp.Description("Item description (create or update)")),
+		mcp.WithString("description", mcp.Description("Terse body, ≤300 chars target, 500 hard cap. Agent-facing content. Narrative belongs in notes.")),
+		mcp.WithString("notes", mcp.Description("Optional human-facing narrative — rationale, trade-offs, context. Returned only when item is fetched with verbose=true.")),
 		mcp.WithString("status", mcp.Description("Item status: open or done (update or filter)")),
 		mcp.WithString("priority_min", mcp.Description("Minimum priority filter (e.g., P0)")),
 		mcp.WithString("priority_max", mcp.Description("Maximum priority filter (e.g., P2)")),
+		mcp.WithBoolean("verbose", mcp.Description("Include notes field. Default false. Set true ONLY when user asks 'why' / rationale / history.")),
 	), withRecover(handleItem(db, bk)))
 
 	s.AddTool(mcp.NewTool("plan",

@@ -13,12 +13,13 @@ type Item struct {
 	Priority    string `json:"priority"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	Notes       string `json:"notes,omitempty"`
 	Status      string `json:"status"`
 	Created     string `json:"created"`
 	Updated     string `json:"updated"`
 }
 
-func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description string) (*Item, error) {
+func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, notes string) (*Item, error) {
 	tx, err := d.Begin()
 	if err != nil {
 		return nil, err
@@ -35,8 +36,8 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description st
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err = tx.Exec(
-		"INSERT INTO items (id, project_id, seq, priority, title, description, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)",
-		id, projectID, seq, priority, title, description, now, now,
+		"INSERT INTO items (id, project_id, seq, priority, title, description, notes, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
+		id, projectID, seq, priority, title, description, notes, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("add item: %w", err)
@@ -48,7 +49,7 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description st
 
 	return &Item{
 		ID: id, ProjectID: projectID, Priority: priority,
-		Title: title, Description: description, Status: "open",
+		Title: title, Description: description, Notes: notes, Status: "open",
 		Created: now, Updated: now,
 	}, nil
 }
@@ -56,8 +57,8 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description st
 func GetItem(d *sql.DB, id string) (*Item, error) {
 	var item Item
 	err := d.QueryRow(
-		"SELECT id, project_id, priority, title, description, status, created, updated FROM items WHERE id = ?", id,
-	).Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Description, &item.Status, &item.Created, &item.Updated)
+		"SELECT id, project_id, priority, title, description, notes, status, created, updated FROM items WHERE id = ?", id,
+	).Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Description, &item.Notes, &item.Status, &item.Created, &item.Updated)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("item not found: %s", id)
 	}
@@ -68,7 +69,7 @@ func GetItem(d *sql.DB, id string) (*Item, error) {
 }
 
 func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
-	allowed := map[string]bool{"priority": true, "title": true, "description": true, "status": true}
+	allowed := map[string]bool{"priority": true, "title": true, "description": true, "notes": true, "status": true}
 
 	var sets []string
 	var args []interface{}
