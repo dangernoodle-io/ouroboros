@@ -103,7 +103,7 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 		if hasID && id != "" {
 			// Check for update fields
 			fields := make(map[string]string)
-			for _, key := range []string{"priority", "title", "description", "status"} {
+			for _, key := range []string{"priority", "title", "description", "notes", "status"} {
 				if v, ok := req.GetArguments()[key].(string); ok && v != "" {
 					fields[key] = v
 				}
@@ -123,6 +123,13 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 				}
 
 				backupCommit(bk, fmt.Sprintf("update: %s", id))
+
+				// Check verbose flag
+				verbose, _ := req.GetArguments()["verbose"].(bool)
+				if !verbose {
+					item.Notes = ""
+				}
+
 				return jsonResult(item)
 			}
 
@@ -131,6 +138,13 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
+
+			// Check verbose flag
+			verbose, _ := req.GetArguments()["verbose"].(bool)
+			if !verbose {
+				item.Notes = ""
+			}
+
 			return jsonResult(item)
 		}
 
@@ -154,7 +168,17 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 				desc = v
 			}
 
-			item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc)
+			// Enforce 500-char hard cap on description
+			if len(desc) > 500 {
+				return mcp.NewToolResultError(fmt.Sprintf("description exceeds 500 char hard cap (got %d). Move narrative into the notes field.", len(desc))), nil //nolint:nilerr
+			}
+
+			notes := ""
+			if v, ok := req.GetArguments()["notes"].(string); ok {
+				notes = v
+			}
+
+			item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc, notes)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

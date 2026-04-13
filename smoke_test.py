@@ -213,45 +213,69 @@ r, err = tool(23, "item", {"project": "acme-corp", "status": "open"})
 print(r if isinstance(r, str) else json.dumps(r, indent=2))
 assert not err, f"item list open failed: {r}"
 
+print("\n--- ITEM: create with notes ---")
+r, err = tool(23, "item", {"project": "acme-corp", "priority": "P2", "title": "Design database schema", "description": "Schema for user and project tables", "notes": "Trade-off: normalized design preferred over performance; will add indices as needed"})
+print(json.dumps(r))
+assert not err, f"item create with notes failed: {r}"
+item_with_notes_id = r.get("id", "AC-3")
+
+print("\n--- ITEM: get with notes (verbose=false, default) ---")
+r, err = tool(24, "item", {"id": item_with_notes_id})
+print(json.dumps(r, indent=2))
+assert not err, f"item get failed: {r}"
+assert r.get("notes", "") == "", f"expected empty notes when verbose=false, got: {r.get('notes')}"
+
+print("\n--- ITEM: get with notes (verbose=true) ---")
+r, err = tool(25, "item", {"id": item_with_notes_id, "verbose": True})
+print(json.dumps(r, indent=2))
+assert not err, f"item get verbose failed: {r}"
+assert "Trade-off" in r.get("notes", ""), f"expected notes to contain rationale when verbose=true, got: {r.get('notes')}"
+
+print("\n--- ITEM: create with oversized description (should fail) ---")
+r, err = tool(26, "item", {"project": "acme-corp", "priority": "P1", "title": "Big task", "description": "x" * 501})
+print(json.dumps(r) if isinstance(r, str) else r)
+assert err, f"expected error for 501-char description, got success: {r}"
+assert "500 char hard cap" in str(r), f"expected cap error message, got: {r}"
+
 print("\n--- PLAN: create ---")
-r, err = tool(24, "plan", {"title": "Auth implementation plan", "content": "## Steps\n1. Add OAuth2 provider\n2. Create middleware\n3. Write tests", "project": "acme-corp"})
+r, err = tool(27, "plan", {"title": "Auth implementation plan", "content": "## Steps\n1. Add OAuth2 provider\n2. Create middleware\n3. Write tests", "project": "acme-corp"})
 print(json.dumps(r))
 assert not err, f"plan create failed: {r}"
 
 print("\n--- PLAN: get ---")
-r, err = tool(25, "plan", {"id": 1})
+r, err = tool(28, "plan", {"id": 1})
 print(json.dumps(r, indent=2))
 assert not err, f"plan get failed: {r}"
 
 print("\n--- PLAN: update ---")
-r, err = tool(26, "plan", {"id": 1, "status": "active"})
+r, err = tool(29, "plan", {"id": 1, "status": "active"})
 print(json.dumps(r))
 assert not err, f"plan update failed: {r}"
 
 print("\n--- PLAN: list ---")
-r, err = tool(27, "plan")
+r, err = tool(30, "plan")
 print(json.dumps(r, indent=2))
 assert not err, f"plan list failed: {r}"
 
 print("\n--- CONFIG: set ---")
-r, err = tool(28, "config", {"key": "theme", "value": "dark"})
+r, err = tool(31, "config", {"key": "theme", "value": "dark"})
 print(json.dumps(r))
 assert not err, f"config set failed: {r}"
 
 print("\n--- CONFIG: get ---")
-r, err = tool(29, "config", {"key": "theme"})
+r, err = tool(32, "config", {"key": "theme"})
 print(json.dumps(r))
 assert not err, f"config get failed: {r}"
 
 print("\n--- CONFIG: list all ---")
-r, err = tool(30, "config")
+r, err = tool(33, "config")
 print(json.dumps(r, indent=2))
 assert not err, f"config list failed: {r}"
 
 # --- NEW: Test notes field and verbose flag ---
 
 print("\n--- PUT: with notes field ---")
-r, err = tool(31, "put", {
+r, err = tool(34, "put", {
     "type": "decision",
     "project": "test-notes",
     "title": "Use Redis",
@@ -264,20 +288,20 @@ assert r["action"] == "created", f"expected action=created, got {r}"
 notes_doc_id = r["id"]
 
 print("\n--- GET with verbose=true ---")
-r, err = tool(32, "get", {"id": notes_doc_id, "verbose": True})
+r, err = tool(35, "get", {"id": notes_doc_id, "verbose": True})
 print(json.dumps(r))
 assert not err, f"get verbose=true failed: {r}"
 assert r["notes"] == "Redis chosen for 100ms latency target. Considered Memcached but Redis has better data structures.", f"notes mismatch: {r}"
 
 print("\n--- GET with verbose=false (default) ---")
-r, err = tool(33, "get", {"id": notes_doc_id, "verbose": False})
+r, err = tool(36, "get", {"id": notes_doc_id, "verbose": False})
 print(json.dumps(r))
 assert not err, f"get verbose=false failed: {r}"
 assert "notes" not in r or r["notes"] == "", f"notes should be absent or empty with verbose=false, got: {r}"
 
 print("\n--- PUT: content hard cap validation ---")
 long_content = "x" * 501
-r, err = tool(34, "put", {
+r, err = tool(37, "put", {
     "type": "decision",
     "project": "test-notes",
     "title": "Oversized",
@@ -287,7 +311,7 @@ print(json.dumps(r))
 assert err, f"expected error for oversized content, got: {r}"
 
 print("\n--- PUT: action=updated on second put ---")
-r, err = tool(35, "put", {
+r, err = tool(38, "put", {
     "type": "decision",
     "project": "test-notes",
     "title": "Use Redis",
