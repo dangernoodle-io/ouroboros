@@ -16,9 +16,8 @@ make lint     # golangci-lint run
 
 ## Project layout
 
-- `main.go` — MCP server entry point, KB handlers, CLI subcommands
-- `tools.go` — MCP tool registration (KB + backlog)
-- `handlers.go` — backlog handler implementations
+- `main.go` — thin wrapper, delegates to `internal/app.Run`
+- `internal/app/` — entry point, MCP server setup, tool handlers, CLI subcommands
 - `internal/store/` — SQLite schema, migrations, KB CRUD, FTS5 search
 - `internal/backlog/` — backlog CRUD (projects, items, plans, config)
 - `internal/backup/` — git backup operations

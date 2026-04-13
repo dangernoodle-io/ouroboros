@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -9,7 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
+	"dangernoodle.io/ouroboros/internal/backup"
 )
+
+var bk *backup.Backup
 
 func resetAllDB(t *testing.T) {
 	t.Helper()
