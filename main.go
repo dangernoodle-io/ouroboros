@@ -166,6 +166,7 @@ func handlePut(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResul
 
 	// Enforce 500-char hard cap on content
 	if len(content) > 500 {
+		fmt.Fprintf(os.Stderr, "ouroboros put cap reject: project=%q title=%q len(content)=%d len(notes)=%d\n", project, title, len(content), len(notes))
 		return mcp.NewToolResultError(fmt.Sprintf("content exceeds 500 char hard cap (got %d). Move narrative into notes field.", len(content))), nil //nolint:nilerr
 	}
 

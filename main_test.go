@@ -559,6 +559,91 @@ func TestHandlePutContentCap(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
+func TestHandlePutAcceptsContentUnderCap(t *testing.T) {
+	resetDB(t)
+
+	// Content exactly at 500 chars should succeed
+	content500 := string(make([]byte, 500))
+	for i := 0; i < 500; i++ {
+		content500 = content500[:i] + "x"
+	}
+
+	req := makeRequest(map[string]interface{}{
+		"type":    "decision",
+		"project": "acme-corp",
+		"title":   "Test 500",
+		"content": content500,
+	})
+
+	result, err := handlePut(context.TODO(), req)
+	require.NoError(t, err)
+	assert.False(t, result.IsError, "content of exactly 500 chars should succeed")
+
+	var resp map[string]interface{}
+	err = unmarshalResult(result, &resp)
+	require.NoError(t, err)
+	action, ok := resp["action"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "created", action)
+
+	// Content with 501 chars should reject with "got 501" in error message
+	content501 := content500 + "x"
+	req2 := makeRequest(map[string]interface{}{
+		"type":    "decision",
+		"project": "acme-corp",
+		"title":   "Test 501",
+		"content": content501,
+	})
+
+	result2, err := handlePut(context.TODO(), req2)
+	require.NoError(t, err)
+	assert.True(t, result2.IsError, "content of 501 chars should be rejected")
+	assert.Len(t, result2.Content, 1)
+	errContent, ok := mcp.AsTextContent(result2.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, errContent.Text, "got 501", "error message should specify the actual length")
+}
+
+func TestHandlePutPreservesContentLengthIndependentOfNotes(t *testing.T) {
+	resetDB(t)
+
+	// content=260 chars + notes=830 chars, both should succeed and preserve lengths
+	content260 := string(make([]byte, 260))
+	for i := 0; i < 260; i++ {
+		content260 = content260[:i] + "a"
+	}
+	notes830 := string(make([]byte, 830))
+	for i := 0; i < 830; i++ {
+		notes830 = notes830[:i] + "b"
+	}
+
+	req := makeRequest(map[string]interface{}{
+		"type":    "fact",
+		"project": "acme-corp",
+		"title":   "OU-24 regression test",
+		"content": content260,
+		"notes":   notes830,
+	})
+
+	result, err := handlePut(context.TODO(), req)
+	require.NoError(t, err)
+	assert.False(t, result.IsError, "put with content=260 and notes=830 should succeed")
+
+	var resp map[string]interface{}
+	err = unmarshalResult(result, &resp)
+	require.NoError(t, err)
+	idFloat, ok := resp["id"].(float64)
+	require.True(t, ok)
+	id := int64(idFloat)
+
+	// Retrieve and verify stored content length is intact
+	doc, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.Equal(t, 260, len(doc.Content), "stored content length should match sent content length")
+	assert.Equal(t, 830, len(doc.Notes), "stored notes length should match sent notes length")
+}
+
 func TestHandlePutAction(t *testing.T) {
 	resetDB(t)
 
