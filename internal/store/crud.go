@@ -9,6 +9,12 @@ import (
 	"unicode"
 )
 
+// UpsertResult indicates whether a document was created or updated.
+type UpsertResult struct {
+	ID     int64  `json:"id"`
+	Action string `json:"action"` // "created" or "updated"
+}
+
 // stopWords are filtered from keyword search queries to reduce noise from natural-language prompts.
 var stopWords = map[string]bool{
 	"a": true, "an": true, "the": true, "is": true, "are": true,
@@ -61,7 +67,7 @@ func KeywordSearch(db *sql.DB, query, project string, limit int) ([]DocumentSumm
 	}
 	ftsQuery := strings.Join(quoted, " OR ")
 
-	limit = ClampLimit(limit, 50, 500)
+	limit = ClampLimit(limit, 10, 500)
 
 	sqlQuery := `SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at
 		FROM documents d
@@ -101,35 +107,43 @@ func KeywordSearch(db *sql.DB, query, project string, limit int) ([]DocumentSumm
 }
 
 // UpsertDocument inserts or updates a document record using ON CONFLICT.
-// Returns the ID of the inserted/updated document.
-func UpsertDocument(db *sql.DB, doc Document) (int64, error) {
+// Returns UpsertResult with ID and action (created/updated).
+func UpsertDocument(db *sql.DB, doc Document) (*UpsertResult, error) {
 	dbMu.Lock()
 	defer dbMu.Unlock()
 
 	metadataJSON, err := json.Marshal(doc.Metadata)
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal metadata: %w", err)
+		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
 	tagsJSON, err := json.Marshal(doc.Tags)
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal tags: %w", err)
+		return nil, fmt.Errorf("failed to marshal tags: %w", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Check if document exists before insert
+	var existingID int64
+	err = db.QueryRow(
+		"SELECT id FROM documents WHERE type = ? AND project = ? AND category = ? AND title = ?",
+		doc.Type, doc.Project, doc.Category, doc.Title,
+	).Scan(&existingID)
+	isUpdate := err == nil
+
 	_, err = db.Exec(`
-		INSERT INTO documents (type, project, category, title, content, metadata, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(type, project, category, title)
-		DO UPDATE SET content = excluded.content, metadata = excluded.metadata, tags = excluded.tags, updated_at = excluded.updated_at
-	`, doc.Type, doc.Project, doc.Category, doc.Title, doc.Content, string(metadataJSON), string(tagsJSON), now, now)
+		DO UPDATE SET content = excluded.content, notes = excluded.notes, metadata = excluded.metadata, tags = excluded.tags, updated_at = excluded.updated_at
+	`, doc.Type, doc.Project, doc.Category, doc.Title, doc.Content, doc.Notes, string(metadataJSON), string(tagsJSON), now, now)
 	if err != nil {
-		return 0, fmt.Errorf("failed to upsert document: %w", err)
+		return nil, fmt.Errorf("failed to upsert document: %w", err)
 	}
 
 	if err := RebuildFTS(db); err != nil {
-		return 0, fmt.Errorf("failed to rebuild FTS: %w", err)
+		return nil, fmt.Errorf("failed to rebuild FTS: %w", err)
 	}
 
 	// Get the ID of the inserted/updated row
@@ -139,10 +153,15 @@ func UpsertDocument(db *sql.DB, doc Document) (int64, error) {
 		doc.Type, doc.Project, doc.Category, doc.Title,
 	).Scan(&id)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get document ID: %w", err)
+		return nil, fmt.Errorf("failed to get document ID: %w", err)
 	}
 
-	return id, nil
+	action := "created"
+	if isUpdate {
+		action = "updated"
+	}
+
+	return &UpsertResult{ID: id, Action: action}, nil
 }
 
 // GetDocument returns a full Document by ID. Returns nil, nil if not found.
@@ -150,17 +169,22 @@ func GetDocument(db *sql.DB, id int64) (*Document, error) {
 	var doc Document
 	var metadataJSON sql.NullString
 	var tagsJSON sql.NullString
+	var notes sql.NullString
 
 	err := db.QueryRow(`
-		SELECT id, type, project, category, title, content, metadata, tags, created_at, updated_at
+		SELECT id, type, project, category, title, content, notes, metadata, tags, created_at, updated_at
 		FROM documents WHERE id = ?
-	`, id).Scan(&doc.ID, &doc.Type, &doc.Project, &doc.Category, &doc.Title, &doc.Content, &metadataJSON, &tagsJSON, &doc.CreatedAt, &doc.UpdatedAt)
+	`, id).Scan(&doc.ID, &doc.Type, &doc.Project, &doc.Category, &doc.Title, &doc.Content, &notes, &metadataJSON, &tagsJSON, &doc.CreatedAt, &doc.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get document: %w", err)
+	}
+
+	if notes.Valid {
+		doc.Notes = notes.String
 	}
 
 	if metadataJSON.Valid {
@@ -181,7 +205,7 @@ func GetDocument(db *sql.DB, id int64) (*Document, error) {
 // QueryDocuments queries documents with optional filters (type, project, category, FTS, tags).
 // Returns DocumentSummary (no content, no metadata) to conserve tokens.
 func QueryDocuments(db *sql.DB, docType, project, category, ftsQuery string, tags []string, limit int) ([]DocumentSummary, error) {
-	limit = ClampLimit(limit, 50, 500)
+	limit = ClampLimit(limit, 10, 500)
 
 	var query string
 	var args []interface{}
@@ -326,7 +350,7 @@ func hasSearchableTokens(q string) bool {
 // SearchDocuments performs a full-text search across all documents.
 // Returns DocumentSummary (no content, no metadata).
 func SearchDocuments(db *sql.DB, query, docType, project string, limit int) ([]DocumentSummary, error) {
-	limit = ClampLimit(limit, 50, 500)
+	limit = ClampLimit(limit, 10, 500)
 
 	// If query has no searchable tokens (only punctuation/wildcards), fall back to list mode
 	if !hasSearchableTokens(query) {

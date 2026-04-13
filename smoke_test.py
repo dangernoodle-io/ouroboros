@@ -248,5 +248,55 @@ r, err = tool(30, "config")
 print(json.dumps(r, indent=2))
 assert not err, f"config list failed: {r}"
 
+# --- NEW: Test notes field and verbose flag ---
+
+print("\n--- PUT: with notes field ---")
+r, err = tool(31, "put", {
+    "type": "decision",
+    "project": "test-notes",
+    "title": "Use Redis",
+    "content": "Fast caching",
+    "notes": "Redis chosen for 100ms latency target. Considered Memcached but Redis has better data structures.",
+})
+print(json.dumps(r))
+assert not err, f"put with notes failed: {r}"
+assert r["action"] == "created", f"expected action=created, got {r}"
+notes_doc_id = r["id"]
+
+print("\n--- GET with verbose=true ---")
+r, err = tool(32, "get", {"id": notes_doc_id, "verbose": True})
+print(json.dumps(r))
+assert not err, f"get verbose=true failed: {r}"
+assert r["notes"] == "Redis chosen for 100ms latency target. Considered Memcached but Redis has better data structures.", f"notes mismatch: {r}"
+
+print("\n--- GET with verbose=false (default) ---")
+r, err = tool(33, "get", {"id": notes_doc_id, "verbose": False})
+print(json.dumps(r))
+assert not err, f"get verbose=false failed: {r}"
+assert "notes" not in r or r["notes"] == "", f"notes should be absent or empty with verbose=false, got: {r}"
+
+print("\n--- PUT: content hard cap validation ---")
+long_content = "x" * 501
+r, err = tool(34, "put", {
+    "type": "decision",
+    "project": "test-notes",
+    "title": "Oversized",
+    "content": long_content,
+})
+print(json.dumps(r))
+assert err, f"expected error for oversized content, got: {r}"
+
+print("\n--- PUT: action=updated on second put ---")
+r, err = tool(35, "put", {
+    "type": "decision",
+    "project": "test-notes",
+    "title": "Use Redis",
+    "content": "Fast caching v2",
+    "notes": "Updated notes",
+})
+print(json.dumps(r))
+assert not err, f"put update failed: {r}"
+assert r["action"] == "updated", f"expected action=updated, got {r}"
+
 proc.terminate()
 print("\nDone.")

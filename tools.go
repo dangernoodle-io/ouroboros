@@ -11,25 +11,27 @@ var bk *backup.Backup
 
 func registerTools(s *server.MCPServer) {
 	s.AddTool(mcp.NewTool("put",
-		mcp.WithDescription("Create or update a document. Upserts by type+project+category+title."),
-		mcp.WithString("type", mcp.Required(), mcp.Description("Document type (e.g. decision, fact, note, relation)")),
+		mcp.WithDescription("Create or update a KB document. content is terse agent-facing body; notes is optional human narrative. Upserts by type+project+category+title."),
+		mcp.WithString("type", mcp.Required(), mcp.Description("decision, fact, note, relation, plan")),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project name")),
-		mcp.WithString("title", mcp.Required(), mcp.Description("Document title (summary for decisions, key for facts)")),
-		mcp.WithString("content", mcp.Description("Document content (rationale, value, body, description)")),
+		mcp.WithString("title", mcp.Required(), mcp.Description("Concise title, used as upsert key")),
+		mcp.WithString("content", mcp.Required(), mcp.Description("Terse body, ≤300 chars target, 500 hard cap. Format: Rule/Fact line 1, optional Trigger:/Effect:/Why: lines. Agents read this on every injection — no narrative.")),
+		mcp.WithString("notes", mcp.Description("Optional human-facing narrative — rationale, context, trade-offs. Unlimited. Returned only when get/search verbose=true.")),
 		mcp.WithString("category", mcp.Description("Document category")),
-		mcp.WithString("metadata", mcp.Description("JSON string of key-value metadata")),
+		mcp.WithString("metadata", mcp.Description("JSON key-value metadata")),
 		mcp.WithArray("tags", mcp.Description("Tags array")),
 	), withRecover(handlePut))
 
 	s.AddTool(mcp.NewTool("get",
-		mcp.WithDescription("Get documents. By id returns full content. Without id returns summaries (no content) to conserve tokens."),
+		mcp.WithDescription("Get documents. By id: full content. Without id: title summaries only."),
 		mcp.WithNumber("id", mcp.Description("Document ID for full detail")),
 		mcp.WithString("type", mcp.Description("Filter by type")),
 		mcp.WithString("project", mcp.Description("Filter by project")),
 		mcp.WithString("category", mcp.Description("Filter by category")),
 		mcp.WithString("query", mcp.Description("Full-text search")),
 		mcp.WithArray("tags", mcp.Description("Filter by tags (all must match)")),
-		mcp.WithNumber("limit", mcp.Description("Result limit (default 50, max 500)")),
+		mcp.WithNumber("limit", mcp.Description("Result limit, default 10, max 500")),
+		mcp.WithBoolean("verbose", mcp.Description("Include notes field. Default false. Set true ONLY when user asks 'why' / rationale / history.")),
 	), withRecover(handleGet))
 
 	s.AddTool(mcp.NewTool("delete",
@@ -38,11 +40,12 @@ func registerTools(s *server.MCPServer) {
 	), withRecover(handleDelete))
 
 	s.AddTool(mcp.NewTool("search",
-		mcp.WithDescription("Full-text search across all documents. Returns summaries."),
+		mcp.WithDescription("Full-text search across documents. Returns summaries."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 		mcp.WithString("type", mcp.Description("Filter by type")),
 		mcp.WithString("project", mcp.Description("Filter by project")),
-		mcp.WithNumber("limit", mcp.Description("Result limit (default 50, max 500)")),
+		mcp.WithNumber("limit", mcp.Description("Result limit, default 10, max 500")),
+		mcp.WithBoolean("verbose", mcp.Description("Include notes field. Default false.")),
 	), withRecover(handleSearch))
 
 	s.AddTool(mcp.NewTool("export",
