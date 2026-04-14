@@ -332,6 +332,34 @@ func TestSearchDocumentsWithProjectFilter(t *testing.T) {
 	assert.Equal(t, "acme-corp", summaries[0].Project)
 }
 
+func TestFtsEscape(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"single word", "foo", "\"foo\""},
+		{"multi word AND", "database choice", "\"database\" \"choice\""},
+		{"token with inner quote", "foo\"bar", "\"foobar\""},
+		{"token with wildcard", "foo*bar", "\"foobar\""},
+		{"whitespace collapsing", "  foo   bar  ", "\"foo\" \"bar\""},
+		{"hyphen handling", "state-import", "\"stateimport\""},
+		{"multiple FTS meta chars", "foo*bar:baz(qux)", "\"foobarbazqux\""},
+		{"all meta chars stripped", "\"*():-^+", ""},
+		{"preserves non-meta punctuation", "hello.world", "\"hello.world\""},
+		{"complex query", "database design patterns", "\"database\" \"design\" \"patterns\""},
+		{"empty string", "", ""},
+		{"only whitespace", "   ", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := store.FtsEscape(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestClampLimit(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -767,5 +795,54 @@ func TestSearchDocumentsReturnsEmptySliceNotNil(t *testing.T) {
 	require.NoError(t, err)
 	// Verify it's an empty slice, not nil
 	require.NotNil(t, summaries)
+	require.Len(t, summaries, 0)
+}
+
+func TestSearchDocumentsMultiWordAND(t *testing.T) {
+	db := testDB(t)
+
+	// Seed docs: one with both "alpha" and "beta", one with only "alpha"
+	doc1 := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "Alpha and Beta",
+		Content: "This document mentions both alpha and beta concepts in detail",
+	}
+	doc2 := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "Only Alpha",
+		Content: "This document only mentions alpha",
+	}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	// Query for "alpha beta" should only match doc1 (implicit AND)
+	summaries, err := store.SearchDocuments(db, "alpha beta", "", "", 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Alpha and Beta", summaries[0].Title)
+}
+
+func TestSearchDocumentsMultiWordPartialMiss(t *testing.T) {
+	db := testDB(t)
+
+	// Seed doc with only "alpha"
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "Alpha Only",
+		Content: "Contains only the alpha term",
+	}
+
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	// Query for "alpha zzznothere" should return empty (implicit AND)
+	summaries, err := store.SearchDocuments(db, "alpha zzznothere", "", "", 50)
+	require.NoError(t, err)
 	require.Len(t, summaries, 0)
 }

@@ -217,9 +217,33 @@ func RebuildFTS(db *sql.DB) error {
 	return err
 }
 
-// FtsEscape escapes a query string for FTS5 matching.
+// FtsEscape converts a query string into FTS5 implicit AND syntax.
+// Splits on whitespace, strips FTS5 meta chars from each token, and joins with spaces.
 func FtsEscape(q string) string {
-	return "\"" + strings.ReplaceAll(q, "\"", "\"\"") + "\""
+	tokens := strings.Fields(q)
+	var result []string
+
+	for _, token := range tokens {
+		// Strip FTS5 meta characters: " * ( ) : - ^ +
+		filtered := strings.Map(func(r rune) rune {
+			switch r {
+			case '"', '*', '(', ')', ':', '-', '^', '+':
+				return -1 // drop this rune
+			default:
+				return r
+			}
+		}, token)
+
+		if filtered != "" {
+			result = append(result, "\""+filtered+"\"")
+		}
+	}
+
+	if len(result) == 0 {
+		return ""
+	}
+
+	return strings.Join(result, " ")
 }
 
 // ClampLimit clamps a limit to a range with a default value.
