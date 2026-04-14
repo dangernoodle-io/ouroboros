@@ -90,6 +90,42 @@ func TestToolsListFootprint(t *testing.T) {
 	t.Logf("    description share of tools/list: %d%%", 100*sumDesc/listTokens)
 	t.Logf("    schema share of tools/list:      %d%%", 100*sumSchema/listTokens)
 
+	// Per-tool: validate annotation structure per OU-75.
+	// Each tool should have only the expected annotation fields set.
+	expectedAnnotations := map[string]map[string]any{
+		"get":     {"readOnlyHint": true},
+		"search":  {"readOnlyHint": true},
+		"export":  {"readOnlyHint": true},
+		"delete":  {"destructiveHint": true, "idempotentHint": true},
+		"put":     {"idempotentHint": true},
+		"config":  {"idempotentHint": true},
+		"import":  {},
+		"project": {},
+		"item":    {},
+		"plan":    {},
+	}
+	t.Logf("  per-tool annotation structure (OU-75):")
+	for _, tool := range tools {
+		expected := expectedAnnotations[tool.Name]
+		require.NotNil(t, tool.Annotations, "tool %s must have annotations", tool.Name)
+		annotJSON, err := json.Marshal(tool.Annotations)
+		require.NoError(t, err)
+		var annot map[string]any
+		err = json.Unmarshal(annotJSON, &annot)
+		require.NoError(t, err)
+
+		// Remove nil/false values for comparison (they should omitempty to JSON).
+		// If a field is present with false, that's wrong.
+		for k, v := range annot {
+			if v == false || v == nil {
+				delete(annot, k)
+			}
+		}
+		// Now annot should exactly match expected.
+		require.Equal(t, expected, annot, "tool %s annotations should be %v, got %v", tool.Name, expected, annot)
+		t.Logf("    %-8s %v", tool.Name, expected)
+	}
+
 	// ---- session-constant total ----
 
 	totalTokens := instrTokens + listTokens

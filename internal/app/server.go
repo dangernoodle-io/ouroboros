@@ -60,10 +60,22 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 	return s
 }
 
+// toolAnnotation constructs a mcp.WithToolAnnotation option with only the
+// specified hint fields set (others remain nil to drop from JSON via omitempty).
+func toolAnnotation(readOnly, destructive, idempotent *bool) mcp.ToolOption {
+	return mcp.WithToolAnnotation(mcp.ToolAnnotation{
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: destructive,
+		IdempotentHint:  idempotent,
+		OpenWorldHint:   nil, // always nil: local SQLite, no external calls
+	})
+}
+
 func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	s.AddTool(mcp.NewTool("put",
 		mcp.WithDescription("Create/update KB documents (batch). Each: type, project, title, content, notes?, category?, tags?, metadata?"),
 		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to upsert")),
+		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
 	), withRecover(handlePut(db)))
 
 	s.AddTool(mcp.NewTool("get",
@@ -76,11 +88,13 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithArray("tags", mcp.Description("Filter by tags (all match)")),
 		mcp.WithNumber("limit", mcp.Description("Limit, default 10, max 500")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
+		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleGet(db)))
 
 	s.AddTool(mcp.NewTool("delete",
 		mcp.WithDescription("Delete a document."),
 		mcp.WithNumber("id", mcp.Required(), mcp.Description("Document ID")),
+		toolAnnotation(nil, mcp.ToBoolPtr(true), mcp.ToBoolPtr(true)),
 	), withRecover(handleDelete(db)))
 
 	s.AddTool(mcp.NewTool("search",
@@ -90,23 +104,27 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithString("project", mcp.Description("Filter by project")),
 		mcp.WithNumber("limit", mcp.Description("Limit, default 10, max 500")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
+		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleSearch(db)))
 
 	s.AddTool(mcp.NewTool("export",
 		mcp.WithDescription("Export KB to markdown."),
 		mcp.WithString("project", mcp.Description("Filter by project")),
 		mcp.WithString("type", mcp.Description("Filter by type")),
+		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleExport(db)))
 
 	s.AddTool(mcp.NewTool("import",
 		mcp.WithDescription("Import documents from JSON."),
 		mcp.WithString("content", mcp.Required(), mcp.Description("JSON to import")),
 		mcp.WithString("project", mcp.Description("Default project if not specified")),
+		toolAnnotation(nil, nil, nil),
 	), withRecover(handleImport(db)))
 
 	s.AddTool(mcp.NewTool("project",
 		mcp.WithDescription("Create project (with name) or list all (no args)."),
 		mcp.WithString("name", mcp.Description("Project name")),
+		toolAnnotation(nil, nil, nil),
 	), withRecover(handleProject(db, bk)))
 
 	s.AddTool(mcp.NewTool("item",
@@ -118,6 +136,7 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithString("priority_max", mcp.Description("Max priority (P0–P6)")),
 		mcp.WithString("status", mcp.Description("open or done")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
+		toolAnnotation(nil, nil, nil),
 	), withRecover(handleItem(db, bk)))
 
 	s.AddTool(mcp.NewTool("plan",
@@ -126,11 +145,13 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithArray("entries", mcp.Description("Plans to create/update: {id?}, title, content?, status?, project?, item_id?")),
 		mcp.WithString("project", mcp.Description("Project name (filter/link)")),
 		mcp.WithString("status", mcp.Description("draft, active, or complete")),
+		toolAnnotation(nil, nil, nil),
 	), withRecover(handlePlan(db, bk)))
 
 	s.AddTool(mcp.NewTool("config",
 		mcp.WithDescription("Get/set config: no args=list, key=get, key+value=set."),
 		mcp.WithString("key", mcp.Description("Config key")),
 		mcp.WithString("value", mcp.Description("Config value")),
+		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
 	), withRecover(handleConfig(db)))
 }
