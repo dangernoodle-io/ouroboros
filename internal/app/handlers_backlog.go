@@ -99,97 +99,131 @@ func handleProject(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 
 func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		id, hasID := req.GetArguments()["id"].(string)
-		if hasID && id != "" {
-			// Check for update fields
-			fields := make(map[string]string)
-			for _, key := range []string{"priority", "title", "description", "notes", "status"} {
-				if v, ok := req.GetArguments()[key].(string); ok && v != "" {
-					fields[key] = v
-				}
-			}
+		// Check for ids[] batch fetch
+		ids := parseStringSlice(req.GetArguments(), "ids")
+		if len(ids) > 0 {
+			verbose, _ := req.GetArguments()["verbose"].(bool)
+			items := make([]interface{}, 0, len(ids))
 
-			if len(fields) > 0 {
-				// Validate priority if present
-				if p, ok := fields["priority"]; ok {
-					if _, err := parsePriority(p); err != nil {
-						return mcp.NewToolResultError(err.Error()), nil
-					}
-				}
-
-				item, err := backlog.UpdateItem(d, id, fields)
+			for _, id := range ids {
+				item, err := backlog.GetItem(d, id)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
+				if item == nil {
+					// Omit misses
+					continue
+				}
 
-				backupCommit(bk, fmt.Sprintf("update: %s", id))
-
-				// Check verbose flag
-				verbose, _ := req.GetArguments()["verbose"].(bool)
 				if !verbose {
 					item.Notes = ""
 				}
 
-				return jsonResult(item)
+				items = append(items, item)
 			}
 
-			// Get mode — id only, no update fields
-			item, err := backlog.GetItem(d, id)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			// Check verbose flag
-			verbose, _ := req.GetArguments()["verbose"].(bool)
-			if !verbose {
-				item.Notes = ""
-			}
-
-			return jsonResult(item)
+			return jsonResult(items)
 		}
 
-		// Check for create mode (project + priority + title all present)
-		projectName, _ := req.GetArguments()["project"].(string)
-		priority, _ := req.GetArguments()["priority"].(string)
-		title, _ := req.GetArguments()["title"].(string)
+		// Check for entries[] batch write (mixed create/update)
+		entries := parseEntriesArray(req.GetArguments(), "entries")
+		if len(entries) > 0 {
+			verbose, _ := req.GetArguments()["verbose"].(bool)
+			results := make([]interface{}, 0, len(entries))
+			writeCount := 0
 
-		if projectName != "" && priority != "" && title != "" {
-			if _, err := parsePriority(priority); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			for _, e := range entries {
+				// Check if this is an update (has id) or create (no id)
+				if entryID, ok := e["id"].(string); ok && entryID != "" {
+					// Update mode
+					fields := make(map[string]string)
+					for _, key := range []string{"priority", "title", "description", "notes", "status"} {
+						if v, ok := e[key].(string); ok && v != "" {
+							fields[key] = v
+						}
+					}
+
+					if len(fields) > 0 {
+						// Validate priority if present
+						if p, ok := fields["priority"]; ok {
+							if _, err := parsePriority(p); err != nil {
+								return mcp.NewToolResultError(err.Error()), nil
+							}
+						}
+
+						item, err := backlog.UpdateItem(d, entryID, fields)
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						writeCount++
+
+						if !verbose {
+							item.Notes = ""
+						}
+
+						results = append(results, map[string]interface{}{
+							"id":     item.ID,
+							"action": "update",
+						})
+					}
+				} else {
+					// Create mode
+					projectName, _ := e["project"].(string)
+					priority, _ := e["priority"].(string)
+					title, _ := e["title"].(string)
+
+					if projectName != "" && priority != "" && title != "" {
+						if _, err := parsePriority(priority); err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						proj, err := resolveProject(d, projectName)
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						desc := ""
+						if v, ok := e["description"].(string); ok {
+							desc = v
+						}
+
+						if len(desc) > 500 {
+							return mcp.NewToolResultError(fmt.Sprintf("description exceeds 500 char hard cap (got %d). Move narrative into the notes field.", len(desc))), nil //nolint:nilerr
+						}
+
+						notes := ""
+						if v, ok := e["notes"].(string); ok {
+							notes = v
+						}
+
+						item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc, notes)
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						writeCount++
+
+						results = append(results, map[string]interface{}{
+							"id":     item.ID,
+							"action": "create",
+						})
+					}
+				}
 			}
 
-			proj, err := resolveProject(d, projectName)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			// Single backup commit at end with batch count
+			if writeCount > 0 {
+				backupCommit(bk, fmt.Sprintf("batch: %d items written", writeCount))
 			}
 
-			desc := ""
-			if v, ok := req.GetArguments()["description"].(string); ok {
-				desc = v
-			}
-
-			// Enforce 500-char hard cap on description
-			if len(desc) > 500 {
-				return mcp.NewToolResultError(fmt.Sprintf("description exceeds 500 char hard cap (got %d). Move narrative into the notes field.", len(desc))), nil //nolint:nilerr
-			}
-
-			notes := ""
-			if v, ok := req.GetArguments()["notes"].(string); ok {
-				notes = v
-			}
-
-			item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc, notes)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			backupCommit(bk, fmt.Sprintf("add: %s %s", item.ID, title))
-			return jsonResult(item)
+			return jsonResult(results)
 		}
 
 		// List mode — apply filters
 		var f backlog.ItemFilter
 
+		projectName, _ := req.GetArguments()["project"].(string)
 		if projectName != "" {
 			proj, err := resolveProject(d, projectName)
 			if err != nil {
@@ -234,65 +268,102 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 
 func handlePlan(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		idFloat, hasID := req.GetArguments()["id"].(float64)
+		// Check for ids[] batch fetch (int64)
+		ids := parseInt64Slice(req.GetArguments(), "ids")
+		if len(ids) > 0 {
+			plans := make([]interface{}, 0, len(ids))
 
-		if hasID {
-			id := int64(idFloat)
-
-			fields := make(map[string]string)
-			for _, key := range []string{"title", "content", "status"} {
-				if v, ok := req.GetArguments()[key].(string); ok && v != "" {
-					fields[key] = v
-				}
-			}
-
-			if len(fields) > 0 {
-				plan, err := backlog.UpdatePlan(d, id, fields)
+			for _, id := range ids {
+				plan, err := backlog.GetPlan(d, id)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
-				backupCommit(bk, fmt.Sprintf("plan update: %d", id))
-				return jsonResult(plan)
+				if plan == nil {
+					// Omit misses
+					continue
+				}
+
+				plans = append(plans, plan)
 			}
 
-			plan, err := backlog.GetPlan(d, id)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return jsonResult(plan)
+			return jsonResult(plans)
 		}
 
-		title, hasTitle := req.GetArguments()["title"].(string)
-		if hasTitle && title != "" {
-			content := ""
-			if v, ok := req.GetArguments()["content"].(string); ok {
-				content = v
-			}
+		// Check for entries[] batch write (mixed create/update)
+		entries := parseEntriesArray(req.GetArguments(), "entries")
+		if len(entries) > 0 {
+			results := make([]interface{}, 0, len(entries))
+			writeCount := 0
 
-			var projectID *int64
-			if v, ok := req.GetArguments()["project"].(string); ok && v != "" {
-				proj, err := resolveProject(d, v)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
+			for _, e := range entries {
+				// Check if this is an update (has id) or create (no id)
+				if idFloat, ok := e["id"].(float64); ok && idFloat != 0 {
+					// Update mode
+					id := int64(idFloat)
+					fields := make(map[string]string)
+					for _, key := range []string{"title", "content", "status"} {
+						if v, ok := e[key].(string); ok && v != "" {
+							fields[key] = v
+						}
+					}
+
+					if len(fields) > 0 {
+						plan, err := backlog.UpdatePlan(d, id, fields)
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						writeCount++
+
+						results = append(results, map[string]interface{}{
+							"id":     plan.ID,
+							"action": "update",
+						})
+					}
+				} else {
+					// Create mode
+					title, _ := e["title"].(string)
+					content, _ := e["content"].(string)
+
+					if title != "" {
+						var projectID *int64
+						if v, ok := e["project"].(string); ok && v != "" {
+							proj, err := resolveProject(d, v)
+							if err != nil {
+								return mcp.NewToolResultError(err.Error()), nil
+							}
+							projectID = &proj.ID
+						}
+
+						var itemID *string
+						if v, ok := e["item_id"].(string); ok && v != "" {
+							if _, err := backlog.GetItem(d, v); err != nil {
+								return mcp.NewToolResultError(err.Error()), nil
+							}
+							itemID = &v
+						}
+
+						plan, err := backlog.CreatePlan(d, title, content, projectID, itemID)
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						writeCount++
+
+						results = append(results, map[string]interface{}{
+							"id":     plan.ID,
+							"action": "create",
+						})
+					}
 				}
-				projectID = &proj.ID
 			}
 
-			var itemID *string
-			if v, ok := req.GetArguments()["item_id"].(string); ok && v != "" {
-				if _, err := backlog.GetItem(d, v); err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				itemID = &v
+			// Single backup commit at end with batch count
+			if writeCount > 0 {
+				backupCommit(bk, fmt.Sprintf("batch: %d plans written", writeCount))
 			}
 
-			plan, err := backlog.CreatePlan(d, title, content, projectID, itemID)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			backupCommit(bk, fmt.Sprintf("plan: %s", title))
-			return jsonResult(plan)
+			return jsonResult(results)
 		}
 
 		// List mode
