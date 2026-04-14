@@ -1,8 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"sort"
 	"strings"
@@ -134,13 +136,16 @@ func TestToolsListFootprint(t *testing.T) {
 	require.Less(t, instrTokens, 4000, "serverInstructions exceeds 4000 tokens")
 	require.Less(t, listTokens, 4000, "tools/list exceeds 4000 tokens")
 
-	if os.Getenv("UPDATE_SNAPSHOT") == "1" {
-		require.NoError(t, os.MkdirAll("testdata", 0o755))
-		pretty, _ := json.MarshalIndent(map[string]any{"tools": tools}, "", "  ")
-		require.NoError(t, os.WriteFile("testdata/tools_list.json", pretty, 0o644))
-		require.NoError(t, os.WriteFile("testdata/server_instructions.txt", []byte(serverInstructions), 0o644))
-		t.Logf("snapshots updated under testdata/")
-	}
+	// Ensure testdata directory exists for snapshot files
+	require.NoError(t, os.MkdirAll("testdata", 0o755))
+
+	// Check server_instructions.txt snapshot
+	assertSnapshot(t, "testdata/server_instructions.txt", []byte(serverInstructions))
+
+	// Check tools_list.json snapshot
+	toolsJSON, err := json.MarshalIndent(map[string]any{"tools": tools}, "", "  ")
+	require.NoError(t, err)
+	assertSnapshot(t, "testdata/tools_list.json", toolsJSON)
 }
 
 // TestBatchRoundTripSavings documents the call count savings from batch operations.
@@ -178,4 +183,34 @@ func splitInstructions(s string) []instructionSection {
 		{name: "KNOWLEDGE BASE", body: strings.TrimSpace(s[kbIdx:blIdx])},
 		{name: "BACKLOG", body: strings.TrimSpace(s[blIdx:])},
 	}
+}
+
+// assertSnapshot reads the snapshot file at path and compares it to the live
+// output. If the file is missing and UPDATE_SNAPSHOT=1, it creates the file.
+// If there's a drift and UPDATE_SNAPSHOT=1, it regenerates the file.
+// If there's a drift and UPDATE_SNAPSHOT is not set, it fails with a clear hint.
+func assertSnapshot(t *testing.T, path string, live []byte) {
+	t.Helper()
+
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) && os.Getenv("UPDATE_SNAPSHOT") == "1" {
+		require.NoError(t, os.WriteFile(path, live, 0o644))
+		t.Logf("snapshot created: %s", path)
+		return
+	}
+	require.NoError(t, err, "snapshot %s missing", path)
+
+	if bytes.Equal(existing, live) {
+		return
+	}
+
+	if os.Getenv("UPDATE_SNAPSHOT") == "1" {
+		require.NoError(t, os.WriteFile(path, live, 0o644))
+		t.Logf("snapshot regenerated: %s", path)
+		return
+	}
+
+	t.Fatalf("snapshot drift: %s is out of sync with live output.\n"+
+		"run: UPDATE_SNAPSHOT=1 go test ./internal/app -run TestToolsListFootprint",
+		path)
 }
