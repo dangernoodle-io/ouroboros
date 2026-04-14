@@ -1,0 +1,304 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Get or set configuration. No args: get all. Key only: get one. Key + value: set.",
+      "inputSchema": {
+        "properties": {
+          "key": {
+            "description": "Config key",
+            "type": "string"
+          },
+          "value": {
+            "description": "Config value (set mode)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "config"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Delete a document by ID.",
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "Document ID",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "delete"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Export knowledge base to markdown.",
+      "inputSchema": {
+        "properties": {
+          "project": {
+            "description": "Filter by project",
+            "type": "string"
+          },
+          "type": {
+            "description": "Filter by type",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "export"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Get documents: ids array for fetch, or filters for list.",
+      "inputSchema": {
+        "properties": {
+          "category": {
+            "description": "Filter by category",
+            "type": "string"
+          },
+          "ids": {
+            "description": "Document IDs to fetch (batch mode)",
+            "type": "array"
+          },
+          "limit": {
+            "description": "Result limit, default 10, max 500",
+            "type": "number"
+          },
+          "project": {
+            "description": "Filter by project",
+            "type": "string"
+          },
+          "query": {
+            "description": "Full-text search",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Filter by tags (all must match)",
+            "type": "array"
+          },
+          "type": {
+            "description": "Filter by type",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Include notes field. Default false.",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "get"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Import documents from JSON.",
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "description": "JSON content to import",
+            "type": "string"
+          },
+          "project": {
+            "description": "Default project for items without one",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "import"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Manage backlog items: ids for fetch, entries for batch create/update, or filters for list.",
+      "inputSchema": {
+        "properties": {
+          "entries": {
+            "description": "Array of items to create/update (batch write mode). Each: {id for update else omit}, project, priority, title, optional description/notes/status.",
+            "type": "array"
+          },
+          "ids": {
+            "description": "Item IDs to fetch (batch fetch mode)",
+            "type": "array"
+          },
+          "priority_max": {
+            "description": "Maximum priority filter (e.g., P2)",
+            "type": "string"
+          },
+          "priority_min": {
+            "description": "Minimum priority filter (e.g., P0)",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name (create or filter)",
+            "type": "string"
+          },
+          "status": {
+            "description": "Item status: open or done (filter)",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Include notes field. Default false.",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "item"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Manage plans: ids for fetch, entries for batch create/update, or filters for list.",
+      "inputSchema": {
+        "properties": {
+          "entries": {
+            "description": "Array of plans to create/update (batch write mode). Each: {id for update else omit}, title, optional content/status/project/item_id.",
+            "type": "array"
+          },
+          "ids": {
+            "description": "Plan IDs to fetch (batch fetch mode)",
+            "type": "array"
+          },
+          "project": {
+            "description": "Project name (filter or link)",
+            "type": "string"
+          },
+          "status": {
+            "description": "Plan status: draft, active, complete (filter or update)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "plan"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Create a project or list all. With name: creates project (prefix auto-derived). Without: lists all projects.",
+      "inputSchema": {
+        "properties": {
+          "name": {
+            "description": "Project name (create mode)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "project"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Create or update KB documents (batch-only). entries array: each {type, project, title, content, optional notes/category/tags/metadata}.",
+      "inputSchema": {
+        "properties": {
+          "entries": {
+            "description": "Array of documents to upsert",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "type": "object"
+      },
+      "name": "put"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      },
+      "description": "Keyword search across documents using FTS5. Multi-word queries match docs containing all terms (implicit AND). Wildcard/punctuation-only queries fall back to listing all docs. Returns summaries.",
+      "inputSchema": {
+        "properties": {
+          "limit": {
+            "description": "Result limit, default 10, max 500",
+            "type": "number"
+          },
+          "project": {
+            "description": "Filter by project",
+            "type": "string"
+          },
+          "query": {
+            "description": "Search query",
+            "type": "string"
+          },
+          "type": {
+            "description": "Filter by type",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Include notes field. Default false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "search"
+    }
+  ]
+}

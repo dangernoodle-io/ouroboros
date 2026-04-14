@@ -100,24 +100,44 @@ func TestHandleItemCreate(t *testing.T) {
 	err = unmarshalResult(projResult, &proj)
 	require.NoError(t, err)
 
-	// Create item
+	// Create item using batch entries
 	itemReq := makeRequest(map[string]interface{}{
-		"project":     "acme-corp",
-		"priority":    "P1",
-		"title":       "Fix login bug",
-		"description": "Users cannot log in",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":     "acme-corp",
+				"priority":    "P1",
+				"title":       "Fix login bug",
+				"description": "Users cannot log in",
+			},
+		},
 	})
 	itemResult, err := handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
 
-	var item backlog.Item
-	err = unmarshalResult(itemResult, &item)
+	var resp []map[string]interface{}
+	err = unmarshalResult(itemResult, &resp)
 	require.NoError(t, err)
-	assert.Equal(t, "AC-1", item.ID)
-	assert.Equal(t, "P1", item.Priority)
-	assert.Equal(t, "Fix login bug", item.Title)
-	assert.Equal(t, "Users cannot log in", item.Description)
-	assert.Equal(t, "open", item.Status)
+	require.Len(t, resp, 1)
+	id, ok := resp[0]["id"].(string)
+	require.True(t, ok)
+
+	// Fetch to verify
+	fetchReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{id},
+	})
+	fetchResult, err := handleItem(db, bk)(context.TODO(), fetchReq)
+	require.NoError(t, err)
+
+	var items []map[string]interface{}
+	err = unmarshalResult(fetchResult, &items)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	item := items[0]
+	assert.Equal(t, "AC-1", item["id"])
+	assert.Equal(t, "P1", item["priority"])
+	assert.Equal(t, "Fix login bug", item["title"])
+	assert.Equal(t, "Users cannot log in", item["description"])
+	assert.Equal(t, "open", item["status"])
 }
 
 func TestHandleItemGet(t *testing.T) {
@@ -131,30 +151,37 @@ func TestHandleItemGet(t *testing.T) {
 	require.NoError(t, err)
 
 	itemReq := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"priority": "P2",
-		"title":    "Update docs",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "Update docs",
+			},
+		},
 	})
 	createResult, err := handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
 
-	var createdItem backlog.Item
-	err = unmarshalResult(createResult, &createdItem)
+	var createResp []map[string]interface{}
+	err = unmarshalResult(createResult, &createResp)
 	require.NoError(t, err)
+	require.Len(t, createResp, 1)
 
-	// Get item by ID
+	// Get item by ID using ids[] fetch
 	getReq := makeRequest(map[string]interface{}{
-		"id": "AC-1",
+		"ids": []interface{}{"AC-1"},
 	})
 	getResult, err := handleItem(db, bk)(context.TODO(), getReq)
 	require.NoError(t, err)
 
-	var retrievedItem backlog.Item
-	err = unmarshalResult(getResult, &retrievedItem)
+	var items []map[string]interface{}
+	err = unmarshalResult(getResult, &items)
 	require.NoError(t, err)
-	assert.Equal(t, "AC-1", retrievedItem.ID)
-	assert.Equal(t, "Update docs", retrievedItem.Title)
-	assert.Equal(t, "P2", retrievedItem.Priority)
+	require.Len(t, items, 1)
+	item := items[0]
+	assert.Equal(t, "AC-1", item["id"])
+	assert.Equal(t, "Update docs", item["title"])
+	assert.Equal(t, "P2", item["priority"])
 }
 
 func TestHandleItemUpdate(t *testing.T) {
@@ -168,28 +195,51 @@ func TestHandleItemUpdate(t *testing.T) {
 	require.NoError(t, err)
 
 	itemReq := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"priority": "P3",
-		"title":    "Original title",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P3",
+				"title":    "Original title",
+			},
+		},
 	})
 	_, err = handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
 
-	// Update item
+	// Update item using batch entries
 	updateReq := makeRequest(map[string]interface{}{
-		"id":       "AC-1",
-		"priority": "P1",
-		"title":    "Updated title",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":       "AC-1",
+				"priority": "P1",
+				"title":    "Updated title",
+			},
+		},
 	})
 	updateResult, err := handleItem(db, bk)(context.TODO(), updateReq)
 	require.NoError(t, err)
 
-	var updatedItem backlog.Item
-	err = unmarshalResult(updateResult, &updatedItem)
+	var updateResp []map[string]interface{}
+	err = unmarshalResult(updateResult, &updateResp)
 	require.NoError(t, err)
-	assert.Equal(t, "AC-1", updatedItem.ID)
-	assert.Equal(t, "P1", updatedItem.Priority)
-	assert.Equal(t, "Updated title", updatedItem.Title)
+	require.Len(t, updateResp, 1)
+	assert.Equal(t, "update", updateResp[0]["action"])
+
+	// Fetch to verify
+	fetchReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{"AC-1"},
+	})
+	fetchResult, err := handleItem(db, bk)(context.TODO(), fetchReq)
+	require.NoError(t, err)
+
+	var items []map[string]interface{}
+	err = unmarshalResult(fetchResult, &items)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	item := items[0]
+	assert.Equal(t, "AC-1", item["id"])
+	assert.Equal(t, "P1", item["priority"])
+	assert.Equal(t, "Updated title", item["title"])
 }
 
 func TestHandleItemDone(t *testing.T) {
@@ -203,25 +253,46 @@ func TestHandleItemDone(t *testing.T) {
 	require.NoError(t, err)
 
 	itemReq := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"priority": "P1",
-		"title":    "Task to complete",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "Task to complete",
+			},
+		},
 	})
 	_, err = handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
 
-	// Mark as done
+	// Mark as done using batch entries
 	doneReq := makeRequest(map[string]interface{}{
-		"id":     "AC-1",
-		"status": "done",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":     "AC-1",
+				"status": "done",
+			},
+		},
 	})
 	doneResult, err := handleItem(db, bk)(context.TODO(), doneReq)
 	require.NoError(t, err)
 
-	var doneItem backlog.Item
-	err = unmarshalResult(doneResult, &doneItem)
+	var doneResp []map[string]interface{}
+	err = unmarshalResult(doneResult, &doneResp)
 	require.NoError(t, err)
-	assert.Equal(t, "done", doneItem.Status)
+	require.Len(t, doneResp, 1)
+
+	// Fetch to verify status
+	fetchReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{"AC-1"},
+	})
+	fetchResult, err := handleItem(db, bk)(context.TODO(), fetchReq)
+	require.NoError(t, err)
+
+	var items []map[string]interface{}
+	err = unmarshalResult(fetchResult, &items)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "done", items[0]["status"])
 }
 
 func TestHandleItemList(t *testing.T) {
@@ -234,12 +305,16 @@ func TestHandleItemList(t *testing.T) {
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
 	require.NoError(t, err)
 
-	// Create multiple items
+	// Create multiple items using batch entries
 	for i := 1; i <= 3; i++ {
 		itemReq := makeRequest(map[string]interface{}{
-			"project":  "acme-corp",
-			"priority": "P1",
-			"title":    "Item " + string(rune('0'+i)),
+			"entries": []interface{}{
+				map[string]interface{}{
+					"project":  "acme-corp",
+					"priority": "P1",
+					"title":    "Item " + string(rune('0'+i)),
+				},
+			},
 		})
 		_, err = handleItem(db, bk)(context.TODO(), itemReq)
 		require.NoError(t, err)
@@ -276,27 +351,39 @@ func TestHandleItemListFilter(t *testing.T) {
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
 	require.NoError(t, err)
 
-	// Create items with different priorities and status
+	// Create items with different priorities and status using batch entries
 	itemReq := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"priority": "P1",
-		"title":    "High priority",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "High priority",
+			},
+		},
 	})
 	_, err = handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
 
 	itemReq = makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"priority": "P3",
-		"title":    "Low priority",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P3",
+				"title":    "Low priority",
+			},
+		},
 	})
 	_, err = handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
 
-	// Mark one as done
+	// Mark one as done using batch entries
 	doneReq := makeRequest(map[string]interface{}{
-		"id":     "AC-1",
-		"status": "done",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":     "AC-1",
+				"status": "done",
+			},
+		},
 	})
 	_, err = handleItem(db, bk)(context.TODO(), doneReq)
 	require.NoError(t, err)
@@ -320,22 +407,43 @@ func TestHandleItemListFilter(t *testing.T) {
 func TestHandlePlanCreate(t *testing.T) {
 	resetAllDB(t)
 
-	// Create standalone plan
+	// Create standalone plan using batch entries
 	planReq := makeRequest(map[string]interface{}{
-		"title":   "Implementation plan",
-		"content": "Step 1: Design\nStep 2: Implement",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"title":   "Implementation plan",
+				"content": "Step 1: Design\nStep 2: Implement",
+			},
+		},
 	})
 	planResult, err := handlePlan(db, bk)(context.TODO(), planReq)
 	require.NoError(t, err)
 
-	var plan backlog.Plan
-	err = unmarshalResult(planResult, &plan)
+	var resp []map[string]interface{}
+	err = unmarshalResult(planResult, &resp)
 	require.NoError(t, err)
-	assert.Equal(t, "Implementation plan", plan.Title)
-	assert.Equal(t, "Step 1: Design\nStep 2: Implement", plan.Content)
-	assert.Equal(t, "draft", plan.Status)
-	assert.Nil(t, plan.ProjectID)
-	assert.Nil(t, plan.ItemID)
+	require.Len(t, resp, 1)
+	id, ok := resp[0]["id"].(float64)
+	require.True(t, ok)
+	planID := int64(id)
+
+	// Fetch to verify
+	fetchReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{float64(planID)},
+	})
+	fetchResult, err := handlePlan(db, bk)(context.TODO(), fetchReq)
+	require.NoError(t, err)
+
+	var plans []map[string]interface{}
+	err = unmarshalResult(fetchResult, &plans)
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	plan := plans[0]
+	assert.Equal(t, "Implementation plan", plan["title"])
+	assert.Equal(t, "Step 1: Design\nStep 2: Implement", plan["content"])
+	assert.Equal(t, "draft", plan["status"])
+	assert.Nil(t, plan["project_id"])
+	assert.Nil(t, plan["item_id"])
 }
 
 func TestHandlePlanCreateLinked(t *testing.T) {
@@ -349,91 +457,152 @@ func TestHandlePlanCreateLinked(t *testing.T) {
 	require.NoError(t, err)
 
 	itemReq := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"priority": "P1",
-		"title":    "Implement feature",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "Implement feature",
+			},
+		},
 	})
 	_, err = handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
 
-	// Create linked plan
+	// Create linked plan using batch entries
 	planReq := makeRequest(map[string]interface{}{
-		"title":   "Feature plan",
-		"content": "Details here",
-		"project": "acme-corp",
-		"item_id": "AC-1",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"title":   "Feature plan",
+				"content": "Details here",
+				"project": "acme-corp",
+				"item_id": "AC-1",
+			},
+		},
 	})
 	planResult, err := handlePlan(db, bk)(context.TODO(), planReq)
 	require.NoError(t, err)
 
-	var plan backlog.Plan
-	err = unmarshalResult(planResult, &plan)
+	var resp []map[string]interface{}
+	err = unmarshalResult(planResult, &resp)
 	require.NoError(t, err)
-	assert.NotNil(t, plan.ProjectID)
-	assert.NotNil(t, plan.ItemID)
-	assert.Equal(t, "AC-1", *plan.ItemID)
+	require.Len(t, resp, 1)
+	id, ok := resp[0]["id"].(float64)
+	require.True(t, ok)
+	planID := int64(id)
+
+	// Fetch to verify links
+	fetchReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{float64(planID)},
+	})
+	fetchResult, err := handlePlan(db, bk)(context.TODO(), fetchReq)
+	require.NoError(t, err)
+
+	var plans []map[string]interface{}
+	err = unmarshalResult(fetchResult, &plans)
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	plan := plans[0]
+	assert.NotNil(t, plan["project_id"])
+	assert.NotNil(t, plan["item_id"])
+	assert.Equal(t, "AC-1", plan["item_id"])
 }
 
 func TestHandlePlanGet(t *testing.T) {
 	resetAllDB(t)
 
-	// Create plan
+	// Create plan using batch entries
 	planReq := makeRequest(map[string]interface{}{
-		"title":   "Test plan",
-		"content": "Test content",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"title":   "Test plan",
+				"content": "Test content",
+			},
+		},
 	})
 	createResult, err := handlePlan(db, bk)(context.TODO(), planReq)
 	require.NoError(t, err)
 
-	var createdPlan backlog.Plan
-	err = unmarshalResult(createResult, &createdPlan)
+	var createResp []map[string]interface{}
+	err = unmarshalResult(createResult, &createResp)
 	require.NoError(t, err)
+	require.Len(t, createResp, 1)
+	id, ok := createResp[0]["id"].(float64)
+	require.True(t, ok)
+	planID := int64(id)
 
-	// Get plan by ID
+	// Get plan by ID using ids[] fetch
 	getReq := makeRequest(map[string]interface{}{
-		"id": float64(createdPlan.ID),
+		"ids": []interface{}{float64(planID)},
 	})
 	getResult, err := handlePlan(db, bk)(context.TODO(), getReq)
 	require.NoError(t, err)
 
-	var retrievedPlan backlog.Plan
-	err = unmarshalResult(getResult, &retrievedPlan)
+	var plans []map[string]interface{}
+	err = unmarshalResult(getResult, &plans)
 	require.NoError(t, err)
-	assert.Equal(t, createdPlan.ID, retrievedPlan.ID)
-	assert.Equal(t, "Test plan", retrievedPlan.Title)
-	assert.Equal(t, "Test content", retrievedPlan.Content)
+	require.Len(t, plans, 1)
+	plan := plans[0]
+	assert.Equal(t, float64(planID), plan["id"])
+	assert.Equal(t, "Test plan", plan["title"])
+	assert.Equal(t, "Test content", plan["content"])
 }
 
 func TestHandlePlanUpdate(t *testing.T) {
 	resetAllDB(t)
 
-	// Create plan
-	planReq := makeRequest(map[string]interface{}{
-		"title":   "Original title",
-		"content": "Original content",
+	// Create plan using batch entries
+	createReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"title":   "Original title",
+				"content": "Original content",
+			},
+		},
 	})
-	createResult, err := handlePlan(db, bk)(context.TODO(), planReq)
+	createResult, err := handlePlan(db, bk)(context.TODO(), createReq)
 	require.NoError(t, err)
 
-	var plan backlog.Plan
-	err = unmarshalResult(createResult, &plan)
+	var createResp []map[string]interface{}
+	err = unmarshalResult(createResult, &createResp)
 	require.NoError(t, err)
+	require.Len(t, createResp, 1)
+	id, ok := createResp[0]["id"].(float64)
+	require.True(t, ok)
+	planID := int64(id)
 
-	// Update plan
+	// Update plan using batch entries
 	updateReq := makeRequest(map[string]interface{}{
-		"id":     float64(plan.ID),
-		"title":  "Updated title",
-		"status": "active",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":     float64(planID),
+				"title":  "Updated title",
+				"status": "active",
+			},
+		},
 	})
 	updateResult, err := handlePlan(db, bk)(context.TODO(), updateReq)
 	require.NoError(t, err)
 
-	var updatedPlan backlog.Plan
-	err = unmarshalResult(updateResult, &updatedPlan)
+	var updateResp []map[string]interface{}
+	err = unmarshalResult(updateResult, &updateResp)
 	require.NoError(t, err)
-	assert.Equal(t, plan.ID, updatedPlan.ID)
-	assert.Equal(t, "Updated title", updatedPlan.Title)
-	assert.Equal(t, "active", updatedPlan.Status)
+	require.Len(t, updateResp, 1)
+	assert.Equal(t, "update", updateResp[0]["action"])
+
+	// Fetch updated plan to verify
+	fetchReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{float64(planID)},
+	})
+	fetchResult, err := handlePlan(db, bk)(context.TODO(), fetchReq)
+	require.NoError(t, err)
+
+	var plans []map[string]interface{}
+	err = unmarshalResult(fetchResult, &plans)
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	plan := plans[0]
+	assert.Equal(t, "Updated title", plan["title"])
+	assert.Equal(t, "active", plan["status"])
 }
 
 func TestHandlePlanList(t *testing.T) {
@@ -446,11 +615,15 @@ func TestHandlePlanList(t *testing.T) {
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
 	require.NoError(t, err)
 
-	// Create multiple plans
+	// Create multiple plans using batch entries
 	for i := 1; i <= 2; i++ {
 		planReq := makeRequest(map[string]interface{}{
-			"title":   "Plan " + string(rune('0'+i)),
-			"project": "acme-corp",
+			"entries": []interface{}{
+				map[string]interface{}{
+					"title":   "Plan " + string(rune('0'+i)),
+					"project": "acme-corp",
+				},
+			},
 		})
 		_, err = handlePlan(db, bk)(context.TODO(), planReq)
 		require.NoError(t, err)
@@ -548,11 +721,15 @@ func TestHandleItemInvalidPriority(t *testing.T) {
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
 	require.NoError(t, err)
 
-	// Try to create item with invalid priority
+	// Try to create item with invalid priority using batch entries
 	itemReq := makeRequest(map[string]interface{}{
-		"project":  "acme-corp",
-		"priority": "X9",
-		"title":    "Invalid item",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "X9",
+				"title":    "Invalid item",
+			},
+		},
 	})
 	itemResult, err := handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
@@ -601,4 +778,158 @@ func TestParsePriority(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ============ Batch tests ============
+
+func resetBacklogDBBatch(t *testing.T) {
+	t.Helper()
+	_, err := db.Exec("DELETE FROM items")
+	require.NoError(t, err)
+	_, err = db.Exec("DELETE FROM plans")
+	require.NoError(t, err)
+	_, err = db.Exec("DELETE FROM projects")
+	require.NoError(t, err)
+}
+
+// TestHandleItemBatchFetch tests batch fetch with ids.
+func TestHandleItemBatchFetch(t *testing.T) {
+	resetBacklogDBBatch(t)
+
+	proj, err := backlog.CreateProject(db, "test-project", "TP")
+	require.NoError(t, err)
+
+	item1, err := backlog.AddItem(db, proj.ID, "TP", "P0", "Task 1", "First task", "")
+	require.NoError(t, err)
+
+	item2, err := backlog.AddItem(db, proj.ID, "TP", "P1", "Task 2", "Second task", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"ids": []interface{}{item1.ID, item2.ID},
+	})
+
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+
+	var items []map[string]interface{}
+	err = unmarshalResult(result, &items)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+
+	assert.Equal(t, "Task 1", items[0]["title"])
+	assert.Equal(t, "Task 2", items[1]["title"])
+}
+
+// TestHandleItemBatchCreateAndUpdate tests batch with mixed creates and updates.
+func TestHandleItemBatchCreateAndUpdate(t *testing.T) {
+	resetBacklogDBBatch(t)
+
+	proj, err := backlog.CreateProject(db, "test-project", "TP")
+	require.NoError(t, err)
+
+	item1, err := backlog.AddItem(db, proj.ID, "TP", "P0", "Task 1", "Initial", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":       item1.ID,
+				"priority": "P2",
+				"title":    "Task 1 Updated",
+			},
+			map[string]interface{}{
+				"project":  "test-project",
+				"priority": "P1",
+				"title":    "Task 2 New",
+			},
+		},
+	})
+
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+
+	var resp []map[string]interface{}
+	err = unmarshalResult(result, &resp)
+	require.NoError(t, err)
+	require.Len(t, resp, 2)
+
+	assert.Equal(t, "update", resp[0]["action"])
+	assert.Equal(t, "create", resp[1]["action"])
+
+	updated, err := backlog.GetItem(db, item1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Task 1 Updated", updated.Title)
+	assert.Equal(t, "P2", updated.Priority)
+}
+
+// TestHandlePlanBatchFetch tests batch fetch for plans.
+func TestHandlePlanBatchFetch(t *testing.T) {
+	resetBacklogDBBatch(t)
+
+	proj, err := backlog.CreateProject(db, "test-project", "TP")
+	require.NoError(t, err)
+
+	plan1, err := backlog.CreatePlan(db, "Plan 1", "Content 1", &proj.ID, nil)
+	require.NoError(t, err)
+
+	plan2, err := backlog.CreatePlan(db, "Plan 2", "Content 2", &proj.ID, nil)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"ids": []interface{}{float64(plan1.ID), float64(plan2.ID)},
+	})
+
+	result, err := handlePlan(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+
+	var plans []map[string]interface{}
+	err = unmarshalResult(result, &plans)
+	require.NoError(t, err)
+	require.Len(t, plans, 2)
+
+	assert.Equal(t, "Plan 1", plans[0]["title"])
+	assert.Equal(t, "Plan 2", plans[1]["title"])
+}
+
+// TestHandlePlanBatchCreateAndUpdate tests batch with mixed creates and updates.
+func TestHandlePlanBatchCreateAndUpdate(t *testing.T) {
+	resetBacklogDBBatch(t)
+
+	proj, err := backlog.CreateProject(db, "test-project", "TP")
+	require.NoError(t, err)
+
+	plan1, err := backlog.CreatePlan(db, "Plan 1", "Initial content", &proj.ID, nil)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":     float64(plan1.ID),
+				"title":  "Plan 1 Updated",
+				"status": "active",
+			},
+			map[string]interface{}{
+				"title":   "Plan 2 New",
+				"content": "New plan content",
+				"project": "test-project",
+			},
+		},
+	})
+
+	result, err := handlePlan(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+
+	var resp []map[string]interface{}
+	err = unmarshalResult(result, &resp)
+	require.NoError(t, err)
+	require.Len(t, resp, 2)
+
+	assert.Equal(t, "update", resp[0]["action"])
+	assert.Equal(t, "create", resp[1]["action"])
+
+	updated, err := backlog.GetPlan(db, plan1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Plan 1 Updated", updated.Title)
+	assert.Equal(t, "active", updated.Status)
 }

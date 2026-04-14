@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -14,102 +13,103 @@ import (
 
 func handlePut(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		docType, err := req.RequireString("type")
-		if err != nil {
-			return mcp.NewToolResultError("type is required"), nil //nolint:nilerr
+		// Batch-only: entries array required
+		entries := parseEntriesArray(req.GetArguments(), "entries")
+		if len(entries) == 0 {
+			return mcp.NewToolResultError("entries array is required (batch-only mode)"), nil //nolint:nilerr
 		}
 
-		project, err := req.RequireString("project")
-		if err != nil {
-			return mcp.NewToolResultError("project is required"), nil //nolint:nilerr
-		}
+		// Convert to kb.Entry slice
+		kbEntries := make([]kb.Entry, 0, len(entries))
+		for _, e := range entries {
+			var entry kb.Entry
 
-		title, err := req.RequireString("title")
-		if err != nil {
-			return mcp.NewToolResultError("title is required"), nil //nolint:nilerr
-		}
-
-		content, _ := req.GetArguments()["content"].(string)
-		notes, _ := req.GetArguments()["notes"].(string)
-		category, _ := req.GetArguments()["category"].(string)
-
-		// Parse metadata from JSON string
-		var metadata map[string]string
-		if metadataStr, ok := req.GetArguments()["metadata"].(string); ok && metadataStr != "" {
-			if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
-				return mcp.NewToolResultError("invalid metadata JSON"), nil //nolint:nilerr
+			// Extract string fields
+			if v, ok := e["type"].(string); ok {
+				entry.Type = v
 			}
-		}
+			if v, ok := e["project"].(string); ok {
+				entry.Project = v
+			}
+			if v, ok := e["title"].(string); ok {
+				entry.Title = v
+			}
+			if v, ok := e["content"].(string); ok {
+				entry.Content = v
+			}
+			if v, ok := e["category"].(string); ok {
+				entry.Category = v
+			}
+			if v, ok := e["notes"].(string); ok {
+				entry.Notes = v
+			}
 
-		// Parse tags from array
-		var tags []string
-		if rawTags, ok := req.GetArguments()["tags"].([]interface{}); ok {
-			for _, t := range rawTags {
-				if s, ok := t.(string); ok {
-					tags = append(tags, s)
+			// Extract tags array
+			if rawTags, ok := e["tags"].([]interface{}); ok {
+				for _, t := range rawTags {
+					if s, ok := t.(string); ok {
+						entry.Tags = append(entry.Tags, s)
+					}
 				}
 			}
+
+			// Extract metadata
+			if rawMeta, ok := e["metadata"].(map[string]interface{}); ok {
+				entry.Metadata = make(map[string]string)
+				for k, v := range rawMeta {
+					if s, ok := v.(string); ok {
+						entry.Metadata[k] = s
+					}
+				}
+			}
+
+			kbEntries = append(kbEntries, entry)
 		}
 
-		doc := store.Document{
-			Type:     docType,
-			Project:  project,
-			Category: category,
-			Title:    title,
-			Content:  content,
-			Notes:    notes,
-			Metadata: metadata,
-			Tags:     tags,
-		}
-
-		if err := kb.ValidateDocument(doc); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		result, err := store.UpsertDocument(db, doc)
+		results, err := kb.WriteBatch(db, kbEntries, "")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		return jsonResult(map[string]interface{}{"id": result.ID, "action": result.Action})
+		return jsonResult(results)
 	}
 }
 
 func handleGet(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// If id provided, return full document
-		if idFloat, ok := req.GetArguments()["id"].(float64); ok {
-			doc, err := store.GetDocument(db, int64(idFloat))
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if doc == nil {
-				return mcp.NewToolResultError("document not found"), nil
-			}
-
-			// Check verbose flag
+		// If ids provided, return full documents (omit misses)
+		ids := parseInt64Slice(req.GetArguments(), "ids")
+		if len(ids) > 0 {
 			verbose, _ := req.GetArguments()["verbose"].(bool)
-			if !verbose {
-				doc.Notes = ""
+			docs := make([]interface{}, 0, len(ids))
+
+			for _, id := range ids {
+				doc, err := store.GetDocument(db, id)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				if doc == nil {
+					// Omit misses
+					continue
+				}
+
+				if !verbose {
+					doc.Notes = ""
+				}
+
+				docs = append(docs, doc)
 			}
 
-			return jsonResult(doc)
+			return jsonResult(docs)
 		}
 
-		// Otherwise return summaries by filters
+		// Filter/list mode
 		docType, _ := req.GetArguments()["type"].(string)
 		project, _ := req.GetArguments()["project"].(string)
 		category, _ := req.GetArguments()["category"].(string)
 		query, _ := req.GetArguments()["query"].(string)
 
-		var tags []string
-		if rawTags, ok := req.GetArguments()["tags"].([]interface{}); ok {
-			for _, t := range rawTags {
-				if s, ok := t.(string); ok {
-					tags = append(tags, s)
-				}
-			}
-		}
+		tags := parseStringSlice(req.GetArguments(), "tags")
 
 		limit := 0
 		if v, ok := req.GetArguments()["limit"].(float64); ok {

@@ -47,19 +47,8 @@ func init() {
 	putCmd.Flags().BoolVar(&putStdinFlag, "stdin", false, "Read JSON array or {documents:[...]} from stdin (batch mode)")
 }
 
-type kbEntry struct {
-	Type     string            `json:"type"`
-	Project  string            `json:"project,omitempty"`
-	Category string            `json:"category,omitempty"`
-	Title    string            `json:"title"`
-	Content  string            `json:"content"`
-	Notes    string            `json:"notes,omitempty"`
-	Tags     []string          `json:"tags,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-}
-
 type kbBatch struct {
-	Documents []kbEntry `json:"documents"`
+	Documents []kb.Entry `json:"documents"`
 }
 
 type putResult struct {
@@ -89,35 +78,36 @@ func runPutFlags(out io.Writer, db *sql.DB, project, docType, title, content, no
 		return fmt.Errorf("--content is required")
 	}
 
-	doc := store.Document{
-		Type:     docType,
-		Project:  project,
-		Category: category,
-		Title:    title,
-		Content:  content,
-		Notes:    notes,
-		Tags:     tags,
+	entries := []kb.Entry{
+		{
+			Type:     docType,
+			Project:  project,
+			Category: category,
+			Title:    title,
+			Content:  content,
+			Notes:    notes,
+			Tags:     tags,
+		},
 	}
 
-	if err := kb.ValidateDocument(doc); err != nil {
-		return err
-	}
-
-	result, err := store.UpsertDocument(db, doc)
+	results, err := kb.WriteBatch(db, entries, "")
 	if err != nil {
-		return fmt.Errorf("put: upsert failed: %w", err)
+		return fmt.Errorf("put: batch write failed: %w", err)
 	}
 
-	output := putResult{
-		ID:     result.ID,
-		Action: result.Action,
-		Title:  title,
+	// results should have exactly one element from one-element batch
+	if len(results) > 0 {
+		output := putResult{
+			ID:     results[0].ID,
+			Action: results[0].Action,
+			Title:  results[0].Title,
+		}
+		data, err := json.Marshal(output)
+		if err != nil {
+			return fmt.Errorf("put: marshal failed: %w", err)
+		}
+		fmt.Fprintln(out, string(data))
 	}
-	data, err := json.Marshal(output)
-	if err != nil {
-		return fmt.Errorf("put: marshal failed: %w", err)
-	}
-	fmt.Fprintln(out, string(data))
 	return nil
 }
 
@@ -133,7 +123,7 @@ func runPutStdin(out io.Writer, in io.Reader, db *sql.DB, projectFlag string) er
 	}
 
 	// Try to unmarshal as array first
-	var entries []kbEntry
+	var entries []kb.Entry
 	err = json.Unmarshal(data, &entries)
 	if err != nil {
 		// Try to unmarshal as {documents: [...]}
@@ -144,58 +134,12 @@ func runPutStdin(out io.Writer, in io.Reader, db *sql.DB, projectFlag string) er
 		entries = batch.Documents
 	}
 
-	// Validate all entries first
-	for i, entry := range entries {
-		project := entry.Project
-		if project == "" {
-			project = projectFlag
-		}
-
-		doc := store.Document{
-			Type:     entry.Type,
-			Project:  project,
-			Category: entry.Category,
-			Title:    entry.Title,
-			Content:  entry.Content,
-			Notes:    entry.Notes,
-			Tags:     entry.Tags,
-			Metadata: entry.Metadata,
-		}
-
-		if err := kb.ValidateDocument(doc); err != nil {
-			return fmt.Errorf("put: entry %d validation failed: %w", i, err)
-		}
-	}
-
-	// Upsert all validated entries
-	results := make([]putResult, 0, len(entries))
-	for _, entry := range entries {
-		project := entry.Project
-		if project == "" {
-			project = projectFlag
-		}
-
-		doc := store.Document{
-			Type:     entry.Type,
-			Project:  project,
-			Category: entry.Category,
-			Title:    entry.Title,
-			Content:  entry.Content,
-			Notes:    entry.Notes,
-			Tags:     entry.Tags,
-			Metadata: entry.Metadata,
-		}
-
-		result, err := store.UpsertDocument(db, doc)
-		if err != nil {
-			return fmt.Errorf("put: upsert failed: %w", err)
-		}
-
-		results = append(results, putResult{
-			ID:     result.ID,
-			Action: result.Action,
-			Title:  entry.Title,
-		})
+	results, err := kb.WriteBatch(db, entries, projectFlag)
+	if err != nil {
+		// WriteBatch returns partial results on error, still output them
+		outputData, _ := json.Marshal(results)
+		fmt.Fprintln(out, string(outputData))
+		return fmt.Errorf("put: batch write failed: %w", err)
 	}
 
 	outputData, err := json.Marshal(results)
