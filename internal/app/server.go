@@ -104,7 +104,7 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	), withRecover(handleDelete(db)))
 
 	s.AddTool(mcp.NewTool("search",
-		mcp.WithDescription("Full-text search across documents. Returns summaries."),
+		mcp.WithDescription("Keyword search across documents using FTS5. Multi-word queries match docs containing all terms (implicit AND). Wildcard/punctuation-only queries fall back to listing all docs. Returns summaries."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 		mcp.WithString("type", mcp.Description("Filter by type")),
 		mcp.WithString("project", mcp.Description("Filter by project")),
