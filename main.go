@@ -3,11 +3,11 @@ package main
 import (
 	"os"
 
-	"dangernoodle.io/ouroboros/internal/app"
+	"dangernoodle.io/ouroboros/internal/cli"
 )
 
-var Version = "dev"
-
 func main() {
-	os.Exit(app.Run(os.Args[1:], Version))
+	if err := cli.Execute(); err != nil {
+		os.Exit(1)
+	}
 }

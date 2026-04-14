@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -13,29 +12,16 @@ import (
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-func Run(args []string, version string) int {
-	for _, arg := range args {
-		if arg == "--version" || arg == "-v" {
-			fmt.Println(version)
-			return 0
-		}
-	}
-
-	if len(args) > 0 && args[0] == "query" {
-		runQuery(args[1:])
-		return 0
-	}
-	if len(args) > 0 && args[0] == "items" {
-		runItems(args[1:])
-		return 0
-	}
-
+// Serve opens the database, builds the MCP server, and runs ServeStdio.
+// It blocks until the server exits or a fatal error occurs.
+// version is the build-injected version string used in MCP server metadata.
+func Serve(version string) error {
 	db, err := store.InitDB()
 	if err != nil {
-		log.Fatalf("failed to open database: %v", err)
+		return err
 	}
 
-	var bk *backup.Backup
+	var bk *backup.Backup // intentionally nil; backupCommit handles nil
 
 	s := buildServer(db, bk, version)
 
@@ -49,7 +35,8 @@ func Run(args []string, version string) int {
 	}()
 
 	if err := server.ServeStdio(s); err != nil {
-		log.Fatal(err)
+		log.Printf("server error: %v", err)
+		return err
 	}
-	return 0
+	return nil
 }
