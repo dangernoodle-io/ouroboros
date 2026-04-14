@@ -5,43 +5,36 @@ All tools below are MCP tools — call them directly, not via CLI. The ouroboros
 KNOWLEDGE BASE (put, get, delete, search, export, import):
 
 Store immediately (put):
-- After an architectural decision is made or confirmed — capture the choice and rationale
-- When you discover a non-obvious fact (config values, environment details, constraints)
-- When a procedure or workaround is established
-- When a project relationship or dependency is identified
-- Determine project via git rev-parse --show-toplevel | xargs basename
-- Always search first to avoid duplicates — upsert by type+project+category+title
-- When a prior decision changes, search for and update the existing entry — do not create a duplicate
-
-Checkpoints:
-- After completing a multi-step task, review what you decided and why — persist anything non-obvious before moving on
-- After a plan is finalized or abandoned, persist the key decisions and trade-offs
-- Before reporting a task as complete to the user, ask yourself: "if a new conversation started this task from scratch, what would it need to know?" — persist that
+- Architectural decisions with rationale
+- Non-obvious facts (config values, environment details, constraints)
+- Established procedures or workarounds
+- Project relationships or dependencies
+- Always search first to avoid duplicates; upsert by type+project+category+title
+- Update existing entries when decisions change — do not duplicate
 
 Query (get/search):
-- Before decisions that may have prior context, when user asks about past decisions/history
-- get without id returns summaries; verbose=false (default) for routine lookups; verbose=true for "why" questions
+- Before decisions with prior context; get/search return summaries by default
+- verbose=true for detailed context; verbose=false (default) for routine lookups
 - Prefer search for broad queries, get with filters for known types/projects
-- After modifying code, check if related KB entries need updating
 
-Staleness:
-- When a KB entry informs your current work, verify it's still accurate — update or delete if stale
+Checkpoints: After multi-step tasks, finalized plans, or before reporting completion — persist non-obvious decisions.
 
-Do not store: trivial implementation details, information derivable from code or git history, temporary debugging state.
+Staleness: Verify KB entries match current work; update or delete if stale.
+
+Do not store: trivial details, derivable information, or temporary state.
 
 BACKLOG (project, item, plan, config):
 
-Projects: Use project tool to create and list. Projects have a name and auto-derived prefix (e.g., acme-corp → AC).
+Projects: Create with name; auto-derived prefix (e.g., acme-corp → AC).
 
 Items:
-- Use item tool in batch mode: ids=[] to fetch, entries=[{...}] to create/update, or filters to list.
-- In entries, id present = update; id absent = create (needs project+priority+title).
-- Priority scale: P0 (critical/blocking) through P6 (someday/maybe).
-- Item IDs are project-prefix + seq (e.g., AC-1, AC-2).
+- Batch mode: ids=[] fetch, entries=[{...}] create/update, filters list
+- id present = update; id absent = create (needs project+priority+title)
+- Priority: P0 (critical) through P6 (someday). IDs: prefix+seq (e.g., AC-1)
 
 Plans:
-- Use plan tool in batch mode: ids=[] to fetch, entries=[{...}] to create/update, or filters to list.
-- In entries, id present = update; id absent = create (needs title).
-- Status lifecycle: draft → active → complete.
+- Batch mode: ids=[] fetch, entries=[{...}] create/update, filters list
+- id present = update; id absent = create (needs title)
+- Status: draft → active → complete
 
-Config: Use config tool for key-value settings (no args = list all, key = get, key + value = set).
+Config: No args = list all; key = get; key+value = set.
