@@ -37,6 +37,7 @@ func init() {
 
 	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(itemsCmd)
+	rootCmd.AddCommand(putCmd)
 }
 
 // Execute runs the root command.
