@@ -17,13 +17,13 @@ make lint     # golangci-lint run
 ## Project layout
 
 - `main.go` — thin wrapper, delegates to `internal/cli.Execute`
-- `internal/cli/` — cobra root + CLI subcommands (query, items)
+- `internal/cli/` — cobra root + CLI subcommands (query, items, put)
 - `internal/app/` — MCP server setup, tool handlers
 - `internal/store/` — SQLite schema, migrations, KB CRUD, FTS5 search
 - `internal/backlog/` — backlog CRUD (projects, items, plans, config)
 - `internal/backup/` — git backup operations
 - `internal/config/` — bootstrap config file + env var loading
-- `internal/kb/` — KB export/import
+- `internal/kb/` — KB export/import, validation
 
 ## Tools
 

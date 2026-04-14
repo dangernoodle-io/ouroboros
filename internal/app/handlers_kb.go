@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
-	"os"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -35,12 +33,6 @@ func handlePut(db *sql.DB) server.ToolHandlerFunc {
 		notes, _ := req.GetArguments()["notes"].(string)
 		category, _ := req.GetArguments()["category"].(string)
 
-		// Enforce 500-char hard cap on content
-		if len(content) > 500 {
-			fmt.Fprintf(os.Stderr, "ouroboros put cap reject: project=%q title=%q len(content)=%d len(notes)=%d\n", project, title, len(content), len(notes))
-			return mcp.NewToolResultError(fmt.Sprintf("content exceeds 500 char hard cap (got %d). Move narrative into notes field.", len(content))), nil //nolint:nilerr
-		}
-
 		// Parse metadata from JSON string
 		var metadata map[string]string
 		if metadataStr, ok := req.GetArguments()["metadata"].(string); ok && metadataStr != "" {
@@ -68,6 +60,10 @@ func handlePut(db *sql.DB) server.ToolHandlerFunc {
 			Notes:    notes,
 			Metadata: metadata,
 			Tags:     tags,
+		}
+
+		if err := kb.ValidateDocument(doc); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		result, err := store.UpsertDocument(db, doc)
