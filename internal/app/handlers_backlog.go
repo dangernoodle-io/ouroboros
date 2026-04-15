@@ -137,7 +137,7 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 				if entryID, ok := e["id"].(string); ok && entryID != "" {
 					// Update mode
 					fields := make(map[string]string)
-					for _, key := range []string{"priority", "title", "description", "notes", "status"} {
+					for _, key := range []string{"priority", "title", "description", "notes", "status", "component"} {
 						if v, ok := e[key].(string); ok && v != "" {
 							fields[key] = v
 						}
@@ -197,7 +197,12 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 							notes = v
 						}
 
-						item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc, notes)
+						component := ""
+						if v, ok := e["component"].(string); ok {
+							component = v
+						}
+
+						item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc, notes, component)
 						if err != nil {
 							return mcp.NewToolResultError(err.Error()), nil
 						}
@@ -248,6 +253,9 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 		if v, ok := req.GetArguments()["status"].(string); ok && v != "" {
 			f.Status = &v
 		}
+		if v, ok := req.GetArguments()["component"].(string); ok {
+			f.Component = &v
+		}
 
 		items, err := backlog.ListItems(d, f)
 		if err != nil {
@@ -260,7 +268,11 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 
 		var lines []string
 		for _, item := range items {
-			lines = append(lines, fmt.Sprintf("%s %s [%s] %s", item.ID, item.Priority, item.Status, item.Title))
+			componentStr := ""
+			if item.Component != "" {
+				componentStr = fmt.Sprintf("(%s) ", item.Component)
+			}
+			lines = append(lines, fmt.Sprintf("%s %s [%s] %s%s", item.ID, item.Priority, item.Status, componentStr, item.Title))
 		}
 		return mcp.NewToolResultText(strings.Join(lines, "\n")), nil
 	}

@@ -21,7 +21,7 @@ func TestAddItem(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "test description", "")
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "test description", "", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "AC-1", item.ID)
@@ -38,15 +38,15 @@ func TestAddItemSequence(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item1, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "")
+	item1, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "AC-1", item1.ID)
 
-	item2, err := backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "")
+	item2, err := backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "AC-2", item2.ID)
 
-	item3, err := backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "")
+	item3, err := backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "AC-3", item3.ID)
 }
@@ -55,7 +55,7 @@ func TestGetItem(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	created, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "desc", "")
+	created, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "desc", "", "")
 	require.NoError(t, err)
 
 	item, err := backlog.GetItem(d, "AC-1")
@@ -77,7 +77,7 @@ func TestUpdateItem(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "old-title", "old-desc", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "old-title", "old-desc", "", "")
 	require.NoError(t, err)
 
 	updated, err := backlog.UpdateItem(d, "AC-1", map[string]string{
@@ -95,7 +95,7 @@ func TestMarkDone(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "")
 	require.NoError(t, err)
 
 	err = backlog.MarkDone(d, "AC-1")
@@ -117,10 +117,10 @@ func TestListItems(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
 	require.NoError(t, err)
 
 	items, err := backlog.ListItems(d, backlog.ItemFilter{})
@@ -135,10 +135,10 @@ func TestListItemsFilterProject(t *testing.T) {
 	p2, err := backlog.CreateProject(d, "other-corp", "OC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item1", "", "")
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item1", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "item2", "", "")
+	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "item2", "", "", "")
 	require.NoError(t, err)
 
 	items, err := backlog.ListItems(d, backlog.ItemFilter{ProjectID: &p1.ID})
@@ -152,13 +152,13 @@ func TestListItemsFilterPriority(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "")
 	require.NoError(t, err)
 
 	minPriority := 2
@@ -174,10 +174,10 @@ func TestListItemsFilterStatus(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
 	require.NoError(t, err)
 
 	err = backlog.MarkDone(d, "AC-1")
@@ -189,4 +189,58 @@ func TestListItemsFilterStatus(t *testing.T) {
 
 	assert.Len(t, items, 1)
 	assert.Equal(t, "AC-2", items[0].ID)
+}
+
+func TestAddItemWithComponent(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "desc", "", "ouroboros-mcp")
+	require.NoError(t, err)
+
+	assert.Equal(t, "ouroboros-mcp", item.Component)
+
+	// Verify round-trip via GetItem
+	fetched, err := backlog.GetItem(d, "AC-1")
+	require.NoError(t, err)
+	assert.Equal(t, "ouroboros-mcp", fetched.Component)
+}
+
+func TestListItemsFilterComponent(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	// Seed 3 items across 2 components
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "plugin-a")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "plugin-b")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "plugin-a")
+	require.NoError(t, err)
+
+	// Filter to plugin-a
+	component := "plugin-a"
+	items, err := backlog.ListItems(d, backlog.ItemFilter{Component: &component})
+	require.NoError(t, err)
+
+	assert.Len(t, items, 2)
+	assert.Equal(t, "AC-1", items[0].ID)
+	assert.Equal(t, "AC-3", items[1].ID)
+}
+
+func TestUpdateItemComponent(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "plugin-a")
+	require.NoError(t, err)
+
+	updated, err := backlog.UpdateItem(d, "AC-1", map[string]string{
+		"component": "plugin-b",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "plugin-b", updated.Component)
 }

@@ -159,6 +159,10 @@ var migrations = []struct {
 		version: 5,
 		sql:     `ALTER TABLE items ADD COLUMN notes TEXT NOT NULL DEFAULT '';`,
 	},
+	{
+		version: 6,
+		sql:     `ALTER TABLE items ADD COLUMN component TEXT NOT NULL DEFAULT '';`,
+	},
 }
 
 // ApplySchema applies all pending migrations to the database.

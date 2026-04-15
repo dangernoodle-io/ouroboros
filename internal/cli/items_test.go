@@ -16,7 +16,7 @@ func TestRunItemsProjectFound(t *testing.T) {
 	db := newTestDB(t)
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Fix bug", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Fix bug", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -42,9 +42,9 @@ func TestRunItemsStatusDone(t *testing.T) {
 	db := newTestDB(t)
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open item", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open item", "", "", "")
 	require.NoError(t, err)
-	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Closed item", "", "")
+	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Closed item", "", "", "")
 	require.NoError(t, err)
 	_, err = backlog.UpdateItem(db, item2.ID, map[string]string{"status": "done"})
 	require.NoError(t, err)

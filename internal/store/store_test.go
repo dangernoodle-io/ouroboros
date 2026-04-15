@@ -511,8 +511,8 @@ func TestMigrationVersionTracking(t *testing.T) {
 		versions = append(versions, v)
 	}
 
-	// Should have recorded migrations 1, 2, 3, 4, and 5
-	assert.Equal(t, []int{1, 2, 3, 4, 5}, versions)
+	// Should have recorded migrations 1, 2, 3, 4, 5, and 6
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6}, versions)
 
 	// Verify applied_at is set (not NULL)
 	var appliedAt string

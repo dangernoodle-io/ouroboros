@@ -799,10 +799,10 @@ func TestHandleItemBatchFetch(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "test-project", "TP")
 	require.NoError(t, err)
 
-	item1, err := backlog.AddItem(db, proj.ID, "TP", "P0", "Task 1", "First task", "")
+	item1, err := backlog.AddItem(db, proj.ID, "TP", "P0", "Task 1", "First task", "", "")
 	require.NoError(t, err)
 
-	item2, err := backlog.AddItem(db, proj.ID, "TP", "P1", "Task 2", "Second task", "")
+	item2, err := backlog.AddItem(db, proj.ID, "TP", "P1", "Task 2", "Second task", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -828,7 +828,7 @@ func TestHandleItemBatchCreateAndUpdate(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "test-project", "TP")
 	require.NoError(t, err)
 
-	item1, err := backlog.AddItem(db, proj.ID, "TP", "P0", "Task 1", "Initial", "")
+	item1, err := backlog.AddItem(db, proj.ID, "TP", "P0", "Task 1", "Initial", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -932,4 +932,147 @@ func TestHandlePlanBatchCreateAndUpdate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Plan 1 Updated", updated.Title)
 	assert.Equal(t, "active", updated.Status)
+}
+
+func TestHandleItemCreateWithComponent(t *testing.T) {
+	resetAllDB(t)
+
+	// Create project first
+	projReq := makeRequest(map[string]interface{}{
+		"name": "acme-corp",
+	})
+	_, err := handleProject(db, bk)(context.TODO(), projReq)
+	require.NoError(t, err)
+
+	// Create item with component using batch entries
+	itemReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":   "acme-corp",
+				"priority":  "P1",
+				"title":     "Implement feature",
+				"component": "ouroboros-mcp",
+			},
+		},
+	})
+	itemResult, err := handleItem(db, bk)(context.TODO(), itemReq)
+	require.NoError(t, err)
+
+	var resp []map[string]interface{}
+	err = unmarshalResult(itemResult, &resp)
+	require.NoError(t, err)
+	require.Len(t, resp, 1)
+
+	// Fetch to verify component was set
+	fetchReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{"AC-1"},
+	})
+	fetchResult, err := handleItem(db, bk)(context.TODO(), fetchReq)
+	require.NoError(t, err)
+
+	var items []map[string]interface{}
+	err = unmarshalResult(fetchResult, &items)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "ouroboros-mcp", items[0]["component"])
+}
+
+func TestHandleItemListFilterComponent(t *testing.T) {
+	resetAllDB(t)
+
+	// Create project
+	projReq := makeRequest(map[string]interface{}{
+		"name": "acme-corp",
+	})
+	_, err := handleProject(db, bk)(context.TODO(), projReq)
+	require.NoError(t, err)
+
+	// Create items with different components using batch entries
+	itemReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":   "acme-corp",
+				"priority":  "P1",
+				"title":     "Item for plugin-a",
+				"component": "plugin-a",
+			},
+			map[string]interface{}{
+				"project":   "acme-corp",
+				"priority":  "P2",
+				"title":     "Item for plugin-b",
+				"component": "plugin-b",
+			},
+			map[string]interface{}{
+				"project":   "acme-corp",
+				"priority":  "P3",
+				"title":     "Another item for plugin-a",
+				"component": "plugin-a",
+			},
+		},
+	})
+	_, err = handleItem(db, bk)(context.TODO(), itemReq)
+	require.NoError(t, err)
+
+	// Filter by component=plugin-a
+	listReq := makeRequest(map[string]interface{}{
+		"project":   "acme-corp",
+		"component": "plugin-a",
+	})
+	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
+	require.NoError(t, err)
+
+	textContent, ok := mcp.AsTextContent(listResult.Content[0])
+	require.True(t, ok)
+	text := textContent.Text
+
+	// Should contain both plugin-a items
+	assert.Contains(t, text, "AC-1")
+	assert.Contains(t, text, "AC-3")
+	assert.NotContains(t, text, "AC-2")
+}
+
+func TestHandleItemListOutputIncludesComponent(t *testing.T) {
+	resetAllDB(t)
+
+	// Create project
+	projReq := makeRequest(map[string]interface{}{
+		"name": "acme-corp",
+	})
+	_, err := handleProject(db, bk)(context.TODO(), projReq)
+	require.NoError(t, err)
+
+	// Create two items: one with component, one without
+	itemReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":   "acme-corp",
+				"priority":  "P1",
+				"title":     "Item with component",
+				"component": "ouroboros-mcp",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "Item without component",
+			},
+		},
+	})
+	_, err = handleItem(db, bk)(context.TODO(), itemReq)
+	require.NoError(t, err)
+
+	// List all items
+	listReq := makeRequest(map[string]interface{}{
+		"project": "acme-corp",
+	})
+	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
+	require.NoError(t, err)
+
+	textContent, ok := mcp.AsTextContent(listResult.Content[0])
+	require.True(t, ok)
+	text := textContent.Text
+
+	// Output should include (ouroboros-mcp) for AC-1 and no component segment for AC-2
+	assert.Contains(t, text, "(ouroboros-mcp) Item with component")
+	assert.Contains(t, text, "Item without component")
+	assert.NotContains(t, text, "() Item without component") // No empty component segment
 }
