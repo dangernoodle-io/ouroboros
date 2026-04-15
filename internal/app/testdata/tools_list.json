@@ -133,8 +133,12 @@
       "description": "Manage backlog items: ids fetch, entries create/update, or filters list.",
       "inputSchema": {
         "properties": {
+          "component": {
+            "description": "Component tag (subproject/plugin); filter or set",
+            "type": "string"
+          },
           "entries": {
-            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, status?",
+            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, status?",
             "type": "array"
           },
           "ids": {

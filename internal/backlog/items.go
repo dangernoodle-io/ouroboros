@@ -12,6 +12,7 @@ type Item struct {
 	ProjectID   int64  `json:"project_id"`
 	Priority    string `json:"priority"`
 	Title       string `json:"title"`
+	Component   string `json:"component"`
 	Description string `json:"description"`
 	Notes       string `json:"notes,omitempty"`
 	Status      string `json:"status"`
@@ -19,7 +20,7 @@ type Item struct {
 	Updated     string `json:"updated"`
 }
 
-func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, notes string) (*Item, error) {
+func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, notes, component string) (*Item, error) {
 	tx, err := d.Begin()
 	if err != nil {
 		return nil, err
@@ -36,8 +37,8 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err = tx.Exec(
-		"INSERT INTO items (id, project_id, seq, priority, title, description, notes, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
-		id, projectID, seq, priority, title, description, notes, now, now,
+		"INSERT INTO items (id, project_id, seq, priority, title, description, notes, component, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
+		id, projectID, seq, priority, title, description, notes, component, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("add item: %w", err)
@@ -49,7 +50,7 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 
 	return &Item{
 		ID: id, ProjectID: projectID, Priority: priority,
-		Title: title, Description: description, Notes: notes, Status: "open",
+		Title: title, Component: component, Description: description, Notes: notes, Status: "open",
 		Created: now, Updated: now,
 	}, nil
 }
@@ -57,8 +58,8 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 func GetItem(d *sql.DB, id string) (*Item, error) {
 	var item Item
 	err := d.QueryRow(
-		"SELECT id, project_id, priority, title, description, notes, status, created, updated FROM items WHERE id = ?", id,
-	).Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Description, &item.Notes, &item.Status, &item.Created, &item.Updated)
+		"SELECT id, project_id, priority, title, component, description, notes, status, created, updated FROM items WHERE id = ?", id,
+	).Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Component, &item.Description, &item.Notes, &item.Status, &item.Created, &item.Updated)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("item not found: %s", id)
 	}
@@ -69,7 +70,7 @@ func GetItem(d *sql.DB, id string) (*Item, error) {
 }
 
 func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
-	allowed := map[string]bool{"priority": true, "title": true, "description": true, "notes": true, "status": true}
+	allowed := map[string]bool{"priority": true, "title": true, "description": true, "notes": true, "status": true, "component": true}
 
 	var sets []string
 	var args []interface{}
@@ -114,10 +115,11 @@ type ItemFilter struct {
 	PriorityMin *int
 	PriorityMax *int
 	Status      *string
+	Component   *string
 }
 
 func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
-	query := "SELECT id, project_id, priority, title, description, status, created, updated FROM items WHERE 1=1"
+	query := "SELECT id, project_id, priority, title, component, description, status, created, updated FROM items WHERE 1=1"
 	var args []interface{}
 
 	if f.ProjectID != nil {
@@ -136,6 +138,10 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 		query += " AND status = ?"
 		args = append(args, *f.Status)
 	}
+	if f.Component != nil {
+		query += " AND component = ?"
+		args = append(args, *f.Component)
+	}
 
 	query += " ORDER BY CAST(SUBSTR(priority, 2) AS INTEGER), id"
 
@@ -148,7 +154,7 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 	var items []Item
 	for rows.Next() {
 		var item Item
-		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Description, &item.Status, &item.Created, &item.Updated); err != nil {
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Component, &item.Description, &item.Status, &item.Created, &item.Updated); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

@@ -130,11 +130,12 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	s.AddTool(mcp.NewTool("item",
 		mcp.WithDescription("Manage backlog items: ids fetch, entries create/update, or filters list."),
 		mcp.WithArray("ids", mcp.Description("Item IDs to fetch")),
-		mcp.WithArray("entries", mcp.Description("Items to create/update: {id?}, project, priority, title, description?, notes?, status?")),
+		mcp.WithArray("entries", mcp.Description("Items to create/update: {id?}, project, priority, title, description?, notes?, component?, status?")),
 		mcp.WithString("project", mcp.Description("Project name (filter/create)")),
 		mcp.WithString("priority_min", mcp.Description("Min priority (P0–P6)")),
 		mcp.WithString("priority_max", mcp.Description("Max priority (P0–P6)")),
 		mcp.WithString("status", mcp.Description("open or done")),
+		mcp.WithString("component", mcp.Description("Component tag (subproject/plugin); filter or set")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
 		toolAnnotation(nil, nil, nil),
 	), withRecover(handleItem(db, bk)))

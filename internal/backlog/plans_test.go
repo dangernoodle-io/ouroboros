@@ -29,7 +29,7 @@ func TestCreatePlanLinked(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "", "")
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "", "", "")
 	require.NoError(t, err)
 
 	plan, err := backlog.CreatePlan(d, "linked-plan", "content", &p.ID, &item.ID)
