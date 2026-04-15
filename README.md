@@ -25,7 +25,27 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 | plan | Backlog | [Wiki](../../wiki/Backlog#plan) |
 | config | Backlog | [Wiki](../../wiki/Backlog#config) |
 
-## Install
+## Use with Claude Code
+
+The recommended way to run ouroboros is via the marketplace plugin — it handles installation and wires up auto-context injection, persistence hooks, and workflow skills on top of the raw MCP server.
+
+```
+/plugin marketplace add dangernoodle-io/dangernoodle-marketplace
+/plugin install ouroboros-mcp@dangernoodle-marketplace
+```
+
+The plugin adds, beyond the raw MCP tools:
+
+- Auto-installs the `ouroboros` binary on session start — no manual install step
+- Hooks that inject project KB context into every turn and auto-persist decisions when conversations end
+- Skills: `/persist`, `/recall`, `/triage` for common KB and backlog workflows
+- Subagents: `backlog-manager` and `knowledge-explorer` for deeper investigation
+
+Source: [dangernoodle-io/dangernoodle-marketplace](https://github.com/dangernoodle-io/dangernoodle-marketplace).
+
+## Install the binary standalone
+
+If you're not using Claude Code, or you want ouroboros as a plain MCP server without the plugin's hooks and skills, install the binary directly.
 
 ### Homebrew
 
@@ -43,11 +63,13 @@ go install dangernoodle.io/ouroboros@latest
 
 Download pre-built binaries from [releases](https://github.com/dangernoodle-io/ouroboros/releases).
 
-## Register with Claude Code
+### Register manually with Claude Code
 
 ```bash
 claude mcp add --scope user ouroboros /absolute/path/to/ouroboros
 ```
+
+This gives you the 10 MCP tools but none of the auto-context injection or persistence hooks that the plugin provides.
 
 ## Configuration
 
