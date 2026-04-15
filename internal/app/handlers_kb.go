@@ -143,9 +143,35 @@ func handleDelete(db *sql.DB) server.ToolHandlerFunc {
 
 func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		query, err := req.RequireString("query")
-		if err != nil {
-			return mcp.NewToolResultError("query is required"), nil //nolint:nilerr
+		// Batch mode: if queries[] is provided, loop over all queries with shared filters
+		queries := parseStringSlice(req.GetArguments(), "queries")
+		if len(queries) > 0 {
+			docType, _ := req.GetArguments()["type"].(string)
+			project, _ := req.GetArguments()["project"].(string)
+
+			limit := 0
+			if v, ok := req.GetArguments()["limit"].(float64); ok {
+				limit = int(v)
+			}
+
+			resultSets := make([][]store.DocumentSummary, 0, len(queries))
+			for _, q := range queries {
+				rs, err := store.SearchDocuments(db, q, docType, project, limit)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				if rs == nil {
+					rs = []store.DocumentSummary{} // empty-not-nil invariant
+				}
+				resultSets = append(resultSets, rs)
+			}
+			return jsonResult(resultSets)
+		}
+
+		// Single-query mode: unchanged for backwards compat
+		query, _ := req.GetArguments()["query"].(string)
+		if query == "" {
+			return mcp.NewToolResultError("query or queries is required"), nil //nolint:nilerr
 		}
 
 		docType, _ := req.GetArguments()["type"].(string)

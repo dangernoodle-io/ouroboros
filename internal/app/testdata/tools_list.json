@@ -232,33 +232,31 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Keyword search (FTS5). Multi-word = AND. Wildcard falls back to list.",
+      "description": "Keyword search (FTS5). Single query or queries[] batch. Multi-word = AND.",
       "inputSchema": {
         "properties": {
           "limit": {
-            "description": "Limit, default 10, max 500",
+            "description": "Limit per query, default 10, max 500",
             "type": "number"
           },
           "project": {
             "description": "Filter by project",
             "type": "string"
           },
+          "queries": {
+            "description": "Batch queries sharing filters; response is positional [[...], [...]]",
+            "type": "array"
+          },
           "query": {
-            "description": "Search query",
+            "description": "Single query",
             "type": "string"
           },
           "type": {
             "description": "Filter by type",
             "type": "string"
-          },
-          "verbose": {
-            "description": "Include notes (default: false)",
-            "type": "boolean"
           }
         },
-        "required": [
-          "query"
-        ],
+        "required": [],
         "type": "object"
       },
       "name": "search"
