@@ -109,16 +109,16 @@ async function main() {
       try {
         JSON.parse(json);
       } catch (parseErr) {
-        console.log(`[ouroboros] main ${sessionShort}: kb block JSON parse error: ${parseErr.message}`);
+        console.error(`[ouroboros] main ${sessionShort}: kb block JSON parse error: ${parseErr.message}`);
         process.exit(0);
       }
       if (!project) {
-        console.log(`[ouroboros] main ${sessionShort}: kb block found but no project (run inside a git repo)`);
+        console.error(`[ouroboros] main ${sessionShort}: kb block found but no project (run inside a git repo)`);
         process.exit(0);
       }
       const binary = getBinaryPath();
       if (!binary) {
-        console.log(`[ouroboros] main ${sessionShort}: kb block found but ouroboros binary not available`);
+        console.error(`[ouroboros] main ${sessionShort}: kb block found but ouroboros binary not available`);
         process.exit(0);
       }
       try {
@@ -141,11 +141,11 @@ async function main() {
         const parsed = JSON.parse(result);
         const resultEntries = Array.isArray(parsed) ? parsed : [parsed];
         const ids = resultEntries.map(e => e.id).filter(id => id !== undefined);
-        console.log(`[ouroboros] main ${sessionShort}: persisted ${resultEntries.length} entries to ${project} [ids: ${ids.join(',')}]`);
+        console.error(`[ouroboros] main ${sessionShort}: persisted ${resultEntries.length} entries to ${project} [ids: ${ids.join(',')}]`);
         logHookEvent({ hook: 'stop', kind: 'persist', session_id: sessionId, project, entries: resultEntries.length, ids });
         process.exit(0);
       } catch (execErr) {
-        console.log(`[ouroboros] main ${sessionShort}: put failed: ${execErr.message}`);
+        console.error(`[ouroboros] main ${sessionShort}: put failed: ${execErr.message}`);
         logHookEvent({ hook: 'stop', kind: 'error', detail: execErr.message, session_id: sessionId, project });
         process.exit(0);
       }
@@ -153,14 +153,14 @@ async function main() {
 
     // Tier-2 check: already persisted
     if (matchesAnyPattern(message, ALREADY_PERSISTED_PATTERNS)) {
-      console.log(`[ouroboros] main ${sessionShort}: tier-2 self-claim detected (no kb block, but message references persistence)`);
+      console.error(`[ouroboros] main ${sessionShort}: tier-2 self-claim detected (no kb block, but message references persistence)`);
       logHookEvent({ hook: 'stop', kind: 'nudge', session_id: sessionId, project, reason: 'tier-2' });
       process.exit(0);
     }
 
     // Tier-1 check: decision language
     if (matchesAnyPattern(message, DECISION_PATTERNS)) {
-      console.log(`[ouroboros] main ${sessionShort}: tier-1 nudge fired (decision language present, no kb block) — call put now`);
+      console.error(`[ouroboros] main ${sessionShort}: tier-1 nudge fired (decision language present, no kb block) — call put now`);
       logHookEvent({ hook: 'stop', kind: 'nudge', session_id: sessionId, project, reason: 'tier-1' });
       process.exit(0);
     }
