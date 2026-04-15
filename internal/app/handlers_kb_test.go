@@ -309,3 +309,254 @@ func unmarshalResult(result *mcp.CallToolResult, v interface{}) error {
 	}
 	return json.Unmarshal([]byte(textContent.Text), v)
 }
+
+// TestHandleSearch_SingleQuery_BackwardsCompat tests single-query mode returns flat []DocumentSummary.
+func TestHandleSearch_SingleQuery_BackwardsCompat(t *testing.T) {
+	resetDB(t)
+
+	// Seed a document
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "ouroboros",
+				"title":   "tiktoken",
+				"content": "Use tiktoken for token counting",
+			},
+		},
+	})
+
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	// Search with single query
+	searchReq := makeRequest(map[string]interface{}{
+		"query": "tiktoken",
+	})
+
+	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
+	require.NoError(t, err)
+
+	// Should unmarshal as flat []DocumentSummary
+	var summaries []store.DocumentSummary
+	err = unmarshalResult(searchResult, &summaries)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "tiktoken", summaries[0].Title)
+}
+
+// TestHandleSearch_Batch_PositionalResults tests batch mode returns [][]DocumentSummary in input order.
+func TestHandleSearch_Batch_PositionalResults(t *testing.T) {
+	resetDB(t)
+
+	// Seed documents
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "First doc about alpha",
+				"content": "Content about alpha",
+			},
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "Second doc about beta",
+				"content": "Content about beta",
+			},
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "Third doc about gamma",
+				"content": "Content about gamma",
+			},
+		},
+	})
+
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	// Search with batch queries
+	searchReq := makeRequest(map[string]interface{}{
+		"queries": []interface{}{"alpha", "beta", "gamma"},
+	})
+
+	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
+	require.NoError(t, err)
+
+	// Should unmarshal as [][]DocumentSummary
+	var resultSets [][]store.DocumentSummary
+	err = unmarshalResult(searchResult, &resultSets)
+	require.NoError(t, err)
+	require.Len(t, resultSets, 3)
+
+	// Verify order and content
+	assert.Len(t, resultSets[0], 1)
+	assert.Equal(t, "First doc about alpha", resultSets[0][0].Title)
+	assert.Len(t, resultSets[1], 1)
+	assert.Equal(t, "Second doc about beta", resultSets[1][0].Title)
+	assert.Len(t, resultSets[2], 1)
+	assert.Equal(t, "Third doc about gamma", resultSets[2][0].Title)
+}
+
+// TestHandleSearch_Batch_EmptyResultSetsAreEmptyNotNil tests empty result slots are [] not null.
+func TestHandleSearch_Batch_EmptyResultSetsAreEmptyNotNil(t *testing.T) {
+	resetDB(t)
+
+	// Seed one document
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "matching doc",
+				"content": "About matches",
+			},
+		},
+	})
+
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	// Search with one matching and one non-matching query
+	searchReq := makeRequest(map[string]interface{}{
+		"queries": []interface{}{"matches", "nothing-will-match-xyz123"},
+	})
+
+	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
+	require.NoError(t, err)
+
+	// Get raw JSON text
+	textContent, ok := mcp.AsTextContent(searchResult.Content[0])
+	require.True(t, ok)
+	jsonText := textContent.Text
+
+	// Verify second result set is [] not null
+	assert.Contains(t, jsonText, "[[", "should contain array of arrays")
+	assert.Contains(t, jsonText, "[]", "should contain empty array for no matches")
+
+	// Also verify unmarshal
+	var resultSets [][]store.DocumentSummary
+	err = json.Unmarshal([]byte(jsonText), &resultSets)
+	require.NoError(t, err)
+	require.Len(t, resultSets, 2)
+	assert.Len(t, resultSets[0], 1)
+	assert.Len(t, resultSets[1], 0, "empty result slot should be non-nil empty slice")
+}
+
+// TestHandleSearch_Batch_SharedFilters tests top-level filters apply to all queries.
+func TestHandleSearch_Batch_SharedFilters(t *testing.T) {
+	resetDB(t)
+
+	// Seed documents in different projects
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "ouroboros",
+				"title":   "about alpha in ouroboros",
+				"content": "Content alpha",
+			},
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "ouroboros",
+				"title":   "about beta in ouroboros",
+				"content": "Content beta",
+			},
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "other-project",
+				"title":   "about alpha in other",
+				"content": "Content alpha",
+			},
+		},
+	})
+
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	// Search with batch queries and project filter
+	searchReq := makeRequest(map[string]interface{}{
+		"queries": []interface{}{"alpha", "beta"},
+		"project": "ouroboros",
+	})
+
+	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
+	require.NoError(t, err)
+
+	var resultSets [][]store.DocumentSummary
+	err = unmarshalResult(searchResult, &resultSets)
+	require.NoError(t, err)
+	require.Len(t, resultSets, 2)
+
+	// Both result sets should only contain ouroboros project docs
+	require.Len(t, resultSets[0], 1)
+	assert.Equal(t, "ouroboros", resultSets[0][0].Project)
+	assert.Equal(t, "about alpha in ouroboros", resultSets[0][0].Title)
+
+	require.Len(t, resultSets[1], 1)
+	assert.Equal(t, "ouroboros", resultSets[1][0].Project)
+	assert.Equal(t, "about beta in ouroboros", resultSets[1][0].Title)
+}
+
+// TestHandleSearch_NeitherQueryNorQueries_Errors tests error when neither param provided.
+func TestHandleSearch_NeitherQueryNorQueries_Errors(t *testing.T) {
+	resetDB(t)
+
+	// Request with neither query nor queries
+	searchReq := makeRequest(map[string]interface{}{})
+
+	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
+	require.NoError(t, err)
+
+	// Should be an error
+	assert.True(t, searchResult.IsError)
+	textContent, ok := mcp.AsTextContent(searchResult.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "query or queries is required")
+}
+
+// TestHandleSearch_BothProvided_QueriesWins tests batch mode takes precedence.
+func TestHandleSearch_BothProvided_QueriesWins(t *testing.T) {
+	resetDB(t)
+
+	// Seed documents
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "about alpha",
+				"content": "Content alpha",
+			},
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "about beta",
+				"content": "Content beta",
+			},
+		},
+	})
+
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	// Request with both query and queries; queries should win
+	searchReq := makeRequest(map[string]interface{}{
+		"query":   "alpha",
+		"queries": []interface{}{"beta", "alpha"},
+	})
+
+	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
+	require.NoError(t, err)
+
+	// Should return batch shape (array of arrays), not flat shape
+	var resultSets [][]store.DocumentSummary
+	err = unmarshalResult(searchResult, &resultSets)
+	require.NoError(t, err)
+	require.Len(t, resultSets, 2, "should use batch mode (queries[]) not single mode (query)")
+	assert.Len(t, resultSets[0], 1)
+	assert.Equal(t, "about beta", resultSets[0][0].Title)
+	assert.Len(t, resultSets[1], 1)
+	assert.Equal(t, "about alpha", resultSets[1][0].Title)
+}

@@ -98,12 +98,12 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	), withRecover(handleDelete(db)))
 
 	s.AddTool(mcp.NewTool("search",
-		mcp.WithDescription("Keyword search (FTS5). Multi-word = AND. Wildcard falls back to list."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+		mcp.WithDescription("Keyword search (FTS5). Single query or queries[] batch. Multi-word = AND."),
+		mcp.WithString("query", mcp.Description("Single query")),
+		mcp.WithArray("queries", mcp.Description("Batch queries sharing filters; response is positional [[...], [...]]")),
 		mcp.WithString("type", mcp.Description("Filter by type")),
 		mcp.WithString("project", mcp.Description("Filter by project")),
-		mcp.WithNumber("limit", mcp.Description("Limit, default 10, max 500")),
-		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
+		mcp.WithNumber("limit", mcp.Description("Limit per query, default 10, max 500")),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleSearch(db)))
 
