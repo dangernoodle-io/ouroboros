@@ -1,0 +1,65 @@
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/scripts/install.sh",
+        "timeout": 30
+      }]
+    }],
+    "PostToolUse": [{
+      "matcher": "tool == \"Bash\"",
+      "hooks": [{
+        "type": "command",
+        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/post-commit-nudge.js",
+        "timeout": 3
+      }],
+      "description": "Nudge to /persist after git commits"
+    }, {
+      "matcher": "tool == \"Edit\" || tool == \"Write\"",
+      "hooks": [{
+        "type": "command",
+        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/post-edit-check.js",
+        "timeout": 3
+      }],
+      "description": "Check KB for entries referencing edited files"
+    }],
+    "SubagentStop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/subagent-stop.js",
+        "timeout": 4
+      }],
+      "description": "Nudge main context to persist subagent decisions"
+    }],
+    "Stop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/stop.js",
+        "timeout": 4
+      }],
+      "description": "Auto-persist or nudge main-context KB blocks/decisions when a turn ends"
+    }],
+    "SubagentStart": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/subagent-start.js",
+        "timeout": 5
+      }],
+      "description": "Inject KB context into subagent at startup"
+    }],
+    "UserPromptSubmit": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt-context.js",
+        "timeout": 5
+      }],
+      "description": "Inject KB context for current project"
+    }]
+  }
+}
