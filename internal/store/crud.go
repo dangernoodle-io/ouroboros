@@ -50,10 +50,27 @@ func TokenizeQuery(query string) []string {
 	return terms
 }
 
+// projectFilter appends a project filter clause and args for the given project names.
+func projectFilter(prefix string, projects []string, args *[]interface{}) string {
+	if len(projects) == 0 {
+		return ""
+	}
+	if len(projects) == 1 {
+		*args = append(*args, projects[0])
+		return " AND " + prefix + "project = ?"
+	}
+	placeholders := make([]string, len(projects))
+	for i, p := range projects {
+		placeholders[i] = "?"
+		*args = append(*args, p)
+	}
+	return " AND " + prefix + "project IN (" + strings.Join(placeholders, ",") + ")"
+}
+
 // KeywordSearch performs a keyword-based FTS5 search with BM25 ranking.
 // Terms are ORed together so any match counts. Returns results ranked by relevance.
 // Returns nil if no meaningful terms after stop word removal.
-func KeywordSearch(db *sql.DB, query, project string, limit int) ([]DocumentSummary, error) {
+func KeywordSearch(db *sql.DB, query string, projects []string, limit int) ([]DocumentSummary, error) {
 	terms := TokenizeQuery(query)
 	if len(terms) == 0 {
 		return []DocumentSummary{}, nil
@@ -75,10 +92,7 @@ func KeywordSearch(db *sql.DB, query, project string, limit int) ([]DocumentSumm
 		WHERE fts.documents_fts MATCH ?`
 	args := []interface{}{ftsQuery}
 
-	if project != "" {
-		sqlQuery += " AND d.project = ?"
-		args = append(args, project)
-	}
+	sqlQuery += projectFilter("d.", projects, &args)
 
 	sqlQuery += " ORDER BY bm25(documents_fts) LIMIT ?"
 	args = append(args, limit)
@@ -204,7 +218,7 @@ func GetDocument(db *sql.DB, id int64) (*Document, error) {
 
 // QueryDocuments queries documents with optional filters (type, project, category, FTS, tags).
 // Returns DocumentSummary (no content, no metadata) to conserve tokens.
-func QueryDocuments(db *sql.DB, docType, project, category, ftsQuery string, tags []string, limit int) ([]DocumentSummary, error) {
+func QueryDocuments(db *sql.DB, docType string, projects []string, category, ftsQuery string, tags []string, limit int) ([]DocumentSummary, error) {
 	limit = ClampLimit(limit, 10, 500)
 
 	var query string
@@ -224,10 +238,7 @@ func QueryDocuments(db *sql.DB, docType, project, category, ftsQuery string, tag
 			query += " AND d.type = ?"
 			args = append(args, docType)
 		}
-		if project != "" {
-			query += " AND d.project = ?"
-			args = append(args, project)
-		}
+		query += projectFilter("d.", projects, &args)
 		if category != "" {
 			query += " AND d.category = ?"
 			args = append(args, category)
@@ -247,12 +258,21 @@ func QueryDocuments(db *sql.DB, docType, project, category, ftsQuery string, tag
 			whereClause += "type = ?"
 			args = append(args, docType)
 		}
-		if project != "" {
+		if len(projects) > 0 {
 			if whereClause != "" {
 				whereClause += " AND "
 			}
-			whereClause += "project = ?"
-			args = append(args, project)
+			if len(projects) == 1 {
+				whereClause += "project = ?"
+				args = append(args, projects[0])
+			} else {
+				placeholders := make([]string, len(projects))
+				for i, p := range projects {
+					placeholders[i] = "?"
+					args = append(args, p)
+				}
+				whereClause += "project IN (" + strings.Join(placeholders, ",") + ")"
+			}
 		}
 		if category != "" {
 			if whereClause != "" {
@@ -349,12 +369,12 @@ func hasSearchableTokens(q string) bool {
 
 // SearchDocuments performs a full-text search across all documents.
 // Returns DocumentSummary (no content, no metadata).
-func SearchDocuments(db *sql.DB, query, docType, project string, limit int) ([]DocumentSummary, error) {
+func SearchDocuments(db *sql.DB, query, docType string, projects []string, limit int) ([]DocumentSummary, error) {
 	limit = ClampLimit(limit, 10, 500)
 
 	// If query has no searchable tokens (only punctuation/wildcards), fall back to list mode
 	if !hasSearchableTokens(query) {
-		return QueryDocuments(db, docType, project, "", "", nil, limit)
+		return QueryDocuments(db, docType, projects, "", "", nil, limit)
 	}
 
 	escapedQuery := FtsEscape(query)
@@ -372,10 +392,7 @@ func SearchDocuments(db *sql.DB, query, docType, project string, limit int) ([]D
 		args = append(args, docType)
 	}
 
-	if project != "" {
-		ftQuery += " AND d.project = ?"
-		args = append(args, project)
-	}
+	ftQuery += projectFilter("d.", projects, &args)
 
 	ftQuery += " LIMIT ?"
 	args = append(args, limit)

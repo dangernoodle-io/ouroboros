@@ -105,7 +105,7 @@ func handleGet(db *sql.DB) server.ToolHandlerFunc {
 
 		// Filter/list mode
 		docType, _ := req.GetArguments()["type"].(string)
-		project, _ := req.GetArguments()["project"].(string)
+		projects := parseStringSlice(req.GetArguments(), "projects")
 		category, _ := req.GetArguments()["category"].(string)
 		query, _ := req.GetArguments()["query"].(string)
 
@@ -116,7 +116,7 @@ func handleGet(db *sql.DB) server.ToolHandlerFunc {
 			limit = int(v)
 		}
 
-		summaries, err := store.QueryDocuments(db, docType, project, category, query, tags, limit)
+		summaries, err := store.QueryDocuments(db, docType, projects, category, query, tags, limit)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -147,7 +147,7 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 		queries := parseStringSlice(req.GetArguments(), "queries")
 		if len(queries) > 0 {
 			docType, _ := req.GetArguments()["type"].(string)
-			project, _ := req.GetArguments()["project"].(string)
+			projects := parseStringSlice(req.GetArguments(), "projects")
 
 			limit := 0
 			if v, ok := req.GetArguments()["limit"].(float64); ok {
@@ -156,7 +156,7 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 
 			resultSets := make([][]store.DocumentSummary, 0, len(queries))
 			for _, q := range queries {
-				rs, err := store.SearchDocuments(db, q, docType, project, limit)
+				rs, err := store.SearchDocuments(db, q, docType, projects, limit)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -175,14 +175,14 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 		}
 
 		docType, _ := req.GetArguments()["type"].(string)
-		project, _ := req.GetArguments()["project"].(string)
+		projects := parseStringSlice(req.GetArguments(), "projects")
 
 		limit := 0
 		if v, ok := req.GetArguments()["limit"].(float64); ok {
 			limit = int(v)
 		}
 
-		summaries, err := store.SearchDocuments(db, query, docType, project, limit)
+		summaries, err := store.SearchDocuments(db, query, docType, projects, limit)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -193,10 +193,10 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 
 func handleExport(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		project, _ := req.GetArguments()["project"].(string)
+		projects := parseStringSlice(req.GetArguments(), "projects")
 		docType, _ := req.GetArguments()["type"].(string)
 
-		markdown, err := kb.ExportMarkdown(db, project, docType)
+		markdown, err := kb.ExportMarkdown(db, projects, docType)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

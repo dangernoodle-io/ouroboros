@@ -141,11 +141,31 @@ func TestListItemsFilterProject(t *testing.T) {
 	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "item2", "", "", "")
 	require.NoError(t, err)
 
-	items, err := backlog.ListItems(d, backlog.ItemFilter{ProjectID: &p1.ID})
+	items, err := backlog.ListItems(d, backlog.ItemFilter{ProjectIDs: []int64{p1.ID}})
 	require.NoError(t, err)
 
 	assert.Len(t, items, 1)
 	assert.Equal(t, "AC-1", items[0].ID)
+}
+
+func TestListItemsFilterMultiProject(t *testing.T) {
+	d := testDB(t)
+	p1 := createTestProject(t, d)
+	p2, err := backlog.CreateProject(d, "other-corp", "OC")
+	require.NoError(t, err)
+	p3, err := backlog.CreateProject(d, "third-corp", "TC")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item1", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "item2", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p3.ID, "TC", "P1", "item3", "", "", "")
+	require.NoError(t, err)
+
+	items, err := backlog.ListItems(d, backlog.ItemFilter{ProjectIDs: []int64{p1.ID, p2.ID}})
+	require.NoError(t, err)
+	assert.Len(t, items, 2)
 }
 
 func TestDeleteItemsSingle(t *testing.T) {

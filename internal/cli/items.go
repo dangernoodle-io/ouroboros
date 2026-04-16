@@ -46,7 +46,7 @@ func runItems(out io.Writer, db *sql.DB, projectName, status string) error {
 		return nil
 	}
 
-	filter := backlog.ItemFilter{ProjectID: &project.ID}
+	filter := backlog.ItemFilter{ProjectIDs: []int64{project.ID}}
 	if status != "" {
 		filter.Status = &status
 	}

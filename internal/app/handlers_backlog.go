@@ -29,6 +29,18 @@ func resolveProject(d *sql.DB, name string) (*backlog.Project, error) {
 	return backlog.GetProjectByName(d, name)
 }
 
+func resolveProjects(d *sql.DB, names []string) ([]int64, error) {
+	ids := make([]int64, 0, len(names))
+	for _, name := range names {
+		proj, err := resolveProject(d, name)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, proj.ID)
+	}
+	return ids, nil
+}
+
 func derivePrefix(d *sql.DB, name string) (string, error) {
 	base := strings.ToUpper(name)
 	if len(base) < 2 {
@@ -241,13 +253,13 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 		// List mode — apply filters
 		var f backlog.ItemFilter
 
-		projectName, _ := req.GetArguments()["project"].(string)
-		if projectName != "" {
-			proj, err := resolveProject(d, projectName)
+		projectNames := parseStringSlice(req.GetArguments(), "projects")
+		if len(projectNames) > 0 {
+			ids, err := resolveProjects(d, projectNames)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			f.ProjectID = &proj.ID
+			f.ProjectIDs = ids
 		}
 		if v, ok := req.GetArguments()["priority_min"].(string); ok && v != "" {
 			n, err := parsePriority(v)
@@ -393,12 +405,13 @@ func handlePlan(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 
 		// List mode
 		var f backlog.PlanFilter
-		if v, ok := req.GetArguments()["project"].(string); ok && v != "" {
-			proj, err := resolveProject(d, v)
+		projectNames := parseStringSlice(req.GetArguments(), "projects")
+		if len(projectNames) > 0 {
+			ids, err := resolveProjects(d, projectNames)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			f.ProjectID = &proj.ID
+			f.ProjectIDs = ids
 		}
 		if v, ok := req.GetArguments()["status"].(string); ok && v != "" {
 			f.Status = &v

@@ -42,13 +42,18 @@ func runQuery(out io.Writer, db *sql.DB, project, docType, search string, limit 
 	var summaries []store.DocumentSummary
 	var err error
 
+	projects := []string{}
+	if project != "" {
+		projects = []string{project}
+	}
+
 	if search != "" {
-		summaries, err = store.KeywordSearch(db, search, project, limit)
+		summaries, err = store.KeywordSearch(db, search, projects, limit)
 		if err != nil {
 			return fmt.Errorf("query: search failed: %w", err)
 		}
 	} else {
-		summaries, err = store.QueryDocuments(db, docType, project, "", "", nil, limit)
+		summaries, err = store.QueryDocuments(db, docType, projects, "", "", nil, limit)
 		if err != nil {
 			return fmt.Errorf("query: list failed: %w", err)
 		}

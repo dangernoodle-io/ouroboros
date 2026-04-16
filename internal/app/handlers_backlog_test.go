@@ -322,7 +322,7 @@ func TestHandleItemList(t *testing.T) {
 
 	// List items
 	listReq := makeRequest(map[string]interface{}{
-		"project": "acme-corp",
+		"projects": []interface{}{"acme-corp"},
 	})
 	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
 	require.NoError(t, err)
@@ -390,8 +390,8 @@ func TestHandleItemListFilter(t *testing.T) {
 
 	// Filter by status=done
 	listReq := makeRequest(map[string]interface{}{
-		"project": "acme-corp",
-		"status":  "done",
+		"projects": []interface{}{"acme-corp"},
+		"status":   "done",
 	})
 	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
 	require.NoError(t, err)
@@ -631,7 +631,7 @@ func TestHandlePlanList(t *testing.T) {
 
 	// List plans
 	listReq := makeRequest(map[string]interface{}{
-		"project": "acme-corp",
+		"projects": []interface{}{"acme-corp"},
 	})
 	listResult, err := handlePlan(db, bk)(context.TODO(), listReq)
 	require.NoError(t, err)
@@ -741,9 +741,13 @@ func TestHandleItemNonexistentProject(t *testing.T) {
 
 	// Try to create item in nonexistent project
 	itemReq := makeRequest(map[string]interface{}{
-		"project":  "nonexistent",
-		"priority": "P1",
-		"title":    "Item",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "nonexistent",
+				"priority": "P1",
+				"title":    "Item",
+			},
+		},
 	})
 	itemResult, err := handleItem(db, bk)(context.TODO(), itemReq)
 	require.NoError(t, err)
@@ -1015,7 +1019,7 @@ func TestHandleItemListFilterComponent(t *testing.T) {
 
 	// Filter by component=plugin-a
 	listReq := makeRequest(map[string]interface{}{
-		"project":   "acme-corp",
+		"projects":  []interface{}{"acme-corp"},
 		"component": "plugin-a",
 	})
 	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
@@ -1062,7 +1066,7 @@ func TestHandleItemListOutputIncludesComponent(t *testing.T) {
 
 	// List all items
 	listReq := makeRequest(map[string]interface{}{
-		"project": "acme-corp",
+		"projects": []interface{}{"acme-corp"},
 	})
 	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
 	require.NoError(t, err)
@@ -1211,4 +1215,67 @@ func TestHandleItemDeleteNonexistent(t *testing.T) {
 	err = unmarshalResult(deleteResult, &deleteResp)
 	require.NoError(t, err)
 	assert.Equal(t, float64(0), deleteResp["deleted"])
+}
+
+// TestHandleItemListMultiProject tests item list with multiple project filters.
+func TestHandleItemListMultiProject(t *testing.T) {
+	resetAllDB(t)
+
+	// Create two projects
+	projReq1 := makeRequest(map[string]interface{}{
+		"name": "project-a",
+	})
+	_, err := handleProject(db, bk)(context.TODO(), projReq1)
+	require.NoError(t, err)
+
+	projReq2 := makeRequest(map[string]interface{}{
+		"name": "project-b",
+	})
+	_, err = handleProject(db, bk)(context.TODO(), projReq2)
+	require.NoError(t, err)
+
+	// Create items in project-a
+	itemReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "project-a",
+				"priority": "P1",
+				"title":    "Item in project-a",
+			},
+		},
+	})
+	_, err = handleItem(db, bk)(context.TODO(), itemReq)
+	require.NoError(t, err)
+
+	// Create items in project-b
+	itemReq = makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "project-b",
+				"priority": "P2",
+				"title":    "Item in project-b",
+			},
+		},
+	})
+	_, err = handleItem(db, bk)(context.TODO(), itemReq)
+	require.NoError(t, err)
+
+	// List items from both projects
+	listReq := makeRequest(map[string]interface{}{
+		"projects": []interface{}{"project-a", "project-b"},
+	})
+	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
+	require.NoError(t, err)
+
+	textContent, ok := mcp.AsTextContent(listResult.Content[0])
+	require.True(t, ok)
+	text := textContent.Text
+
+	// Should contain items from both projects
+	// Prefixes are derived from project names: project-a → PR, project-b → P1
+	assert.Contains(t, text, "Item in project-a")
+	assert.Contains(t, text, "Item in project-b")
+	// IDs should be PR-1 and P1-1 but we just check that both projects appear
+	assert.Contains(t, text, "[open] Item in project-a")
+	assert.Contains(t, text, "[open] Item in project-b")
 }
