@@ -159,6 +159,41 @@ test('subagent-start: KB context still injected to stdout (regression)', () => {
   assert(stdout.includes('persist any decisions/facts'));
 });
 
+test('subagent-start: plugin-qualified knowledge-explorer agent skipped (regression test)', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-plugin-qualified-skip-'));
+  try {
+    const input = JSON.stringify({ agent_type: 'ouroboros-mcp:knowledge-explorer', session_id: 'plugin-skip-test' });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '', 'no KB context should be injected for skipped plugin agent');
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'subagent_start' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    const startEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.kind === 'subagent_start';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'fire event should be logged');
+    assert(startEvent, 'subagent_start event should be logged');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
 
 test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {
