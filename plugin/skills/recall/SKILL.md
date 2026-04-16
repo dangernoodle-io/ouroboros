@@ -10,9 +10,9 @@ model: haiku
 2. **Query.** Use args as the search query (e.g. `/recall auth middleware`). If no args, do a broad project dump.
 
 3. **Query all three sources:**
-   - KB: `search` with query + project filter; if no query, `get` with project filter for summaries
-   - Backlog: `item` with project filter (add `status: "open"` for broad queries)
-   - Plans: `plan` with project filter
+   - KB: `search` with query + `projects: ["<project>"]`; if no query, `get` with `projects: ["<project>"]` for summaries
+   - Backlog: `item` with `projects: ["<project>"]` (add `status: "open"` for broad queries)
+   - Plans: `plan` with `projects: ["<project>"]`
 
 4. **Present** grouped by source:
    - **Knowledge Base** — decisions, facts, notes, relations (summaries only)
