@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, getProject, getBinaryPath, formatContextLines, SKIP_AGENT_TYPES } = require(__dirname + '/lib');
+const { readStdin, getProject, projectFromPath, getBinaryPath, formatContextLines, logHookEvent, SKIP_AGENT_TYPES } = require(__dirname + '/lib');
 
 const MAX_ENTRIES = 8;
 
@@ -16,14 +16,31 @@ async function main() {
       // If not JSON, continue with empty data
     }
 
-    // Early exit: skip list
     const agent_type = data.agent_type || '';
+    const session_id = data.session_id;
+
+    // Determine project, prefer cwd-based resolution
+    const cwd = data.cwd || '';
+    let project = null;
+    if (cwd) {
+      project = projectFromPath(cwd);
+    }
+    if (!project) {
+      project = getProject();
+    }
+
+    // Log fire event immediately, before any early exits
+    logHookEvent({ hook: 'subagent_start', kind: 'fire', session_id, project });
+
+    // Log subagent_start event unconditionally, before any early exits
+    logHookEvent({ hook: 'subagent_start', kind: 'subagent_start', session_id, agent_type });
+
+    // Early exit: skip list
     if (SKIP_AGENT_TYPES.includes(agent_type)) {
       process.exit(0);
     }
 
-    // Determine project from cwd
-    const project = getProject();
+    // Early exit: no project
     if (!project) {
       process.exit(0);
     }
@@ -58,6 +75,7 @@ async function main() {
     for (const line of lines) {
       process.stdout.write(line + '\n');
     }
+
     process.exit(0);
   } catch (e) {
     process.exit(0);

@@ -3,6 +3,8 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const SKIP_AGENT_TYPES = ['Explore', 'knowledge-explorer', 'backlog-manager'];
+const LOG_PATH = `${process.env.HOME}/.ouroboros/hooks.log`;
+let logDirCreated = false;
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -85,6 +87,53 @@ function formatContextLines(project, rows) {
   lines.push('```');
 
   return lines;
+}
+
+function findGitRoot(startPath) {
+  try {
+    if (!startPath) return null;
+    let current = path.resolve(startPath);
+    const root = path.parse(current).root;
+
+    // If startPath is a file, start from its directory
+    if (fs.existsSync(current)) {
+      const stats = fs.statSync(current);
+      if (stats.isFile()) {
+        current = path.dirname(current);
+      }
+    } else {
+      // If startPath doesn't exist, still try to walk up from the given path
+      current = path.dirname(current);
+    }
+
+    while (current !== root) {
+      try {
+        const gitPath = path.join(current, '.git');
+        if (fs.existsSync(gitPath)) {
+          return current;
+        }
+      } catch (e) {
+        // Continue walking
+      }
+      current = path.dirname(current);
+    }
+
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function projectFromPath(startPath) {
+  try {
+    const gitRoot = findGitRoot(startPath);
+    if (!gitRoot) {
+      return null;
+    }
+    return path.basename(gitRoot);
+  } catch (e) {
+    return null;
+  }
 }
 
 function findWorkspaceRoot() {
@@ -207,4 +256,46 @@ function resolveProject(hints = {}, workspaceRoot, skipGit = false) {
   return null;
 }
 
-module.exports = { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findWorkspaceRoot, listWorkspaceProjects, resolveProject, SKIP_AGENT_TYPES };
+function logHookEvent(fields) {
+  const flag = process.env.OUROBOROS_HOOK_LOG;
+  if (flag === '0' || flag === 'false' || flag === 'off') return;
+  try {
+    // Create directory on first call
+    if (!logDirCreated) {
+      try {
+        const dir = path.dirname(LOG_PATH);
+        fs.mkdirSync(dir, { recursive: true });
+        logDirCreated = true;
+      } catch (e) {
+        // Silent fail on mkdir
+        return;
+      }
+    }
+
+    // Size check: if file exceeds ~5MB, rotate to .1
+    try {
+      const stats = fs.statSync(LOG_PATH);
+      if (stats.size > 5 * 1024 * 1024) {
+        const rotatedPath = `${LOG_PATH}.1`;
+        try {
+          fs.renameSync(LOG_PATH, rotatedPath);
+        } catch (e) {
+          // Silent fail on rotation
+        }
+      }
+    } catch (e) {
+      // File doesn't exist yet; that's fine
+    }
+
+    // Write JSONL line
+    const entry = {
+      ts: new Date().toISOString(),
+      ...fields,
+    };
+    fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + '\n');
+  } catch (e) {
+    // Silent fail — logging must never break a hook
+  }
+}
+
+module.exports = { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, SKIP_AGENT_TYPES };

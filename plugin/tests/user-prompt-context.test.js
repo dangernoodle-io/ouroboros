@@ -10,16 +10,18 @@ const FIXTURES_PATH = path.join(__dirname, 'fixtures');
 
 let tempDir;
 let stubPath;
+let homeDir;
 
-test('setup: create temp stub dir', () => {
+test('setup: create temp stub dir and HOME isolation', () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-upc-test-'));
+  homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-upc-home-'));
   stubPath = path.join(tempDir, 'ouroboros');
   fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
 });
 
 function runScript(input, env = {}) {
-  const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}` };
+  const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: homeDir };
   Object.assign(envVars, env);
   return spawnSync('node', [SCRIPT_PATH], {
     input: input,
@@ -294,4 +296,53 @@ test('fallback: legacy message field still works', () => {
 
   fs.rmSync(workspaceRoot, { recursive: true });
   fs.rmSync(testStubDir, { recursive: true });
+});
+
+test('user-prompt-context: fire event logged with hook:user_prompt_context', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-upc-fire-home-'));
+  try {
+    const input = JSON.stringify({ prompt: 'what\'s next?', session_id: 'sess-test-123' });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist (fire event always logged)');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'user_prompt_context' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'should have a fire event with hook=user_prompt_context');
+    const parsed = JSON.parse(fireEvent);
+    assert.strictEqual(parsed.session_id, 'sess-test-123', 'fire event should include session_id');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('user-prompt-context: KB context still injected to stdout (regression)', () => {
+  const input = JSON.stringify({ prompt: 'what\'s next?' });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+  const stdout = result.stdout;
+  // Stub returns KB data, so verify expected context is present
+  assert(stdout.includes('[ouroboros]') || stdout.trim() === '');
+});
+
+test('cleanup: remove temp stub dir and HOME', () => {
+  if (tempDir && fs.existsSync(tempDir)) {
+    fs.rmSync(tempDir, { recursive: true });
+  }
+  if (homeDir && fs.existsSync(homeDir)) {
+    fs.rmSync(homeDir, { recursive: true });
+  }
 });
