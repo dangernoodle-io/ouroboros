@@ -56,7 +56,7 @@ func TokenizeQuery(query string) []string {
 func KeywordSearch(db *sql.DB, query, project string, limit int) ([]DocumentSummary, error) {
 	terms := TokenizeQuery(query)
 	if len(terms) == 0 {
-		return nil, nil
+		return []DocumentSummary{}, nil
 	}
 
 	// Build FTS5 query: term1 OR term2 OR term3
