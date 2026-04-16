@@ -12,7 +12,7 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
    - `relation` — dependencies between components, projects, or systems
    - `plan` — implementation plans discussed or deferred; terse step list in `content`, narrative in `notes`
 
-3. **Search before put.** For each candidate, call `search` with the proposed title. If a matching entry exists for the same project, reuse its title verbatim — the server upserts on `type+project+category+title`. Only skip if existing content is already identical.
+3. **Search before put.** Collect all candidate titles, then call `search` once with `queries: [title1, title2, ...]` and `projects: ["<project>"]`. The response is positional — `results[i]` corresponds to `queries[i]`. If a matching entry exists for the same project, reuse its title verbatim — the server upserts on `type+project+category+title`. Only skip if existing content is already identical.
 
 4. **Store via `put`** with these fields:
    - `type`, `project`, `title` (concise, searchable — used as the upsert key)
