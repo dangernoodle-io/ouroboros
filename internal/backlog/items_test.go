@@ -336,3 +336,71 @@ func TestUpdateItemComponent(t *testing.T) {
 
 	assert.Equal(t, "plugin-b", updated.Component)
 }
+
+func TestCountItemsByPriority(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P0", "item1", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P1", "item2", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P1", "item3", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item4", "", "", "")
+	require.NoError(t, err)
+
+	status := "open"
+	counts, err := backlog.CountItemsByPriority(d, backlog.ItemFilter{Status: &status})
+	require.NoError(t, err)
+
+	assert.Len(t, counts, 3)
+	assert.Equal(t, "P0", counts[0].Priority)
+	assert.Equal(t, 1, counts[0].Count)
+	assert.Equal(t, "P1", counts[1].Priority)
+	assert.Equal(t, 2, counts[1].Count)
+	assert.Equal(t, "P2", counts[2].Priority)
+	assert.Equal(t, 1, counts[2].Count)
+}
+
+func TestCountItemsByPriorityFiltered(t *testing.T) {
+	d := testDB(t)
+	p1 := createTestProject(t, d)
+	p2, err := backlog.CreateProject(d, "test-project", "TP")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P0", "item1", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item2", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p2.ID, "TP", "P0", "item3", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p2.ID, "TP", "P0", "item4", "", "", "")
+	require.NoError(t, err)
+
+	counts, err := backlog.CountItemsByPriority(d, backlog.ItemFilter{ProjectIDs: []int64{p1.ID}})
+	require.NoError(t, err)
+
+	assert.Len(t, counts, 2)
+	assert.Equal(t, "P0", counts[0].Priority)
+	assert.Equal(t, 1, counts[0].Count)
+	assert.Equal(t, "P1", counts[1].Priority)
+	assert.Equal(t, 1, counts[1].Count)
+}
+
+func TestCountItemsByPriorityEmpty(t *testing.T) {
+	d := testDB(t)
+	_ = createTestProject(t, d)
+
+	status := "open"
+	counts, err := backlog.CountItemsByPriority(d, backlog.ItemFilter{Status: &status})
+	require.NoError(t, err)
+
+	assert.Empty(t, counts)
+}

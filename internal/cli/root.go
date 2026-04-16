@@ -38,6 +38,7 @@ func init() {
 	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(itemsCmd)
 	rootCmd.AddCommand(putCmd)
+	rootCmd.AddCommand(statuslineCmd)
 }
 
 // Execute runs the root command.
