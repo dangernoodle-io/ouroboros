@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent } = require('../scripts/lib');
+const { extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, isSkippedAgentType } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -573,3 +573,48 @@ test('logHookEvent - rotation: file > 5MB triggers rotation to .log.1', () => {
   }
 });
 
+// Tests for isSkippedAgentType
+test('isSkippedAgentType - "Explore" (built-in) → true', () => {
+  const result = isSkippedAgentType('Explore');
+  assert.strictEqual(result, true);
+});
+
+test('isSkippedAgentType - "knowledge-explorer" (bare) → true', () => {
+  const result = isSkippedAgentType('knowledge-explorer');
+  assert.strictEqual(result, true);
+});
+
+test('isSkippedAgentType - "backlog-manager" (bare) → true', () => {
+  const result = isSkippedAgentType('backlog-manager');
+  assert.strictEqual(result, true);
+});
+
+test('isSkippedAgentType - "ouroboros-mcp:knowledge-explorer" (plugin qualified) → true', () => {
+  const result = isSkippedAgentType('ouroboros-mcp:knowledge-explorer');
+  assert.strictEqual(result, true);
+});
+
+test('isSkippedAgentType - "ouroboros-mcp:backlog-manager" (plugin qualified) → true', () => {
+  const result = isSkippedAgentType('ouroboros-mcp:backlog-manager');
+  assert.strictEqual(result, true);
+});
+
+test('isSkippedAgentType - "general-purpose" → false', () => {
+  const result = isSkippedAgentType('general-purpose');
+  assert.strictEqual(result, false);
+});
+
+test('isSkippedAgentType - "ouroboros-mcp:general-purpose" → false', () => {
+  const result = isSkippedAgentType('ouroboros-mcp:general-purpose');
+  assert.strictEqual(result, false);
+});
+
+test('isSkippedAgentType - empty string → false', () => {
+  const result = isSkippedAgentType('');
+  assert.strictEqual(result, false);
+});
+
+test('isSkippedAgentType - undefined → false', () => {
+  const result = isSkippedAgentType(undefined);
+  assert.strictEqual(result, false);
+});

@@ -50,7 +50,7 @@ async function main() {
     touchFile(COOLDOWN_FILE);
 
     // Write to stderr
-    console.log('[ouroboros] /persist to save decisions');
+    console.error('[ouroboros] /persist to save decisions');
     logHookEvent({ hook: 'post_commit_nudge', kind: 'nudge', session_id, project });
 
     process.exit(0);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, getProject, projectFromPath, getBinaryPath, extractKbBlock, matchesAnyPattern, logHookEvent, SKIP_AGENT_TYPES } = require(__dirname + '/lib');
+const { readStdin, getProject, projectFromPath, getBinaryPath, extractKbBlock, matchesAnyPattern, logHookEvent, isSkippedAgentType } = require(__dirname + '/lib');
 
 // Tier-2 check: patterns indicating the subagent already persisted
 const ALREADY_PERSISTED_PATTERNS = [
@@ -61,7 +61,7 @@ async function main() {
     logHookEvent({ hook: 'subagent_stop', kind: 'subagent_stop', session_id, agent_id, agent_type, last_message_excerpt: excerpt });
 
     // Early exit: skip list
-    if (SKIP_AGENT_TYPES.includes(agent_type)) {
+    if (isSkippedAgentType(agent_type)) {
       process.exit(0);
     }
 
@@ -81,16 +81,16 @@ async function main() {
       try {
         JSON.parse(json);
       } catch (parseErr) {
-        console.log(`[ouroboros] subagent ${agent_id_short}: kb block JSON parse error: ${parseErr.message}`);
+        console.error(`[ouroboros] subagent ${agent_id_short}: kb block JSON parse error: ${parseErr.message}`);
         process.exit(0);
       }
       if (!project) {
-        console.log(`[ouroboros] subagent ${agent_id_short}: kb block found but no project (run inside a git repo)`);
+        console.error(`[ouroboros] subagent ${agent_id_short}: kb block found but no project (run inside a git repo)`);
         process.exit(0);
       }
       const binary = getBinaryPath();
       if (!binary) {
-        console.log(`[ouroboros] subagent ${agent_id_short}: kb block found but ouroboros binary not available`);
+        console.error(`[ouroboros] subagent ${agent_id_short}: kb block found but ouroboros binary not available`);
         process.exit(0);
       }
       try {
@@ -115,12 +115,12 @@ async function main() {
         const parsed = JSON.parse(result);
         const resultEntries = Array.isArray(parsed) ? parsed : [parsed];
         const ids = resultEntries.map(e => e.id).filter(id => id !== undefined);
-        console.log(`[ouroboros] subagent ${agent_id_short}: persisted ${resultEntries.length} entries to ${project} [ids: ${ids.join(',')}]`);
+        console.error(`[ouroboros] subagent ${agent_id_short}: persisted ${resultEntries.length} entries to ${project} [ids: ${ids.join(',')}]`);
         logHookEvent({ hook: 'subagent_stop', kind: 'persist', session_id, project, entries: resultEntries.length, ids });
 
         process.exit(0);
       } catch (execErr) {
-        console.log(`[ouroboros] subagent ${agent_id_short}: put failed: ${execErr.message}`);
+        console.error(`[ouroboros] subagent ${agent_id_short}: put failed: ${execErr.message}`);
         logHookEvent({ hook: 'subagent_stop', kind: 'error', detail: execErr.message, session_id, project });
         process.exit(0);
       }
@@ -128,7 +128,7 @@ async function main() {
 
     // Tier-2 check: already persisted
     if (matchesAnyPattern(message, ALREADY_PERSISTED_PATTERNS)) {
-      console.log(`[ouroboros] subagent ${agent_id_short}: tier-2 self-claim detected (no kb block, but message references persistence)`);
+      console.error(`[ouroboros] subagent ${agent_id_short}: tier-2 self-claim detected (no kb block, but message references persistence)`);
       logHookEvent({ hook: 'subagent_stop', kind: 'nudge', session_id, project, reason: 'tier-2' });
 
       process.exit(0);
@@ -136,7 +136,7 @@ async function main() {
 
     // Tier-1 check: decision language
     if (matchesAnyPattern(message, DECISION_PATTERNS)) {
-      console.log(`[ouroboros] subagent ${agent_id_short}: tier-1 nudge fired (decision language present, no kb block)`);
+      console.error(`[ouroboros] subagent ${agent_id_short}: tier-1 nudge fired (decision language present, no kb block)`);
       logHookEvent({ hook: 'subagent_stop', kind: 'nudge', session_id, project, reason: 'tier-1' });
 
       process.exit(0);

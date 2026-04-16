@@ -87,7 +87,7 @@ async function main() {
 
     // Format and inject
     const titles = rows.map(r => `[${r.type}] ${r.title}`).join(', ');
-    process.stdout.write(`[ouroboros] KB refs ${basename}: ${titles} — check staleness\n`);
+    process.stderr.write(`[ouroboros] KB refs ${basename}: ${titles} — check staleness\n`);
     logHookEvent({ hook: 'post_edit_check', kind: 'nudge', session_id, project });
     process.exit(0);
   } catch (e) {

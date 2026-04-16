@@ -91,9 +91,9 @@ test('subagent-stop: kb block + stub put succeeds → log includes count, projec
   });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /persisted 1 entries/);
-  assert.match(result.stdout, /\[ids: 1\]/);
-  assert(result.stdout.includes('abc12345'));
+  assert.match(result.stderr, /persisted 1 entries/);
+  assert.match(result.stderr, /\[ids: 1\]/);
+  assert(result.stderr.includes('abc12345'));
 });
 
 test('subagent-stop: kb block + stub put fails → log says put failed', () => {
@@ -104,8 +104,8 @@ test('subagent-stop: kb block + stub put fails → log says put failed', () => {
   });
   const result = runScript(input, { OUROBOROS_STUB_PUT_FAIL: '1' });
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /put failed/);
-  assert(result.stdout.includes('def87654'));
+  assert.match(result.stderr, /put failed/);
+  assert(result.stderr.includes('def87654'));
 });
 
 test('subagent-stop: kb block with malformed JSON → logs parse error, does NOT fall through', () => {
@@ -116,9 +116,9 @@ test('subagent-stop: kb block with malformed JSON → logs parse error, does NOT
   });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /kb block JSON parse error/);
-  assert(!result.stdout.includes('tier-1'));
-  assert(!result.stdout.includes('persisted'));
+  assert.match(result.stderr, /kb block JSON parse error/);
+  assert(!result.stderr.includes('tier-1'));
+  assert(!result.stderr.includes('persisted'));
 });
 
 test('subagent-stop: no kb block + tier-2 self-claim → logs tier-2 detection', () => {
@@ -129,8 +129,8 @@ test('subagent-stop: no kb block + tier-2 self-claim → logs tier-2 detection',
   });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /tier-2 self-claim/);
-  assert(result.stdout.includes('abc12345'));
+  assert.match(result.stderr, /tier-2 self-claim/);
+  assert(result.stderr.includes('abc12345'));
 });
 
 test('subagent-stop: no kb block + tier-1 decision language → tier-1 nudge log', () => {
@@ -141,8 +141,8 @@ test('subagent-stop: no kb block + tier-1 decision language → tier-1 nudge log
   });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /tier-1 nudge fired/);
-  assert(result.stdout.includes('abc12345'));
+  assert.match(result.stderr, /tier-1 nudge fired/);
+  assert(result.stderr.includes('abc12345'));
 });
 
 test('subagent-stop: message with no kb block + neutral content → exit 0, no stdout', () => {
@@ -270,6 +270,53 @@ test('subagent-stop: metadata injection → hook:subagent_stop source, agent_id,
   assert.strictEqual(secondEntry.metadata.source, 'hook:subagent_stop', 'second entry should also have injected source');
 });
 
+test('subagent-stop: plugin-qualified knowledge-explorer agent skipped (regression test)', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-plugin-qualified-stop-skip-'));
+  try {
+    const input = JSON.stringify({
+      agent_type: 'ouroboros-mcp:knowledge-explorer',
+      agent_id: 'plugin-kb-explorer',
+      session_id: 'plugin-stop-skip-test',
+      last_assistant_message: 'This is a long message with persistence keywords like knowledge base and ouroboros references. We decided to persist everything. The message contains more than 80 characters to pass minimum length check.',
+    });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '', 'no stdout should be emitted for skipped plugin agent');
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'subagent_stop' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    const stopEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.kind === 'subagent_stop';
+      } catch (e) { return false; }
+    });
+    const nudgeEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.kind === 'nudge';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'fire event should be logged');
+    assert(stopEvent, 'subagent_stop event should be logged');
+    assert(!nudgeEvent, 'no nudge event should be fired for skipped plugin agent');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
 
 test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {

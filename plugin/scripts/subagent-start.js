@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, getProject, projectFromPath, getBinaryPath, formatContextLines, logHookEvent, SKIP_AGENT_TYPES } = require(__dirname + '/lib');
+const { readStdin, getProject, projectFromPath, getBinaryPath, formatContextLines, logHookEvent, isSkippedAgentType } = require(__dirname + '/lib');
 
 const MAX_ENTRIES = 8;
 
@@ -36,7 +36,7 @@ async function main() {
     logHookEvent({ hook: 'subagent_start', kind: 'subagent_start', session_id, agent_type });
 
     // Early exit: skip list
-    if (SKIP_AGENT_TYPES.includes(agent_type)) {
+    if (isSkippedAgentType(agent_type)) {
       process.exit(0);
     }
 

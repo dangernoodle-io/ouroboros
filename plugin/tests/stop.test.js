@@ -78,10 +78,10 @@ test('stop: kb block + stub put succeeds → log includes count, project, ids, s
   const input = JSON.stringify({ session_id: 'sess1234abcd', transcript_path: transcript });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /persisted 1 entries/);
-  assert.match(result.stdout, /\[ids: 1\]/);
-  assert(result.stdout.includes('sess1234'));
-  assert(result.stdout.includes('main'));
+  assert.match(result.stderr, /persisted 1 entries/);
+  assert.match(result.stderr, /\[ids: 1\]/);
+  assert(result.stderr.includes('sess1234'));
+  assert(result.stderr.includes('main'));
 });
 
 test('stop: kb block + stub put fails → log says put failed', () => {
@@ -91,8 +91,8 @@ test('stop: kb block + stub put fails → log says put failed', () => {
   const input = JSON.stringify({ session_id: 'sessXYZ12345', transcript_path: transcript });
   const result = runScript(input, { OUROBOROS_STUB_PUT_FAIL: '1' });
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /put failed/);
-  assert(result.stdout.includes('sessXYZ1'));
+  assert.match(result.stderr, /put failed/);
+  assert(result.stderr.includes('sessXYZ1'));
 });
 
 test('stop: kb block with malformed JSON → logs parse error, does NOT fall through', () => {
@@ -102,9 +102,9 @@ test('stop: kb block with malformed JSON → logs parse error, does NOT fall thr
   const input = JSON.stringify({ session_id: 'sessparse123', transcript_path: transcript });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /kb block JSON parse error/);
-  assert(!result.stdout.includes('tier-1'));
-  assert(!result.stdout.includes('persisted'));
+  assert.match(result.stderr, /kb block JSON parse error/);
+  assert(!result.stderr.includes('tier-1'));
+  assert(!result.stderr.includes('persisted'));
 });
 
 test('stop: no kb block + tier-2 self-claim → logs tier-2 detection', () => {
@@ -114,8 +114,8 @@ test('stop: no kb block + tier-2 self-claim → logs tier-2 detection', () => {
   const input = JSON.stringify({ session_id: 'sesst2abc123', transcript_path: transcript });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /tier-2 self-claim/);
-  assert(result.stdout.includes('sesst2ab'));
+  assert.match(result.stderr, /tier-2 self-claim/);
+  assert(result.stderr.includes('sesst2ab'));
 });
 
 test('stop: no kb block + tier-1 decision language → tier-1 nudge log', () => {
@@ -125,9 +125,9 @@ test('stop: no kb block + tier-1 decision language → tier-1 nudge log', () => 
   const input = JSON.stringify({ session_id: 'sesst1abc123', transcript_path: transcript });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /tier-1 nudge fired/);
-  assert.match(result.stdout, /call put now/);
-  assert(result.stdout.includes('sesst1ab'));
+  assert.match(result.stderr, /tier-1 nudge fired/);
+  assert.match(result.stderr, /call put now/);
+  assert(result.stderr.includes('sesst1ab'));
 });
 
 test('stop: no kb block + neutral content → exit 0, no stdout', () => {
@@ -149,7 +149,7 @@ test('stop: skips sidechain (subagent) turns and uses last main-context turn', (
   const input = JSON.stringify({ session_id: 'sessmain1234', transcript_path: transcript });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
-  assert.match(result.stdout, /tier-1 nudge fired/);
+  assert.match(result.stderr, /tier-1 nudge fired/);
 });
 
 test('stop: only sidechain turns present → exit 0, no stdout', () => {
