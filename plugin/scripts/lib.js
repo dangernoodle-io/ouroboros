@@ -298,4 +298,11 @@ function logHookEvent(fields) {
   }
 }
 
-module.exports = { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, SKIP_AGENT_TYPES };
+function isSkippedAgentType(agentType) {
+  if (!agentType) return false;
+  if (SKIP_AGENT_TYPES.includes(agentType)) return true;
+  const tail = agentType.includes(':') ? agentType.split(':').pop() : agentType;
+  return SKIP_AGENT_TYPES.includes(tail);
+}
+
+module.exports = { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, SKIP_AGENT_TYPES, isSkippedAgentType };
