@@ -148,6 +148,78 @@ func TestListItemsFilterProject(t *testing.T) {
 	assert.Equal(t, "AC-1", items[0].ID)
 }
 
+func TestDeleteItemsSingle(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
+	require.NoError(t, err)
+
+	affected, err := backlog.DeleteItems(d, []string{"AC-1"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+
+	_, err = backlog.GetItem(d, "AC-1")
+	assert.Error(t, err)
+
+	item, err := backlog.GetItem(d, "AC-2")
+	require.NoError(t, err)
+	assert.Equal(t, "AC-2", item.ID)
+}
+
+func TestDeleteItemsMultiple(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "")
+	require.NoError(t, err)
+
+	affected, err := backlog.DeleteItems(d, []string{"AC-1", "AC-2"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), affected)
+
+	item, err := backlog.GetItem(d, "AC-3")
+	require.NoError(t, err)
+	assert.Equal(t, "AC-3", item.ID)
+}
+
+func TestDeleteItemsNotFound(t *testing.T) {
+	d := testDB(t)
+
+	affected, err := backlog.DeleteItems(d, []string{"NONEXISTENT"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), affected)
+}
+
+func TestDeleteItemsMixed(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	require.NoError(t, err)
+
+	affected, err := backlog.DeleteItems(d, []string{"AC-1", "NONEXISTENT"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+}
+
+func TestDeleteItemsEmpty(t *testing.T) {
+	d := testDB(t)
+
+	affected, err := backlog.DeleteItems(d, []string{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), affected)
+}
+
 func TestListItemsFilterPriority(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)

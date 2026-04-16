@@ -129,13 +129,19 @@
       "name": "import"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "destructiveHint": true
+      },
       "description": "Manage backlog items: ids fetch, entries create/update, or filters list.",
       "inputSchema": {
         "properties": {
           "component": {
             "description": "Component tag (subproject/plugin); filter or set",
             "type": "string"
+          },
+          "delete_ids": {
+            "description": "Item IDs to delete",
+            "type": "array"
           },
           "entries": {
             "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, status?",

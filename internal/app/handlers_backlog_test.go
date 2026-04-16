@@ -1076,3 +1076,139 @@ func TestHandleItemListOutputIncludesComponent(t *testing.T) {
 	assert.Contains(t, text, "Item without component")
 	assert.NotContains(t, text, "() Item without component") // No empty component segment
 }
+
+func TestHandleItemDeleteSingle(t *testing.T) {
+	resetAllDB(t)
+
+	// Create project and two items
+	projReq := makeRequest(map[string]interface{}{
+		"name": "acme-corp",
+	})
+	_, err := handleProject(db, bk)(context.TODO(), projReq)
+	require.NoError(t, err)
+
+	itemReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "Item to delete",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "Item to keep",
+			},
+		},
+	})
+	_, err = handleItem(db, bk)(context.TODO(), itemReq)
+	require.NoError(t, err)
+
+	// Delete one item via delete_ids
+	deleteReq := makeRequest(map[string]interface{}{
+		"delete_ids": []interface{}{"AC-1"},
+	})
+	deleteResult, err := handleItem(db, bk)(context.TODO(), deleteReq)
+	require.NoError(t, err)
+
+	var deleteResp map[string]interface{}
+	err = unmarshalResult(deleteResult, &deleteResp)
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), deleteResp["deleted"])
+
+	// Verify AC-1 is gone by trying to fetch it (should error)
+	getReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{"AC-1"},
+	})
+	getResult, err := handleItem(db, bk)(context.TODO(), getReq)
+	require.NoError(t, err)
+	// Check that result is an error
+	assert.True(t, len(getResult.Content) > 0)
+
+	// Verify AC-2 still exists
+	getReq2 := makeRequest(map[string]interface{}{
+		"ids": []interface{}{"AC-2"},
+	})
+	getResult2, err := handleItem(db, bk)(context.TODO(), getReq2)
+	require.NoError(t, err)
+
+	var items2 []map[string]interface{}
+	err = unmarshalResult(getResult2, &items2)
+	require.NoError(t, err)
+	require.Len(t, items2, 1)
+	assert.Equal(t, "AC-2", items2[0]["id"])
+}
+
+func TestHandleItemDeleteMultiple(t *testing.T) {
+	resetAllDB(t)
+
+	// Create project and three items
+	projReq := makeRequest(map[string]interface{}{
+		"name": "acme-corp",
+	})
+	_, err := handleProject(db, bk)(context.TODO(), projReq)
+	require.NoError(t, err)
+
+	itemReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "Item 1",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "Item 2",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P3",
+				"title":    "Item 3",
+			},
+		},
+	})
+	_, err = handleItem(db, bk)(context.TODO(), itemReq)
+	require.NoError(t, err)
+
+	// Delete two items
+	deleteReq := makeRequest(map[string]interface{}{
+		"delete_ids": []interface{}{"AC-1", "AC-3"},
+	})
+	deleteResult, err := handleItem(db, bk)(context.TODO(), deleteReq)
+	require.NoError(t, err)
+
+	var deleteResp map[string]interface{}
+	err = unmarshalResult(deleteResult, &deleteResp)
+	require.NoError(t, err)
+	assert.Equal(t, float64(2), deleteResp["deleted"])
+
+	// Verify only AC-2 remains by fetching it directly
+	getReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{"AC-2"},
+	})
+	getResult, err := handleItem(db, bk)(context.TODO(), getReq)
+	require.NoError(t, err)
+
+	var items []map[string]interface{}
+	err = unmarshalResult(getResult, &items)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "AC-2", items[0]["id"])
+}
+
+func TestHandleItemDeleteNonexistent(t *testing.T) {
+	resetAllDB(t)
+
+	// Try to delete non-existent item
+	deleteReq := makeRequest(map[string]interface{}{
+		"delete_ids": []interface{}{"NONEXISTENT"},
+	})
+	deleteResult, err := handleItem(db, bk)(context.TODO(), deleteReq)
+	require.NoError(t, err)
+
+	var deleteResp map[string]interface{}
+	err = unmarshalResult(deleteResult, &deleteResp)
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), deleteResp["deleted"])
+}
