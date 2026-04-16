@@ -28,7 +28,7 @@ func TestRunPutFlagsCreate(t *testing.T) {
 	assert.Equal(t, "Use PostgreSQL", result.Title)
 
 	// Verify it was created in DB
-	summaries, err := store.QueryDocuments(db, "decision", "acme-corp", "", "", nil, 10)
+	summaries, err := store.QueryDocuments(db, "decision", []string{"acme-corp"}, "", "", nil, 10)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 1)
 	assert.Equal(t, "Use PostgreSQL", summaries[0].Title)
@@ -135,7 +135,7 @@ func TestRunPutStdinProjectFallback(t *testing.T) {
 	assert.Len(t, results, 1)
 
 	// Verify it was created with fallback project
-	summaries, err := store.QueryDocuments(db, "note", "default-project", "", "", nil, 10)
+	summaries, err := store.QueryDocuments(db, "note", []string{"default-project"}, "", "", nil, 10)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 1)
 }
@@ -151,7 +151,7 @@ func TestRunPutStdinValidationFailureNoPartialWrites(t *testing.T) {
 	assert.Contains(t, err.Error(), "validation failed")
 
 	// Verify nothing was written
-	summaries, err := store.QueryDocuments(db, "", "", "", "", nil, 10)
+	summaries, err := store.QueryDocuments(db, "", []string{}, "", "", nil, 10)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 0)
 }
@@ -210,7 +210,7 @@ func TestRunPutStdinMultipleEntries(t *testing.T) {
 	assert.Len(t, results, 3)
 
 	// Verify all three were created
-	summaries, err := store.QueryDocuments(db, "", "acme-corp", "", "", nil, 10)
+	summaries, err := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 10)
 	require.NoError(t, err)
 	assert.Len(t, summaries, 3)
 }

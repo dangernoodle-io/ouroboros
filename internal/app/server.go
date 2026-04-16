@@ -82,7 +82,7 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithDescription("Get documents: ids array for fetch, or filters for list."),
 		mcp.WithArray("ids", mcp.Description("Document IDs (batch fetch)")),
 		mcp.WithString("type", mcp.Description("Filter by type")),
-		mcp.WithString("project", mcp.Description("Filter by project")),
+		mcp.WithArray("projects", mcp.Description("Filter by project names")),
 		mcp.WithString("category", mcp.Description("Filter by category")),
 		mcp.WithString("query", mcp.Description("Full-text search")),
 		mcp.WithArray("tags", mcp.Description("Filter by tags (all match)")),
@@ -102,14 +102,14 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithString("query", mcp.Description("Single query")),
 		mcp.WithArray("queries", mcp.Description("Batch queries sharing filters; response is positional [[...], [...]]")),
 		mcp.WithString("type", mcp.Description("Filter by type")),
-		mcp.WithString("project", mcp.Description("Filter by project")),
+		mcp.WithArray("projects", mcp.Description("Filter by project names")),
 		mcp.WithNumber("limit", mcp.Description("Limit per query, default 10, max 500")),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleSearch(db)))
 
 	s.AddTool(mcp.NewTool("export",
 		mcp.WithDescription("Export KB to markdown."),
-		mcp.WithString("project", mcp.Description("Filter by project")),
+		mcp.WithArray("projects", mcp.Description("Filter by project names")),
 		mcp.WithString("type", mcp.Description("Filter by type")),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleExport(db)))
@@ -132,7 +132,7 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithArray("ids", mcp.Description("Item IDs to fetch")),
 		mcp.WithArray("entries", mcp.Description("Items to create/update: {id?}, project, priority, title, description?, notes?, component?, status?")),
 		mcp.WithArray("delete_ids", mcp.Description("Item IDs to delete")),
-		mcp.WithString("project", mcp.Description("Project name (filter/create)")),
+		mcp.WithArray("projects", mcp.Description("Filter by project names")),
 		mcp.WithString("priority_min", mcp.Description("Min priority (P0–P6)")),
 		mcp.WithString("priority_max", mcp.Description("Max priority (P0–P6)")),
 		mcp.WithString("status", mcp.Description("open or done")),
@@ -145,7 +145,7 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithDescription("Manage plans: ids fetch, entries create/update, or filters list."),
 		mcp.WithArray("ids", mcp.Description("Plan IDs to fetch")),
 		mcp.WithArray("entries", mcp.Description("Plans to create/update: {id?}, title, content?, status?, project?, item_id?")),
-		mcp.WithString("project", mcp.Description("Project name (filter/link)")),
+		mcp.WithArray("projects", mcp.Description("Filter by project names")),
 		mcp.WithString("status", mcp.Description("draft, active, or complete")),
 		toolAnnotation(nil, nil, nil),
 	), withRecover(handlePlan(db, bk)))

@@ -112,3 +112,40 @@ func TestListPlansFilterStatus(t *testing.T) {
 	assert.Len(t, plans, 1)
 	assert.Equal(t, "published-plan", plans[0].Title)
 }
+
+func TestListPlansFilterProject(t *testing.T) {
+	d := testDB(t)
+	p1 := createTestProject(t, d)
+	p2, err := backlog.CreateProject(d, "other-corp", "OC")
+	require.NoError(t, err)
+
+	_, err = backlog.CreatePlan(d, "plan1", "content1", &p1.ID, nil)
+	require.NoError(t, err)
+	_, err = backlog.CreatePlan(d, "plan2", "content2", &p2.ID, nil)
+	require.NoError(t, err)
+	_, err = backlog.CreatePlan(d, "plan3", "content3", nil, nil)
+	require.NoError(t, err)
+
+	plans, err := backlog.ListPlans(d, backlog.PlanFilter{ProjectIDs: []int64{p1.ID}})
+	require.NoError(t, err)
+	assert.Len(t, plans, 1)
+	assert.Equal(t, "plan1", plans[0].Title)
+}
+
+func TestListPlansFilterMultiProject(t *testing.T) {
+	d := testDB(t)
+	p1 := createTestProject(t, d)
+	p2, err := backlog.CreateProject(d, "other-corp", "OC")
+	require.NoError(t, err)
+
+	_, err = backlog.CreatePlan(d, "plan1", "content1", &p1.ID, nil)
+	require.NoError(t, err)
+	_, err = backlog.CreatePlan(d, "plan2", "content2", &p2.ID, nil)
+	require.NoError(t, err)
+	_, err = backlog.CreatePlan(d, "plan3", "content3", nil, nil)
+	require.NoError(t, err)
+
+	plans, err := backlog.ListPlans(d, backlog.PlanFilter{ProjectIDs: []int64{p1.ID, p2.ID}})
+	require.NoError(t, err)
+	assert.Len(t, plans, 2)
+}

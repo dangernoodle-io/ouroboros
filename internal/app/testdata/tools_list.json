@@ -48,9 +48,9 @@
       "description": "Export KB to markdown.",
       "inputSchema": {
         "properties": {
-          "project": {
-            "description": "Filter by project",
-            "type": "string"
+          "projects": {
+            "description": "Filter by project names",
+            "type": "array"
           },
           "type": {
             "description": "Filter by type",
@@ -81,9 +81,9 @@
             "description": "Limit, default 10, max 500",
             "type": "number"
           },
-          "project": {
-            "description": "Filter by project",
-            "type": "string"
+          "projects": {
+            "description": "Filter by project names",
+            "type": "array"
           },
           "query": {
             "description": "Full-text search",
@@ -159,9 +159,9 @@
             "description": "Min priority (P0–P6)",
             "type": "string"
           },
-          "project": {
-            "description": "Project name (filter/create)",
-            "type": "string"
+          "projects": {
+            "description": "Filter by project names",
+            "type": "array"
           },
           "status": {
             "description": "open or done",
@@ -190,9 +190,9 @@
             "description": "Plan IDs to fetch",
             "type": "array"
           },
-          "project": {
-            "description": "Project name (filter/link)",
-            "type": "string"
+          "projects": {
+            "description": "Filter by project names",
+            "type": "array"
           },
           "status": {
             "description": "draft, active, or complete",
@@ -249,9 +249,9 @@
             "description": "Limit per query, default 10, max 500",
             "type": "number"
           },
-          "project": {
-            "description": "Filter by project",
-            "type": "string"
+          "projects": {
+            "description": "Filter by project names",
+            "type": "array"
           },
           "queries": {
             "description": "Batch queries sharing filters; response is positional [[...], [...]]",

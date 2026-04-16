@@ -78,17 +78,24 @@ func UpdatePlan(d *sql.DB, id int64, fields map[string]string) (*Plan, error) {
 }
 
 type PlanFilter struct {
-	ProjectID *int64
-	Status    *string
+	ProjectIDs []int64
+	Status     *string
 }
 
 func ListPlans(d *sql.DB, f PlanFilter) ([]Plan, error) {
 	query := "SELECT id, project_id, item_id, title, content, status, created, updated FROM plans WHERE 1=1"
 	var args []interface{}
 
-	if f.ProjectID != nil {
+	if len(f.ProjectIDs) == 1 {
 		query += " AND project_id = ?"
-		args = append(args, *f.ProjectID)
+		args = append(args, f.ProjectIDs[0])
+	} else if len(f.ProjectIDs) > 1 {
+		placeholders := make([]string, len(f.ProjectIDs))
+		for i, id := range f.ProjectIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		query += " AND project_id IN (" + strings.Join(placeholders, ",") + ")"
 	}
 	if f.Status != nil {
 		query += " AND status = ?"

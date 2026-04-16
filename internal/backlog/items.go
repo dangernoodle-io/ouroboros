@@ -130,7 +130,7 @@ func DeleteItems(d *sql.DB, ids []string) (int64, error) {
 }
 
 type ItemFilter struct {
-	ProjectID   *int64
+	ProjectIDs  []int64
 	PriorityMin *int
 	PriorityMax *int
 	Status      *string
@@ -141,9 +141,16 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 	query := "SELECT id, project_id, priority, title, component, description, status, created, updated FROM items WHERE 1=1"
 	var args []interface{}
 
-	if f.ProjectID != nil {
+	if len(f.ProjectIDs) == 1 {
 		query += " AND project_id = ?"
-		args = append(args, *f.ProjectID)
+		args = append(args, f.ProjectIDs[0])
+	} else if len(f.ProjectIDs) > 1 {
+		placeholders := make([]string, len(f.ProjectIDs))
+		for i, id := range f.ProjectIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		query += " AND project_id IN (" + strings.Join(placeholders, ",") + ")"
 	}
 	if f.PriorityMin != nil {
 		query += " AND CAST(SUBSTR(priority, 2) AS INTEGER) >= ?"

@@ -477,8 +477,8 @@ func TestHandleSearch_Batch_SharedFilters(t *testing.T) {
 
 	// Search with batch queries and project filter
 	searchReq := makeRequest(map[string]interface{}{
-		"queries": []interface{}{"alpha", "beta"},
-		"project": "ouroboros",
+		"queries":  []interface{}{"alpha", "beta"},
+		"projects": []interface{}{"ouroboros"},
 	})
 
 	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
@@ -559,4 +559,59 @@ func TestHandleSearch_BothProvided_QueriesWins(t *testing.T) {
 	assert.Equal(t, "about beta", resultSets[0][0].Title)
 	assert.Len(t, resultSets[1], 1)
 	assert.Equal(t, "about alpha", resultSets[1][0].Title)
+}
+
+// TestHandleSearch_MultiProject tests search with multiple project filters.
+func TestHandleSearch_MultiProject(t *testing.T) {
+	resetDB(t)
+
+	// Seed documents in three projects
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "project-a",
+				"title":   "doc with keyword",
+				"content": "Content about keyword",
+			},
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "project-b",
+				"title":   "another doc with keyword",
+				"content": "Content about keyword",
+			},
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "project-c",
+				"title":   "third doc with keyword",
+				"content": "Content about keyword",
+			},
+		},
+	})
+
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	// Search with multiple project filters
+	searchReq := makeRequest(map[string]interface{}{
+		"query":    "keyword",
+		"projects": []interface{}{"project-a", "project-b"},
+	})
+
+	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
+	require.NoError(t, err)
+
+	var summaries []store.DocumentSummary
+	err = unmarshalResult(searchResult, &summaries)
+	require.NoError(t, err)
+
+	// Should only return docs from project-a and project-b
+	require.Len(t, summaries, 2)
+	projects := make(map[string]bool)
+	for _, s := range summaries {
+		projects[s.Project] = true
+	}
+	assert.True(t, projects["project-a"])
+	assert.True(t, projects["project-b"])
+	assert.False(t, projects["project-c"])
 }

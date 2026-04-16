@@ -9,7 +9,7 @@ import (
 )
 
 // ExportMarkdown queries documents and builds a markdown export.
-func ExportMarkdown(db *sql.DB, project, docType string) (string, error) {
+func ExportMarkdown(db *sql.DB, projects []string, docType string) (string, error) {
 	// Query documents by type and/or project
 	var query string
 	var args []interface{}
@@ -21,9 +21,16 @@ func ExportMarkdown(db *sql.DB, project, docType string) (string, error) {
 		args = append(args, docType)
 	}
 
-	if project != "" {
+	if len(projects) == 1 {
 		query += " AND project = ?"
-		args = append(args, project)
+		args = append(args, projects[0])
+	} else if len(projects) > 1 {
+		placeholders := make([]string, len(projects))
+		for i, p := range projects {
+			placeholders[i] = "?"
+			args = append(args, p)
+		}
+		query += " AND project IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
 	query += " ORDER BY type, updated_at DESC"
@@ -64,8 +71,8 @@ func ExportMarkdown(db *sql.DB, project, docType string) (string, error) {
 	sb.WriteString("# Knowledge Base Export\n\n")
 
 	projectLabel := "All Projects"
-	if project != "" {
-		projectLabel = project
+	if len(projects) > 0 {
+		projectLabel = strings.Join(projects, ", ")
 	}
 	typeLabel := ""
 	if docType != "" {
