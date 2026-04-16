@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject } = require(__dirname + '/lib');
+const { readStdin, getProject, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 1800000; // 30 minutes per project
 const RESUME_COOLDOWN_MS = 0; // no cooldown for resume prompts
@@ -53,25 +53,35 @@ async function main() {
     let message = '';
     let transcriptPath = '';
     let cwd = '';
+    let session_id = undefined;
     try {
       const json = JSON.parse(input);
       // UserPromptSubmit hook sends `prompt`, fallback to legacy `message` for testing
       message = json.prompt || json.message || '';
       transcriptPath = json.transcript_path || '';
       cwd = json.cwd || '';
+      session_id = json.session_id;
     } catch (e) {
       // If not JSON, treat as empty
     }
+
+    // Log fire event immediately, before any early exits
+    logHookEvent({ hook: 'user_prompt_context', kind: 'fire', session_id, project: undefined });
 
     const intent = classifyPrompt(message);
     if (intent === 'none' || intent === 'unrelated') {
       process.exit(0);
     }
 
-    // Determine project with fallback chain
-    // TODO: extend resolveProject to support cwd hint (would require git-in-cwd logic)
-    const hints = { message, transcriptPath };
-    const project = resolveProject(hints);
+    // Determine project with fallback chain: cwd → hints chain → getProject
+    let project = null;
+    if (cwd) {
+      project = projectFromPath(cwd);
+    }
+    if (!project) {
+      const hints = { message, transcriptPath };
+      project = resolveProject(hints);
+    }
     if (!project) {
       process.exit(0);
     }
