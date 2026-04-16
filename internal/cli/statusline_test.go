@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -245,4 +246,63 @@ func TestPriorityColor(t *testing.T) {
 			assert.Equal(t, tt.expected, priorityColor(tt.priority))
 		})
 	}
+}
+
+func TestFormatStatuslineANSIProjectFirst(t *testing.T) {
+	t.Run("project before KB", func(t *testing.T) {
+		data := statuslineData{
+			Project: "project-a",
+			KB: statuslineKB{
+				Total: 2,
+				Types: []store.TypeCount{
+					{Type: "decision", Count: 2},
+				},
+			},
+			Backlog: statuslineBacklog{
+				Total: 1,
+				Items: []backlog.PriorityCount{
+					{Priority: "P1", Count: 1},
+				},
+			},
+		}
+
+		output := formatStatuslineANSI(data)
+
+		// Both [project-a] and KB should be present
+		assert.Contains(t, output, "[project-a]")
+		assert.Contains(t, output, "KB 2")
+
+		// Index of [project-a] should be before index of KB
+		idxProject := strings.Index(output, "[project-a]")
+		idxKB := strings.Index(output, "KB")
+		assert.True(t, idxProject < idxKB, "project should appear before KB")
+	})
+
+	t.Run("no project bracket when empty", func(t *testing.T) {
+		data := statuslineData{
+			Project: "",
+			KB: statuslineKB{
+				Total: 2,
+				Types: []store.TypeCount{
+					{Type: "decision", Count: 2},
+				},
+			},
+			Backlog: statuslineBacklog{
+				Total: 1,
+				Items: []backlog.PriorityCount{
+					{Priority: "P1", Count: 1},
+				},
+			},
+		}
+
+		output := formatStatuslineANSI(data)
+
+		// Should start with "ouroboros: KB " (no brackets)
+		assert.True(t, strings.HasPrefix(output, "\033[2mouroboros:\033[0m KB"),
+			"without project, should have 'ouroboros: KB' prefix")
+
+		// Should not contain project brackets [project-name]
+		assert.NotContains(t, output, "ouroboros:\033[0m ]",
+			"should not have project bracket after ouroboros:")
+	})
 }
