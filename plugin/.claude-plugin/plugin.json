@@ -1,0 +1,17 @@
+{
+  "name": "ouroboros-mcp",
+  "description": "Project knowledge base and backlog management. Persist decisions, facts, and notes across conversations. Track work items, plans, and project configuration.",
+  "author": {
+    "name": "dangernoodle-io",
+    "url": "https://github.com/dangernoodle-io"
+  },
+  "homepage": "https://github.com/dangernoodle-io/ouroboros",
+  "repository": "https://github.com/dangernoodle-io/dangernoodle-marketplace",
+  "license": "MIT",
+  "keywords": ["knowledge-base", "backlog", "planning", "mcp", "persistence", "decisions"],
+  "mcpServers": {
+    "ouroboros": {
+      "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros"
+    }
+  }
+}

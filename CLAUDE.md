@@ -71,3 +71,20 @@ ouroboros exists to replace ~14K tokens of unconditional project context loading
 - **Tool descriptions are context too.** MCP tool descriptions load on every session — keep them tight. One sentence of purpose, one sentence of mode-selection if the tool is overloaded.
 
 When in doubt: the caller can always ask for more. They cannot un-spend tokens on output they didn't need.
+
+## Plugin
+
+`plugin/` contains the Claude Code plugin wrapper (`ouroboros-mcp`) — registers this binary as an MCP server.
+
+- `plugin/.claude-plugin/plugin.json` — manifest; `mcpServers.ouroboros.command` points at `${CLAUDE_PLUGIN_DATA}/bin/ouroboros`
+- `plugin/hooks/hooks.json` — hooks for SessionStart (install), PostToolUse, SubagentStart, SubagentStop, Stop, UserPromptSubmit
+- `plugin/scripts/install.sh` — downloads the GitHub release archive, verifies SHA256, installs to plugin data dir
+- `plugin/scripts/lib.js` — shared hook utilities (stdin, project resolution, cooldown, KB formatting)
+- `plugin/scripts/*.js` — hook scripts for KB persistence nudges, context injection, staleness warnings
+- `plugin/skills/` — persist, recall, triage skills
+- `plugin/agents/` — backlog-manager, knowledge-explorer subagents
+- `plugin/tests/` — node:test suite (zero npm deps), run via `plugin/tests/run.sh`
+
+**No plugin version field**: `plugin/.claude-plugin/plugin.json` intentionally omits `version`. When absent, Claude Code keys its plugin cache on the source commit sha, so changing the `marketplace.json` ref to a new tag automatically invalidates the cache — no lockstep bump required. Release automation only needs to update the marketplace ref.
+
+**Local dev**: from a clone of `dangernoodle-marketplace`, run `.scripts/plugin-dev.sh link ouroboros-mcp` to symlink the plugin cache dir to this working tree.

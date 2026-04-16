@@ -11,3 +11,6 @@ jobs:
   verify:
     uses: dangernoodle-io/.github/.github/workflows/go-build.yml@main
     secrets: inherit
+
+  plugin:
+    uses: dangernoodle-io/.github/.github/workflows/plugin-test.yml@main
