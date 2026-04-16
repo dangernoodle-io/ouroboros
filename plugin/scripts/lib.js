@@ -256,6 +256,69 @@ function resolveProject(hints = {}, workspaceRoot, skipGit = false) {
   return null;
 }
 
+function getMaxLogSize() {
+  const envVal = process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  if (!envVal) return 5 * 1024 * 1024; // 5MB default
+  const parsed = parseInt(envVal, 10);
+  return isNaN(parsed) ? 5 * 1024 * 1024 : parsed;
+}
+
+function getMaxLogFiles() {
+  const envVal = process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  if (!envVal) return 1; // 1 backup default
+  const parsed = parseInt(envVal, 10);
+  return isNaN(parsed) ? 1 : parsed;
+}
+
+function rotateLogFiles(logPath, maxFiles) {
+  try {
+    // If maxFiles is 0, don't rotate anything
+    if (maxFiles <= 0) {
+      try {
+        fs.unlinkSync(logPath);
+      } catch (e) {
+        // Silent fail on unlink
+      }
+      return;
+    }
+
+    // Shift existing backups backwards: .log.N → .log.(N+1), ..., .log.1 → .log.2
+    for (let i = maxFiles; i >= 1; i--) {
+      const oldPath = `${logPath}.${i}`;
+      const newPath = `${logPath}.${i + 1}`;
+      try {
+        if (fs.existsSync(oldPath)) {
+          fs.renameSync(oldPath, newPath);
+        }
+      } catch (e) {
+        // Silent fail on individual shift
+      }
+    }
+
+    // Rotate current log → .log.1
+    try {
+      fs.renameSync(logPath, `${logPath}.1`);
+    } catch (e) {
+      // Silent fail on rename
+    }
+
+    // Delete any files beyond maxFiles (starting from .log.(maxFiles+1))
+    let deleteIdx = maxFiles + 1;
+    while (true) {
+      const pathToDelete = `${logPath}.${deleteIdx}`;
+      if (!fs.existsSync(pathToDelete)) break;
+      try {
+        fs.unlinkSync(pathToDelete);
+      } catch (e) {
+        // Silent fail on delete
+      }
+      deleteIdx++;
+    }
+  } catch (e) {
+    // Silent fail on entire rotation
+  }
+}
+
 function logHookEvent(fields) {
   const flag = process.env.OUROBOROS_HOOK_LOG;
   if (flag === '0' || flag === 'false' || flag === 'off') return;
@@ -272,16 +335,13 @@ function logHookEvent(fields) {
       }
     }
 
-    // Size check: if file exceeds ~5MB, rotate to .1
+    // Size check: if file exceeds configured max, rotate
     try {
+      const maxSize = getMaxLogSize();
       const stats = fs.statSync(LOG_PATH);
-      if (stats.size > 5 * 1024 * 1024) {
-        const rotatedPath = `${LOG_PATH}.1`;
-        try {
-          fs.renameSync(LOG_PATH, rotatedPath);
-        } catch (e) {
-          // Silent fail on rotation
-        }
+      if (stats.size > maxSize) {
+        const maxFiles = getMaxLogFiles();
+        rotateLogFiles(LOG_PATH, maxFiles);
       }
     } catch (e) {
       // File doesn't exist yet; that's fine
@@ -305,4 +365,4 @@ function isSkippedAgentType(agentType) {
   return SKIP_AGENT_TYPES.includes(tail);
 }
 
-module.exports = { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, SKIP_AGENT_TYPES, isSkippedAgentType };
+module.exports = { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType };
