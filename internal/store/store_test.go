@@ -921,3 +921,84 @@ func TestQueryDocumentsMultiProject(t *testing.T) {
 	assert.Contains(t, projects, "acme-corp")
 	assert.Contains(t, projects, "other-corp")
 }
+
+func TestCountDocumentsByType(t *testing.T) {
+	db := testDB(t)
+
+	// Seed documents of different types in acme-corp
+	docs := []store.Document{
+		{Type: "decision", Project: "acme-corp", Title: "api-design", Content: "RESTful API"},
+		{Type: "decision", Project: "acme-corp", Title: "database", Content: "PostgreSQL"},
+		{Type: "decision", Project: "acme-corp", Title: "auth", Content: "OAuth2"},
+		{Type: "fact", Project: "acme-corp", Title: "endpoint", Content: "api.example.com"},
+		{Type: "fact", Project: "acme-corp", Title: "version", Content: "v2.1.0"},
+		{Type: "note", Project: "acme-corp", Title: "meeting", Content: "Q2 planning"},
+	}
+
+	for _, doc := range docs {
+		_, err := store.UpsertDocument(db, doc)
+		require.NoError(t, err)
+	}
+
+	// Get counts for all types
+	counts, err := store.CountDocumentsByType(db, nil)
+	require.NoError(t, err)
+	require.Len(t, counts, 3)
+
+	// Verify counts
+	typeMap := make(map[string]int)
+	for _, tc := range counts {
+		typeMap[tc.Type] = tc.Count
+	}
+
+	assert.Equal(t, 3, typeMap["decision"])
+	assert.Equal(t, 2, typeMap["fact"])
+	assert.Equal(t, 1, typeMap["note"])
+}
+
+func TestCountDocumentsByTypeFiltered(t *testing.T) {
+	db := testDB(t)
+
+	// Seed documents across two projects
+	docs := []store.Document{
+		{Type: "fact", Project: "acme-corp", Title: "acme-fact-1", Content: "content"},
+		{Type: "fact", Project: "acme-corp", Title: "acme-fact-2", Content: "content"},
+		{Type: "decision", Project: "acme-corp", Title: "acme-decision", Content: "content"},
+		{Type: "fact", Project: "other-corp", Title: "other-fact", Content: "content"},
+		{Type: "fact", Project: "other-corp", Title: "other-fact-2", Content: "content"},
+		{Type: "note", Project: "other-corp", Title: "other-note", Content: "content"},
+	}
+
+	for _, doc := range docs {
+		_, err := store.UpsertDocument(db, doc)
+		require.NoError(t, err)
+	}
+
+	// Get counts for acme-corp only
+	counts, err := store.CountDocumentsByType(db, []string{"acme-corp"})
+	require.NoError(t, err)
+	require.Len(t, counts, 2)
+
+	typeMap := make(map[string]int)
+	for _, tc := range counts {
+		typeMap[tc.Type] = tc.Count
+	}
+
+	assert.Equal(t, 1, typeMap["decision"])
+	assert.Equal(t, 2, typeMap["fact"])
+	assert.NotContains(t, typeMap, "note")
+}
+
+func TestCountDocumentsByTypeEmpty(t *testing.T) {
+	db := testDB(t)
+
+	// Query empty database
+	counts, err := store.CountDocumentsByType(db, nil)
+	require.NoError(t, err)
+	assert.Empty(t, counts)
+
+	// Query with project filter on empty database
+	counts, err = store.CountDocumentsByType(db, []string{"nonexistent-project"})
+	require.NoError(t, err)
+	assert.Empty(t, counts)
+}

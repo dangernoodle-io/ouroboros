@@ -187,3 +187,54 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 	}
 	return items, rows.Err()
 }
+
+// PriorityCount holds a priority level and its count.
+type PriorityCount struct {
+	Priority string `json:"priority"`
+	Count    int    `json:"count"`
+}
+
+// CountItemsByPriority returns item counts grouped by priority.
+// Reuses ItemFilter for filtering (typically Status="open").
+func CountItemsByPriority(d *sql.DB, f ItemFilter) ([]PriorityCount, error) {
+	query := "SELECT priority, COUNT(*) FROM items WHERE 1=1"
+	var args []interface{}
+
+	if len(f.ProjectIDs) == 1 {
+		query += " AND project_id = ?"
+		args = append(args, f.ProjectIDs[0])
+	} else if len(f.ProjectIDs) > 1 {
+		placeholders := make([]string, len(f.ProjectIDs))
+		for i, id := range f.ProjectIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		query += " AND project_id IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	if f.Status != nil {
+		query += " AND status = ?"
+		args = append(args, *f.Status)
+	}
+	if f.Component != nil {
+		query += " AND component = ?"
+		args = append(args, *f.Component)
+	}
+
+	query += " GROUP BY priority ORDER BY priority"
+
+	rows, err := d.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count items by priority: %w", err)
+	}
+	defer rows.Close()
+
+	var counts []PriorityCount
+	for rows.Next() {
+		var pc PriorityCount
+		if err := rows.Scan(&pc.Priority, &pc.Count); err != nil {
+			return nil, fmt.Errorf("scan priority count: %w", err)
+		}
+		counts = append(counts, pc)
+	}
+	return counts, rows.Err()
+}

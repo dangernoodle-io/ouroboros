@@ -427,3 +427,49 @@ func SearchDocuments(db *sql.DB, query, docType string, projects []string, limit
 
 	return summaries, nil
 }
+
+// TypeCount holds a document type and its count.
+type TypeCount struct {
+	Type  string `json:"type"`
+	Count int    `json:"count"`
+}
+
+// CountDocumentsByType returns document counts grouped by type.
+// If projects is non-empty, counts are filtered to those projects.
+func CountDocumentsByType(db *sql.DB, projects []string) ([]TypeCount, error) {
+	query := "SELECT type, COUNT(*) FROM documents"
+	var args []interface{}
+
+	if len(projects) > 0 {
+		query += " WHERE"
+		if len(projects) == 1 {
+			query += " project = ?"
+			args = append(args, projects[0])
+		} else {
+			placeholders := make([]string, len(projects))
+			for i, p := range projects {
+				placeholders[i] = "?"
+				args = append(args, p)
+			}
+			query += " project IN (" + strings.Join(placeholders, ",") + ")"
+		}
+	}
+
+	query += " GROUP BY type ORDER BY type"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count documents by type: %w", err)
+	}
+	defer rows.Close()
+
+	var counts []TypeCount
+	for rows.Next() {
+		var tc TypeCount
+		if err := rows.Scan(&tc.Type, &tc.Count); err != nil {
+			return nil, fmt.Errorf("scan type count: %w", err)
+		}
+		counts = append(counts, tc)
+	}
+	return counts, rows.Err()
+}
