@@ -110,6 +110,25 @@ func MarkDone(d *sql.DB, id string) error {
 	return nil
 }
 
+func DeleteItems(d *sql.DB, ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	result, err := d.Exec("DELETE FROM items WHERE id IN ("+strings.Join(placeholders, ",")+") ", args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete items: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 type ItemFilter struct {
 	ProjectID   *int64
 	PriorityMin *int

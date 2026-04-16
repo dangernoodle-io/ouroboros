@@ -103,7 +103,7 @@ func TestToolsListFootprint(t *testing.T) {
 		"config":  {"idempotentHint": true},
 		"import":  {},
 		"project": {},
-		"item":    {},
+		"item":    {"destructiveHint": true},
 		"plan":    {},
 	}
 	t.Logf("  per-tool annotation structure (OU-75):")

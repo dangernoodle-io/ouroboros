@@ -99,6 +99,19 @@ func handleProject(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 
 func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check for delete_ids[] batch delete
+		deleteIDs := parseStringSlice(req.GetArguments(), "delete_ids")
+		if len(deleteIDs) > 0 {
+			affected, err := backlog.DeleteItems(d, deleteIDs)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			backupCommit(bk, fmt.Sprintf("deleted %d items", affected))
+			return jsonResult(map[string]interface{}{
+				"deleted": affected,
+			})
+		}
+
 		// Check for ids[] batch fetch
 		ids := parseStringSlice(req.GetArguments(), "ids")
 		if len(ids) > 0 {
