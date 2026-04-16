@@ -152,10 +152,6 @@ func formatStatuslineANSI(data statuslineData) string {
 	sb.WriteString("\033[2m")
 	sb.WriteString("ouroboros:")
 	sb.WriteString("\033[0m")
-	sb.WriteString(" KB ")
-
-	// KB total in white (default)
-	fmt.Fprintf(&sb, "%d", data.KB.Total)
 
 	// Project filter in dim if present
 	if data.Project != "" {
@@ -163,6 +159,11 @@ func formatStatuslineANSI(data statuslineData) string {
 		sb.WriteString(data.Project)
 		sb.WriteString("]\033[0m")
 	}
+
+	sb.WriteString(" KB ")
+
+	// KB total in white (default)
+	fmt.Fprintf(&sb, "%d", data.KB.Total)
 
 	// Type abbreviations
 	if len(data.KB.Types) > 0 {
