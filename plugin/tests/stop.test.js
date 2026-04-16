@@ -10,11 +10,13 @@ const FIXTURES_PATH = path.join(__dirname, 'fixtures');
 
 let tempDir;
 let stubPath;
+let homeDir;
 
-test('setup: create temp stub dir', () => {
+test('setup: create temp stub dir and HOME isolation', () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-test-'));
+  homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-home-'));
   stubPath = path.join(tempDir, 'ouroboros');
-  fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub.sh'), stubPath);
+  fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub-capture.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
 });
 
@@ -32,7 +34,7 @@ function writeTranscript(turns) {
 }
 
 function runScript(input, env = {}) {
-  const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}` };
+  const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: homeDir };
   Object.assign(envVars, env);
   return spawnSync('node', [SCRIPT_PATH], {
     input: input,
@@ -161,8 +163,190 @@ test('stop: only sidechain turns present → exit 0, no stdout', () => {
   assert.strictEqual(result.stdout.trim(), '');
 });
 
-test('cleanup: remove temp stub dir', () => {
+test('stop: hook fire event logged with hook:stop and session_id', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-fire-home-'));
+  try {
+    const transcript = writeTranscript([{
+      text: 'This is a long main-context message with enough content to pass the minimum length check but no kb block',
+    }]);
+    const input = JSON.stringify({ session_id: 'sess-fire-test-123', transcript_path: transcript });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'stop' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'should have a fire event with hook=stop');
+    const parsed = JSON.parse(fireEvent);
+    assert.strictEqual(parsed.session_id, 'sess-fire-test-123');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('stop: persist event logged when kb block present and put succeeds', () => {
+  const transcript = writeTranscript([{
+    text: 'This is a long main-context message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"decision","title":"test decision"}]\n```',
+  }]);
+  const input = JSON.stringify({ session_id: 'sess-persist-123', transcript_path: transcript });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+
+  const logFile = path.join(homeDir, '.ouroboros', 'hooks.log');
+  const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+  const persistEvent = lines.find(line => {
+    try {
+      const entry = JSON.parse(line);
+      return entry.kind === 'persist';
+    } catch (e) { return false; }
+  });
+  assert(persistEvent, 'should have a persist event');
+  const parsed = JSON.parse(persistEvent);
+  assert.strictEqual(parsed.entries, 1, 'entries count should match KB block size');
+});
+
+test('stop: metadata injection → hook:stop source and session_id injected, metadata merged', () => {
+  const captureFile = path.join(tempDir, `capture-${Date.now()}-${Math.random()}.json`);
+  const transcript = writeTranscript([{
+    text: 'This is a long main-context message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"decision","title":"first"},{"type":"note","title":"second","metadata":{"custom":"value"}}]\n```',
+  }]);
+  const input = JSON.stringify({ session_id: 'sess-metadata-test', transcript_path: transcript });
+  const result = runScript(input, { OUROBOROS_PUT_CAPTURE_FILE: captureFile });
+  assert.strictEqual(result.status, 0);
+  assert(fs.existsSync(captureFile), `capture file should exist at ${captureFile}`);
+
+  const captured = fs.readFileSync(captureFile, 'utf-8');
+  const entries = JSON.parse(captured);
+  assert.strictEqual(Array.isArray(entries), true, 'captured content should be JSON array');
+  assert.strictEqual(entries.length, 2, 'should have 2 entries');
+
+  entries.forEach((e, idx) => {
+    assert(e.metadata, `entry ${idx} should have metadata`);
+    assert.strictEqual(e.metadata.source, 'hook:stop', `entry ${idx} should have source=hook:stop`);
+    assert(Object.prototype.hasOwnProperty.call(e.metadata, 'session_id'), `entry ${idx} should have session_id key`);
+  });
+
+  const secondEntry = entries[1];
+  assert.strictEqual(secondEntry.metadata.custom, 'value', 'second entry should preserve custom metadata');
+  assert.strictEqual(secondEntry.metadata.source, 'hook:stop', 'second entry should also have injected source');
+});
+
+test('stop: nudge event logged on tier-1 decision language detection', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-nudge-home-'));
+  try {
+    const transcript = writeTranscript([{
+      text: 'This is a long main-context message with enough content where we decided to adopt a new architecture for the system based on solid rationale',
+    }]);
+    const input = JSON.stringify({ session_id: 'sess-nudge-123', transcript_path: transcript });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const nudgeEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.kind === 'nudge';
+      } catch (e) { return false; }
+    });
+    assert(nudgeEvent, 'should have a nudge event');
+    const parsed = JSON.parse(nudgeEvent);
+    assert.strictEqual(parsed.reason, 'tier-1');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('stop: noop event logged for neutral content', () => {
+  const transcript = writeTranscript([{
+    text: 'This is just a simple neutral message that talks about the weather and contains no decision language or kb blocks',
+  }]);
+  const input = JSON.stringify({ session_id: 'sess-noop-123', transcript_path: transcript });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+
+  const logFile = path.join(homeDir, '.ouroboros', 'hooks.log');
+  const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+  const noopEvent = lines.find(line => {
+    try {
+      const entry = JSON.parse(line);
+      return entry.kind === 'noop';
+    } catch (e) { return false; }
+  });
+  assert(noopEvent, 'should have a noop event for neutral content');
+});
+
+test('stop: cwd hint resolves project for git repo', () => {
+  const gitRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stop-git-repo-'));
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-cwd-home-'));
+  try {
+    fs.mkdirSync(path.join(gitRepoDir, '.git'));
+    const transcript = writeTranscript([{
+      text: 'This is a long main-context message with enough content but no kb block or decision language',
+    }]);
+    const cwdPath = path.join(gitRepoDir, 'src');
+    fs.mkdirSync(cwdPath, { recursive: true });
+
+    const input = JSON.stringify({
+      session_id: 'sess-cwd-test',
+      transcript_path: transcript,
+      cwd: cwdPath
+    });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'stop' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'fire event should be logged');
+    const parsed = JSON.parse(fireEvent);
+    // Project should be resolved from cwd via git root
+    assert.strictEqual(parsed.project, path.basename(gitRepoDir));
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+    fs.rmSync(gitRepoDir, { recursive: true });
+  }
+});
+
+test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true });
+  }
+  if (homeDir && fs.existsSync(homeDir)) {
+    fs.rmSync(homeDir, { recursive: true });
   }
 });

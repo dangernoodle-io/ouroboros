@@ -3,7 +3,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
-const { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile } = require(__dirname + '/lib');
+const { readStdin, getProject, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, logHookEvent } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 600000; // 10 minutes per file
 
@@ -12,14 +12,26 @@ async function main() {
     const input = await readStdin();
 
     let filePath = '';
+    let session_id;
     try {
       const data = JSON.parse(input);
       filePath = (data.tool_input && data.tool_input.file_path) || '';
+      session_id = data.session_id;
     } catch (e) {
       process.exit(0);
     }
 
+    // Determine project for fire event, prefer path-based resolution
+    let project = projectFromPath(filePath);
+    if (!project) {
+      project = getProject();
+    }
+
+    // Log fire event
+    logHookEvent({ hook: 'post_edit_check', kind: 'fire', session_id, project });
+
     if (!filePath) {
+      logHookEvent({ hook: 'post_edit_check', kind: 'noop', session_id, project });
       process.exit(0);
     }
 
@@ -27,12 +39,12 @@ async function main() {
     const fileHash = crypto.createHash('md5').update(filePath).digest('hex').substring(0, 8);
     const cooldownFile = `/tmp/.ouroboros-stale-${fileHash}`;
     if (isWithinCooldown(cooldownFile, COOLDOWN_MS)) {
+      logHookEvent({ hook: 'post_edit_check', kind: 'noop', session_id, project });
       process.exit(0);
     }
 
-    // Determine project from cwd
-    const project = getProject();
     if (!project) {
+      logHookEvent({ hook: 'post_edit_check', kind: 'noop', session_id, project });
       process.exit(0);
     }
 
@@ -47,6 +59,7 @@ async function main() {
     const stem = basename.replace(/\.[^.]+$/, '');
     if (!stem || stem.length < 3) {
       // Too short to be meaningful for search
+      logHookEvent({ hook: 'post_edit_check', kind: 'noop', session_id, project });
       process.exit(0);
     }
 
@@ -60,10 +73,12 @@ async function main() {
       );
       rows = JSON.parse(out);
     } catch (e) {
+      logHookEvent({ hook: 'post_edit_check', kind: 'noop', session_id, project });
       process.exit(0);
     }
 
     if (!rows || rows.length === 0) {
+      logHookEvent({ hook: 'post_edit_check', kind: 'noop', session_id, project });
       process.exit(0);
     }
 
@@ -73,6 +88,7 @@ async function main() {
     // Format and inject
     const titles = rows.map(r => `[${r.type}] ${r.title}`).join(', ');
     process.stdout.write(`[ouroboros] KB refs ${basename}: ${titles} — check staleness\n`);
+    logHookEvent({ hook: 'post_edit_check', kind: 'nudge', session_id, project });
     process.exit(0);
   } catch (e) {
     process.exit(0);
