@@ -676,13 +676,13 @@ func TestKeywordSearch(t *testing.T) {
 	t.Run("keyword search all stop words", func(t *testing.T) {
 		summaries, err := store.KeywordSearch(db, "the is a an are", "", 50)
 		require.NoError(t, err)
-		require.Nil(t, summaries)
+		require.Empty(t, summaries)
 	})
 
 	t.Run("keyword search empty query", func(t *testing.T) {
 		summaries, err := store.KeywordSearch(db, "", "", 50)
 		require.NoError(t, err)
-		require.Nil(t, summaries)
+		require.Empty(t, summaries)
 	})
 
 	t.Run("keyword search respects limit", func(t *testing.T) {
