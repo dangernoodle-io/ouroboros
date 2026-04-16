@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, matchesAnyPattern, formatContextLines, findWorkspaceRoot, listWorkspaceProjects, resolveProject } = require('../scripts/lib');
+const { extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -99,6 +99,87 @@ test('formatContextLines - project name interpolated correctly', () => {
   const result = formatContextLines('special-proj', rows);
   assert(result[0].includes('special-proj'));
   assert(result.some(line => line.includes('(project: special-proj)')));
+});
+
+// Tests for findGitRoot
+test('findGitRoot - finds .git directory from a file inside repo', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'git-root-'));
+  fs.mkdirSync(path.join(tmpRoot, '.git'));
+  fs.mkdirSync(path.join(tmpRoot, 'src'));
+  const filePath = path.join(tmpRoot, 'src', 'main.js');
+  fs.writeFileSync(filePath, '');
+
+  const result = findGitRoot(filePath);
+  assert.strictEqual(fs.realpathSync(result), fs.realpathSync(tmpRoot));
+
+  fs.rmSync(tmpRoot, { recursive: true });
+});
+
+test('findGitRoot - finds .git directory from a directory inside repo', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'git-root-dir-'));
+  fs.mkdirSync(path.join(tmpRoot, '.git'));
+  const srcDir = path.join(tmpRoot, 'src');
+  fs.mkdirSync(srcDir);
+
+  const result = findGitRoot(srcDir);
+  assert.strictEqual(fs.realpathSync(result), fs.realpathSync(tmpRoot));
+
+  fs.rmSync(tmpRoot, { recursive: true });
+});
+
+test('findGitRoot - returns null when not in a git repo', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'no-git-'));
+  const filePath = path.join(tmpRoot, 'file.js');
+  fs.writeFileSync(filePath, '');
+
+  const result = findGitRoot(filePath);
+  assert.strictEqual(result, null);
+
+  fs.rmSync(tmpRoot, { recursive: true });
+});
+
+test('findGitRoot - handles nonexistent start path', () => {
+  // Path doesn't exist but should still walk up correctly
+  const nonexistent = '/tmp/definitely-not-real-12345/src/code.js';
+  const result = findGitRoot(nonexistent);
+  // Either null or a real git repo (if walking up hits the real filesystem)
+  assert(result === null || typeof result === 'string');
+});
+
+test('findGitRoot - wrapped in try/catch, returns null on error', () => {
+  // Test that errors are caught gracefully
+  const result = findGitRoot(null);
+  assert.strictEqual(result, null);
+});
+
+// Tests for projectFromPath
+test('projectFromPath - returns basename of git root', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-name-'));
+  fs.mkdirSync(path.join(tmpRoot, '.git'));
+  const filePath = path.join(tmpRoot, 'src', 'main.js');
+  fs.mkdirSync(path.join(tmpRoot, 'src'));
+  fs.writeFileSync(filePath, '');
+
+  const result = projectFromPath(filePath);
+  assert.strictEqual(result, path.basename(tmpRoot));
+
+  fs.rmSync(tmpRoot, { recursive: true });
+});
+
+test('projectFromPath - returns null when not in a git repo', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'no-git-proj-'));
+  const filePath = path.join(tmpRoot, 'file.js');
+  fs.writeFileSync(filePath, '');
+
+  const result = projectFromPath(filePath);
+  assert.strictEqual(result, null);
+
+  fs.rmSync(tmpRoot, { recursive: true });
+});
+
+test('projectFromPath - returns null on error (wrapped in try/catch)', () => {
+  const result = projectFromPath(null);
+  assert.strictEqual(result, null);
 });
 
 // Tests for findWorkspaceRoot
@@ -351,3 +432,144 @@ test('resolveProject - priority: git > filePath > message > transcript', () => {
 
   fs.rmSync(tmpRoot, { recursive: true });
 });
+
+// Tests for logHookEvent
+test('logHookEvent - writes JSONL line with ts and passed fields', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-'));
+  const originalHome = process.env.HOME;
+  try {
+    process.env.HOME = tmpHome;
+    // Force reset of logDirCreated by reloading module
+    delete require.cache[require.resolve('../scripts/lib')];
+    const { logHookEvent: logHE } = require('../scripts/lib');
+
+    logHE({ hook: 'test', kind: 'fire', session_id: 'sess123', project: 'test-proj' });
+
+    const logFile = path.join(tmpHome, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'log file should exist');
+
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    assert.strictEqual(lines.length, 1);
+    const entry = JSON.parse(lines[0]);
+    assert(entry.ts, 'should have ts field');
+    assert.strictEqual(entry.hook, 'test');
+    assert.strictEqual(entry.kind, 'fire');
+    assert.strictEqual(entry.session_id, 'sess123');
+    assert.strictEqual(entry.project, 'test-proj');
+  } finally {
+    process.env.HOME = originalHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('logHookEvent - multiple calls append (don\'t overwrite)', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-append-'));
+  const originalHome = process.env.HOME;
+  try {
+    process.env.HOME = tmpHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+    const { logHookEvent: logHE } = require('../scripts/lib');
+
+    logHE({ hook: 'test', kind: 'fire' });
+    logHE({ hook: 'test', kind: 'persist' });
+    logHE({ hook: 'test', kind: 'noop' });
+
+    const logFile = path.join(tmpHome, '.ouroboros', 'hooks.log');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    assert.strictEqual(lines.length, 3);
+    assert.strictEqual(JSON.parse(lines[0]).kind, 'fire');
+    assert.strictEqual(JSON.parse(lines[1]).kind, 'persist');
+    assert.strictEqual(JSON.parse(lines[2]).kind, 'noop');
+  } finally {
+    process.env.HOME = originalHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('logHookEvent - missing HOME or permission errors: silent failure, no throw', () => {
+  const originalHome = process.env.HOME;
+  try {
+    // Set HOME to something invalid (no throw expected)
+    process.env.HOME = '/root/nonexistent/invalid/path/that/cannot/exist';
+    delete require.cache[require.resolve('../scripts/lib')];
+    const { logHookEvent: logHE } = require('../scripts/lib');
+
+    // Should not throw even though it can't write
+    assert.doesNotThrow(() => {
+      logHE({ hook: 'test', kind: 'fire' });
+    });
+  } finally {
+    process.env.HOME = originalHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+  }
+});
+
+test('logHookEvent - OUROBOROS_HOOK_LOG=0 disables writes', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-disabled-'));
+  const originalHome = process.env.HOME;
+  const originalFlag = process.env.OUROBOROS_HOOK_LOG;
+  try {
+    process.env.HOME = tmpHome;
+    const logFile = path.join(tmpHome, '.ouroboros', 'hooks.log');
+
+    for (const value of ['0', 'false', 'off']) {
+      process.env.OUROBOROS_HOOK_LOG = value;
+      delete require.cache[require.resolve('../scripts/lib')];
+      const { logHookEvent: logHE } = require('../scripts/lib');
+      logHE({ hook: 'test', kind: 'fire' });
+      assert(!fs.existsSync(logFile), `log file should not exist when OUROBOROS_HOOK_LOG=${value}`);
+    }
+
+    // Sanity: unset re-enables
+    delete process.env.OUROBOROS_HOOK_LOG;
+    delete require.cache[require.resolve('../scripts/lib')];
+    const { logHookEvent: logHE2 } = require('../scripts/lib');
+    logHE2({ hook: 'test', kind: 'fire' });
+    assert(fs.existsSync(logFile), 'log file should exist when flag unset');
+  } finally {
+    process.env.HOME = originalHome;
+    if (originalFlag === undefined) delete process.env.OUROBOROS_HOOK_LOG;
+    else process.env.OUROBOROS_HOOK_LOG = originalFlag;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('logHookEvent - rotation: file > 5MB triggers rotation to .log.1', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-rotate-'));
+  const originalHome = process.env.HOME;
+  try {
+    process.env.HOME = tmpHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+
+    // Pre-create a large log file (sparse is fine, just need size > 5MB)
+    const logDir = path.join(tmpHome, '.ouroboros');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, 'hooks.log');
+    // Write > 5MB of data
+    const buffer = Buffer.alloc(6 * 1024 * 1024, 'x');
+    fs.writeFileSync(logFile, buffer);
+
+    const { logHookEvent: logHE } = require('../scripts/lib');
+    logHE({ hook: 'test', kind: 'fire' });
+
+    // After logHookEvent, original file should be rotated and new file should be small
+    const rotatedPath = `${logFile}.1`;
+    assert(fs.existsSync(rotatedPath), '.log.1 should exist after rotation');
+
+    const newStats = fs.statSync(logFile);
+    assert(newStats.size < 1000, 'current .log should be small (just the new entry)');
+
+    // Verify the new entry is in the current log
+    const newContent = fs.readFileSync(logFile, 'utf-8').trim();
+    const entry = JSON.parse(newContent);
+    assert.strictEqual(entry.kind, 'fire');
+  } finally {
+    process.env.HOME = originalHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+

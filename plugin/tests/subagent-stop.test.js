@@ -10,16 +10,18 @@ const FIXTURES_PATH = path.join(__dirname, 'fixtures');
 
 let tempDir;
 let stubPath;
+let homeDir;
 
-test('setup: create temp stub dir', () => {
+test('setup: create temp stub dir and HOME isolation', () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-test-'));
+  homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-subagent-stop-home-'));
   stubPath = path.join(tempDir, 'ouroboros');
-  fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub.sh'), stubPath);
+  fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub-capture.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
 });
 
 function runScript(input, env = {}) {
-  const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}` };
+  const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: homeDir };
   Object.assign(envVars, env);
   return spawnSync('node', [SCRIPT_PATH], {
     input: input,
@@ -40,15 +42,45 @@ test('subagent-stop: skip-list agent_type → exit 0, no stdout', () => {
   assert.strictEqual(result.stdout.trim(), '');
 });
 
-test('subagent-stop: short message (<80 chars) → exit 0, no stdout', () => {
-  const input = JSON.stringify({
-    agent_type: 'general',
-    agent_id: 'abc12345678',
-    last_assistant_message: 'short',
-  });
-  const result = runScript(input);
-  assert.strictEqual(result.status, 0);
-  assert.strictEqual(result.stdout.trim(), '');
+test('subagent-stop: short message (<80 chars) → exit 0, no stdout, but fire+subagent_stop events logged', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-subagent-stop-short-home-'));
+  try {
+    const input = JSON.stringify({
+      agent_type: 'general',
+      agent_id: 'short-msg-123',
+      session_id: 'short-test-sess',
+      last_assistant_message: 'short',
+    });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '');
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist even for short messages');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'subagent_stop' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    const stopEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.kind === 'subagent_stop';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'fire event should be logged even for short messages');
+    assert(stopEvent, 'subagent_stop event should be logged even for short messages');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
 });
 
 test('subagent-stop: kb block + stub put succeeds → log includes count, project, ids, agent_id', () => {
@@ -124,8 +156,126 @@ test('subagent-stop: message with no kb block + neutral content → exit 0, no s
   assert.strictEqual(result.stdout.trim(), '');
 });
 
-test('cleanup: remove temp stub dir', () => {
+test('subagent-stop: fire event logged with hook:subagent_stop', () => {
+  const input = JSON.stringify({
+    agent_type: 'general',
+    agent_id: 'agent-fire-123',
+    last_assistant_message: 'This is a long message with enough content to pass the minimum length check without any kb blocks',
+  });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+
+  const logFile = path.join(homeDir, '.ouroboros', 'hooks.log');
+  assert(fs.existsSync(logFile), 'hooks.log should exist');
+
+  const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+  const fireEvent = lines.find(line => {
+    try {
+      const entry = JSON.parse(line);
+      return entry.hook === 'subagent_stop' && entry.kind === 'fire';
+    } catch (e) { return false; }
+  });
+  assert(fireEvent, 'should have a fire event with hook=subagent_stop');
+});
+
+test('subagent-stop: subagent_stop event logged with agent_id, agent_type, session_id, and last_message_excerpt', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-subagent-stop-event-home-'));
+  try {
+    const input = JSON.stringify({
+      agent_type: 'general',
+      agent_id: 'agent-stop-abc789xyz',
+      session_id: 'stop-event-sess',
+      last_assistant_message: 'This is a long message with enough content to pass the minimum length check and includes multiple lines\nLine 2 with more content\nLine 3 with even more text for testing truncation of long messages',
+    });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const stopEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.kind === 'subagent_stop';
+      } catch (e) { return false; }
+    });
+    assert(stopEvent, 'should have a subagent_stop event');
+    const parsed = JSON.parse(stopEvent);
+    assert.strictEqual(parsed.agent_id, 'agent-stop-abc789xyz');
+    assert.strictEqual(parsed.agent_type, 'general');
+    assert.strictEqual(parsed.session_id, 'stop-event-sess');
+    assert(parsed.last_message_excerpt, 'should have last_message_excerpt');
+    assert(parsed.last_message_excerpt.length <= 120, 'excerpt should be <= 120 chars');
+    assert(!parsed.last_message_excerpt.includes('\n'), 'excerpt should have newlines stripped');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('subagent-stop: persist event logged when kb block present', () => {
+  const input = JSON.stringify({
+    agent_type: 'general',
+    agent_id: 'agent-persist-456',
+    last_assistant_message: 'This is a long message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"fact","title":"test fact"}]\n```',
+  });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+
+  const logFile = path.join(homeDir, '.ouroboros', 'hooks.log');
+  const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+  const persistEvent = lines.find(line => {
+    try {
+      const entry = JSON.parse(line);
+      return entry.kind === 'persist';
+    } catch (e) { return false; }
+  });
+  assert(persistEvent, 'should have a persist event');
+  const parsed = JSON.parse(persistEvent);
+  assert.strictEqual(parsed.entries, 1, 'entries count should match KB block size');
+});
+
+test('subagent-stop: metadata injection → hook:subagent_stop source, agent_id, agent_type, session_id injected, metadata merged', () => {
+  const captureFile = path.join(tempDir, `capture-${Date.now()}-${Math.random()}.json`);
+  const input = JSON.stringify({
+    agent_type: 'general',
+    agent_id: 'agent-meta-test-789',
+    last_assistant_message: 'This is a long message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"decision","title":"first"},{"type":"fact","title":"second","metadata":{"custom":"preserved"}}]\n```',
+  });
+  const result = runScript(input, { OUROBOROS_PUT_CAPTURE_FILE: captureFile });
+  assert.strictEqual(result.status, 0);
+  assert(fs.existsSync(captureFile), `capture file should exist at ${captureFile}`);
+
+  const captured = fs.readFileSync(captureFile, 'utf-8');
+  const entries = JSON.parse(captured);
+  assert.strictEqual(Array.isArray(entries), true, 'captured content should be JSON array');
+  assert.strictEqual(entries.length, 2, 'should have 2 entries');
+
+  entries.forEach((e, idx) => {
+    assert(e.metadata, `entry ${idx} should have metadata`);
+    assert.strictEqual(e.metadata.source, 'hook:subagent_stop', `entry ${idx} should have source=hook:subagent_stop`);
+    assert.strictEqual(e.metadata.agent_id, 'agent-meta-test-789', `entry ${idx} should have correct agent_id`);
+    assert.strictEqual(e.metadata.agent_type, 'general', `entry ${idx} should have correct agent_type`);
+    assert(Object.prototype.hasOwnProperty.call(e.metadata, 'session_id'), `entry ${idx} should have session_id key`);
+  });
+
+  const secondEntry = entries[1];
+  assert.strictEqual(secondEntry.metadata.custom, 'preserved', 'second entry should preserve custom metadata');
+  assert.strictEqual(secondEntry.metadata.source, 'hook:subagent_stop', 'second entry should also have injected source');
+});
+
+
+test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true });
+  }
+  if (homeDir && fs.existsSync(homeDir)) {
+    fs.rmSync(homeDir, { recursive: true });
   }
 });

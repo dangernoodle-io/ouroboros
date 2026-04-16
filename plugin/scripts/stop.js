@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const { execSync } = require('child_process');
-const { readStdin, getProject, getBinaryPath, extractKbBlock, matchesAnyPattern } = require(__dirname + '/lib');
+const { readStdin, getProject, projectFromPath, getBinaryPath, extractKbBlock, matchesAnyPattern, logHookEvent } = require(__dirname + '/lib');
 
 // Tier-2 check: patterns indicating the main context already persisted
 const ALREADY_PERSISTED_PATTERNS = [
@@ -80,6 +80,19 @@ async function main() {
       process.exit(0);
     }
 
+    // Determine project, prefer cwd-based resolution
+    const cwd = data.cwd || '';
+    let project = null;
+    if (cwd) {
+      project = projectFromPath(cwd);
+    }
+    if (!project) {
+      project = getProject();
+    }
+
+    const sessionId = data.session_id;
+    logHookEvent({ hook: 'stop', kind: 'fire', session_id: sessionId, project });
+
     let message = readLastMainAssistantText(transcriptPath);
     if (!message || message.length < 80) {
       process.exit(0);
@@ -99,7 +112,6 @@ async function main() {
         console.log(`[ouroboros] main ${sessionShort}: kb block JSON parse error: ${parseErr.message}`);
         process.exit(0);
       }
-      const project = getProject();
       if (!project) {
         console.log(`[ouroboros] main ${sessionShort}: kb block found but no project (run inside a git repo)`);
         process.exit(0);
@@ -110,15 +122,31 @@ async function main() {
         process.exit(0);
       }
       try {
+        // Parse entries and inject metadata
+        let entries = JSON.parse(json);
+        if (!Array.isArray(entries)) {
+          entries = [entries];
+        }
+        const source = {
+          source: 'hook:stop',
+          session_id: sessionId || '',
+        };
+        entries.forEach(e => {
+          e.metadata = { ...(e.metadata || {}), ...source };
+        });
+        const injectedJson = JSON.stringify(entries);
+
         const cmd = `"${binary}" put --stdin --project "${project}"`;
-        const result = execSync(cmd, { input: json, timeout: 3000, encoding: 'utf-8' });
+        const result = execSync(cmd, { input: injectedJson, timeout: 3000, encoding: 'utf-8' });
         const parsed = JSON.parse(result);
-        const entries = Array.isArray(parsed) ? parsed : [parsed];
-        const ids = entries.map(e => e.id).filter(id => id !== undefined).join(',');
-        console.log(`[ouroboros] main ${sessionShort}: persisted ${entries.length} entries to ${project} [ids: ${ids}]`);
+        const resultEntries = Array.isArray(parsed) ? parsed : [parsed];
+        const ids = resultEntries.map(e => e.id).filter(id => id !== undefined);
+        console.log(`[ouroboros] main ${sessionShort}: persisted ${resultEntries.length} entries to ${project} [ids: ${ids.join(',')}]`);
+        logHookEvent({ hook: 'stop', kind: 'persist', session_id: sessionId, project, entries: resultEntries.length, ids });
         process.exit(0);
       } catch (execErr) {
         console.log(`[ouroboros] main ${sessionShort}: put failed: ${execErr.message}`);
+        logHookEvent({ hook: 'stop', kind: 'error', detail: execErr.message, session_id: sessionId, project });
         process.exit(0);
       }
     }
@@ -126,16 +154,19 @@ async function main() {
     // Tier-2 check: already persisted
     if (matchesAnyPattern(message, ALREADY_PERSISTED_PATTERNS)) {
       console.log(`[ouroboros] main ${sessionShort}: tier-2 self-claim detected (no kb block, but message references persistence)`);
+      logHookEvent({ hook: 'stop', kind: 'nudge', session_id: sessionId, project, reason: 'tier-2' });
       process.exit(0);
     }
 
     // Tier-1 check: decision language
     if (matchesAnyPattern(message, DECISION_PATTERNS)) {
       console.log(`[ouroboros] main ${sessionShort}: tier-1 nudge fired (decision language present, no kb block) — call put now`);
+      logHookEvent({ hook: 'stop', kind: 'nudge', session_id: sessionId, project, reason: 'tier-1' });
       process.exit(0);
     }
 
     // Default: exit silently (exploratory output)
+    logHookEvent({ hook: 'stop', kind: 'noop', session_id: sessionId, project });
     process.exit(0);
   } catch (e) {
     process.exit(0);
