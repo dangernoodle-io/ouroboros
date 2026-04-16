@@ -18,6 +18,14 @@ case "$1" in
     echo '[{"id":1,"action":"created","title":"hook smoke"}]'
     exit 0
     ;;
+  items)
+    if [ "$OUROBOROS_STUB_ITEMS_EMPTY" = "1" ]; then
+      echo "[]"
+    else
+      echo '[{"id":"OU-1","title":"test item","priority":"P2","status":"open","project":"test-project"}]'
+    fi
+    exit 0
+    ;;
   *)
     exit 0
     ;;

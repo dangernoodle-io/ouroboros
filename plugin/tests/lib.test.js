@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, isSkippedAgentType } = require('../scripts/lib');
+const { extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -568,6 +568,307 @@ test('logHookEvent - rotation: file > 5MB triggers rotation to .log.1', () => {
     assert.strictEqual(entry.kind, 'fire');
   } finally {
     process.env.HOME = originalHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+// Tests for getMaxLogSize
+test('getMaxLogSize - unset env var returns 5MB default', () => {
+  const originalVal = process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  try {
+    delete process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+    const result = getMaxLogSize();
+    assert.strictEqual(result, 5 * 1024 * 1024);
+  } finally {
+    if (originalVal !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = originalVal;
+  }
+});
+
+test('getMaxLogSize - valid numeric env var is parsed', () => {
+  const originalVal = process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  try {
+    process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = '1048576'; // 1MB
+    const result = getMaxLogSize();
+    assert.strictEqual(result, 1048576);
+  } finally {
+    if (originalVal !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = originalVal;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  }
+});
+
+test('getMaxLogSize - invalid env var falls back to 5MB default', () => {
+  const originalVal = process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  try {
+    process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = 'not-a-number';
+    const result = getMaxLogSize();
+    assert.strictEqual(result, 5 * 1024 * 1024);
+  } finally {
+    if (originalVal !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = originalVal;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  }
+});
+
+// Tests for getMaxLogFiles
+test('getMaxLogFiles - unset env var returns 1 backup default', () => {
+  const originalVal = process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  try {
+    delete process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+    const result = getMaxLogFiles();
+    assert.strictEqual(result, 1);
+  } finally {
+    if (originalVal !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_FILES = originalVal;
+  }
+});
+
+test('getMaxLogFiles - valid numeric env var is parsed', () => {
+  const originalVal = process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  try {
+    process.env.OUROBOROS_HOOK_LOG_MAX_FILES = '3';
+    const result = getMaxLogFiles();
+    assert.strictEqual(result, 3);
+  } finally {
+    if (originalVal !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_FILES = originalVal;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  }
+});
+
+test('getMaxLogFiles - invalid env var falls back to 1 default', () => {
+  const originalVal = process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  try {
+    process.env.OUROBOROS_HOOK_LOG_MAX_FILES = 'invalid';
+    const result = getMaxLogFiles();
+    assert.strictEqual(result, 1);
+  } finally {
+    if (originalVal !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_FILES = originalVal;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  }
+});
+
+// Tests for rotateLogFiles
+test('rotateLogFiles - maxFiles=0 deletes current log', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-zero-'));
+  try {
+    const logPath = path.join(tmpHome, 'test.log');
+    fs.writeFileSync(logPath, 'some data');
+    assert(fs.existsSync(logPath));
+
+    rotateLogFiles(logPath, 0);
+
+    assert(!fs.existsSync(logPath), 'log file should be deleted when maxFiles=0');
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('rotateLogFiles - maxFiles=1 shifts .log → .log.1 only', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-one-'));
+  try {
+    const logPath = path.join(tmpHome, 'test.log');
+    fs.writeFileSync(logPath, 'current data');
+    fs.writeFileSync(`${logPath}.1`, 'old data 1');
+    fs.writeFileSync(`${logPath}.2`, 'old data 2'); // Should be deleted
+
+    rotateLogFiles(logPath, 1);
+
+    assert(!fs.existsSync(logPath), 'original .log should be rotated away');
+    assert(fs.existsSync(`${logPath}.1`), '.log.1 should exist');
+    assert.strictEqual(
+      fs.readFileSync(`${logPath}.1`, 'utf-8'),
+      'current data',
+      '.log.1 should contain current data'
+    );
+    assert(!fs.existsSync(`${logPath}.2`), '.log.2 should be deleted (beyond limit)');
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('rotateLogFiles - maxFiles=2 keeps two backups', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-two-'));
+  try {
+    const logPath = path.join(tmpHome, 'test.log');
+    fs.writeFileSync(logPath, 'current');
+    fs.writeFileSync(`${logPath}.1`, 'backup1');
+    fs.writeFileSync(`${logPath}.2`, 'backup2');
+    fs.writeFileSync(`${logPath}.3`, 'backup3'); // Should be deleted
+
+    rotateLogFiles(logPath, 2);
+
+    assert(!fs.existsSync(logPath), 'original should be rotated');
+    assert.strictEqual(fs.readFileSync(`${logPath}.1`, 'utf-8'), 'current');
+    assert.strictEqual(fs.readFileSync(`${logPath}.2`, 'utf-8'), 'backup1');
+    assert(!fs.existsSync(`${logPath}.3`), '.log.3 should be deleted (beyond limit)');
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('rotateLogFiles - rotates when only current log exists', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-only-current-'));
+  try {
+    const logPath = path.join(tmpHome, 'test.log');
+    fs.writeFileSync(logPath, 'first and only');
+
+    rotateLogFiles(logPath, 1);
+
+    assert(!fs.existsSync(logPath), 'original should be renamed');
+    assert(fs.existsSync(`${logPath}.1`), '.log.1 should exist');
+    assert.strictEqual(fs.readFileSync(`${logPath}.1`, 'utf-8'), 'first and only');
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+// Tests for logHookEvent with configurable rotation
+test('logHookEvent - custom max size via env var triggers rotation', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-custom-size-'));
+  const originalHome = process.env.HOME;
+  const originalMaxSize = process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  try {
+    process.env.HOME = tmpHome;
+    process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = '1024'; // 1KB
+    delete require.cache[require.resolve('../scripts/lib')];
+
+    // Pre-create a log file > 1KB
+    const logDir = path.join(tmpHome, '.ouroboros');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, 'hooks.log');
+    fs.writeFileSync(logFile, 'x'.repeat(2000)); // > 1KB
+
+    const { logHookEvent: logHE } = require('../scripts/lib');
+    logHE({ hook: 'test', kind: 'fire' });
+
+    // Should have rotated
+    assert(fs.existsSync(`${logFile}.1`), '.log.1 should exist after rotation');
+    const newStats = fs.statSync(logFile);
+    assert(newStats.size < 500, 'new log should be small');
+  } finally {
+    process.env.HOME = originalHome;
+    if (originalMaxSize !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = originalMaxSize;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('logHookEvent - multiple backups via env var keeps two rotated files', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-multi-backups-'));
+  const originalHome = process.env.HOME;
+  const originalMaxSize = process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  const originalMaxFiles = process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  try {
+    process.env.HOME = tmpHome;
+    process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = '500'; // Small so rotations happen
+    process.env.OUROBOROS_HOOK_LOG_MAX_FILES = '2';  // Keep 2 backups
+    delete require.cache[require.resolve('../scripts/lib')];
+
+    const logDir = path.join(tmpHome, '.ouroboros');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, 'hooks.log');
+
+    // Pre-seed with files
+    fs.writeFileSync(logFile, 'x'.repeat(600)); // Will trigger rotation on first write
+
+    const { logHookEvent: logHE } = require('../scripts/lib');
+
+    // First write triggers rotation
+    logHE({ msg: 'first' });
+    assert(fs.existsSync(`${logFile}.1`), 'first rotation creates .log.1');
+
+    // Second write
+    fs.appendFileSync(logFile, 'y'.repeat(600)); // Exceed limit again
+    logHE({ msg: 'second' });
+    assert(fs.existsSync(`${logFile}.1`), '.log.1 should still exist');
+    assert(fs.existsSync(`${logFile}.2`), '.log.2 should exist after second rotation');
+
+    // Third write
+    fs.appendFileSync(logFile, 'z'.repeat(600)); // Exceed limit again
+    logHE({ msg: 'third' });
+    assert(fs.existsSync(`${logFile}.1`), '.log.1 should exist');
+    assert(fs.existsSync(`${logFile}.2`), '.log.2 should exist');
+    assert(!fs.existsSync(`${logFile}.3`), '.log.3 should not exist (exceeds maxFiles=2)');
+  } finally {
+    process.env.HOME = originalHome;
+    if (originalMaxSize !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = originalMaxSize;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+    if (originalMaxFiles !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_FILES = originalMaxFiles;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('logHookEvent - default 5MB / 1 backup unchanged (backward compat)', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-default-'));
+  const originalHome = process.env.HOME;
+  const originalMaxSize = process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  const originalMaxFiles = process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  try {
+    process.env.HOME = tmpHome;
+    // Explicitly unset custom env vars to test defaults
+    delete process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+    delete process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+    delete require.cache[require.resolve('../scripts/lib')];
+
+    const logDir = path.join(tmpHome, '.ouroboros');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, 'hooks.log');
+
+    // Pre-create a file > 5MB
+    const buffer = Buffer.alloc(6 * 1024 * 1024, 'x');
+    fs.writeFileSync(logFile, buffer);
+
+    const { logHookEvent: logHE } = require('../scripts/lib');
+    logHE({ hook: 'test', kind: 'fire' });
+
+    // Should have rotated at 5MB
+    assert(fs.existsSync(`${logFile}.1`), '.log.1 should exist');
+    const newStats = fs.statSync(logFile);
+    assert(newStats.size < 1000, 'new log should be small');
+
+    // Only .log.1 should exist (not .log.2)
+    assert(!fs.existsSync(`${logFile}.2`), '.log.2 should not exist (default maxFiles=1)');
+  } finally {
+    process.env.HOME = originalHome;
+    if (originalMaxSize !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = originalMaxSize;
+    if (originalMaxFiles !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_FILES = originalMaxFiles;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('logHookEvent - invalid env vars fall back to defaults', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-invalid-'));
+  const originalHome = process.env.HOME;
+  const originalMaxSize = process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+  const originalMaxFiles = process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
+  try {
+    process.env.HOME = tmpHome;
+    process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = 'garbage';
+    process.env.OUROBOROS_HOOK_LOG_MAX_FILES = 'not-numeric';
+    delete require.cache[require.resolve('../scripts/lib')];
+
+    const logDir = path.join(tmpHome, '.ouroboros');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, 'hooks.log');
+    const buffer = Buffer.alloc(6 * 1024 * 1024, 'x'); // > 5MB default
+    fs.writeFileSync(logFile, buffer);
+
+    const { logHookEvent: logHE } = require('../scripts/lib');
+    // Should not throw, should use defaults
+    assert.doesNotThrow(() => {
+      logHE({ hook: 'test', kind: 'fire' });
+    });
+
+    assert(fs.existsSync(`${logFile}.1`), '.log.1 should exist (used 5MB default)');
+    assert(!fs.existsSync(`${logFile}.2`), '.log.2 should not exist (used 1 backup default)');
+  } finally {
+    process.env.HOME = originalHome;
+    if (originalMaxSize !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_SIZE = originalMaxSize;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_SIZE;
+    if (originalMaxFiles !== undefined) process.env.OUROBOROS_HOOK_LOG_MAX_FILES = originalMaxFiles;
+    else delete process.env.OUROBOROS_HOOK_LOG_MAX_FILES;
     delete require.cache[require.resolve('../scripts/lib')];
     fs.rmSync(tmpHome, { recursive: true });
   }
