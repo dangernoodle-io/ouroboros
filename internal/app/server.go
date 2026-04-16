@@ -22,11 +22,14 @@ Store immediately (put):
 - Project relationships or dependencies
 - Always search first to avoid duplicates; upsert by type+project+category+title
 - Update existing entries when decisions change — do not duplicate
+- Batch mode: entries=[{type, project, title, content, ...}, ...]
 
 Query (get/search):
 - Before decisions with prior context; get/search return summaries by default
 - verbose=true for detailed context; verbose=false (default) for routine lookups
 - Prefer search for broad queries, get with filters for known types/projects
+- Batch fetch: get ids=[1,2,3]; batch search: queries=["q1","q2"]
+- Filter multiple projects: projects=["proj-a","proj-b"]
 
 Checkpoints: After multi-step tasks, finalized plans, or before reporting completion — persist non-obvious decisions.
 
@@ -39,9 +42,11 @@ BACKLOG (project, item, plan, config):
 Projects: Create with name; auto-derived prefix (e.g., acme-corp → AC).
 
 Items:
-- Batch mode: ids=[] fetch, entries=[{...}] create/update, filters list
+- Batch mode: ids=[] fetch, entries=[{...}] create/update, delete_ids=[] remove, filters list
 - id present = update; id absent = create (needs project+priority+title)
 - Priority: P0 (critical) through P6 (someday). IDs: prefix+seq (e.g., AC-1)
+- Component: optional tag for subproject scope (e.g., "plugin")
+- Filter by projects=[], priority range, status, component
 
 Plans:
 - Batch mode: ids=[] fetch, entries=[{...}] create/update, filters list

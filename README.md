@@ -12,18 +12,10 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 
 ## Tools
 
-| Tool | Domain | Docs |
-|------|--------|------|
-| put | KB | [Wiki](../../wiki/Knowledge-Base#put) |
-| get | KB | [Wiki](../../wiki/Knowledge-Base#get) |
-| search | KB | [Wiki](../../wiki/Knowledge-Base#search) |
-| delete | KB | [Wiki](../../wiki/Knowledge-Base#delete) |
-| export | KB | [Wiki](../../wiki/Knowledge-Base#export) |
-| import | KB | [Wiki](../../wiki/Knowledge-Base#import) |
-| project | Backlog | [Wiki](../../wiki/Backlog#project) |
-| item | Backlog | [Wiki](../../wiki/Backlog#item) |
-| plan | Backlog | [Wiki](../../wiki/Backlog#plan) |
-| config | Backlog | [Wiki](../../wiki/Backlog#config) |
+| Namespace | Tools | Docs |
+|-----------|-------|------|
+| KB | `put`, `get`, `delete`, `search`, `export`, `import` | [Wiki](../../wiki/Knowledge-Base) |
+| Backlog | `project`, `item`, `plan`, `config` | [Wiki](../../wiki/Backlog) |
 
 ## Use with Claude Code
 
