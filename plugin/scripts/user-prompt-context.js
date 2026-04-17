@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, getProject, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 1800000; // 30 minutes per project
 const RESUME_COOLDOWN_MS = 0; // no cooldown for resume prompts
@@ -73,7 +73,7 @@ async function main() {
       process.exit(0);
     }
 
-    // Determine project with fallback chain: cwd → hints chain → getProject
+    // Determine project with fallback chain: cwd → hints chain (message, transcript)
     let project = null;
     if (cwd) {
       project = projectFromPath(cwd);

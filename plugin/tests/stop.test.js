@@ -11,13 +11,30 @@ const FIXTURES_PATH = path.join(__dirname, 'fixtures');
 let tempDir;
 let stubPath;
 let homeDir;
+let workspaceRoot;
+let projectDir;
 
-test('setup: create temp stub dir and HOME isolation', () => {
+test('setup: create temp stub dir, workspace, and HOME isolation', () => {
+  const { execSync } = require('child_process');
+
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-test-'));
   homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-home-'));
   stubPath = path.join(tempDir, 'ouroboros');
   fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub-capture.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
+
+  // Create workspace with .claude marker and a project dir with git repo
+  workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-workspace-'));
+  fs.mkdirSync(path.join(workspaceRoot, '.claude'));
+  projectDir = path.join(workspaceRoot, 'ouroboros');
+  fs.mkdirSync(projectDir);
+
+  // Initialize git repo in projectDir so projectFromPath works
+  try {
+    execSync('git init', { cwd: projectDir, stdio: 'ignore' });
+  } catch (e) {
+    // Ignore git init errors
+  }
 });
 
 // writeTranscript creates a JSONL transcript file with the given assistant turns.
@@ -75,7 +92,7 @@ test('stop: kb block + stub put succeeds → log includes count, project, ids, s
   const transcript = writeTranscript([{
     text: 'This is a long main-context message with enough content to pass the minimum length check and a kb block at the end:\n```kb\n[{"type":"decision","title":"adopt cobra"}]\n```',
   }]);
-  const input = JSON.stringify({ session_id: 'sess1234abcd', transcript_path: transcript });
+  const input = JSON.stringify({ session_id: 'sess1234abcd', transcript_path: transcript, cwd: projectDir });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
   assert.match(result.stderr, /persisted 1 entries/);
@@ -88,7 +105,7 @@ test('stop: kb block + stub put fails → log says put failed', () => {
   const transcript = writeTranscript([{
     text: 'This is a long main-context message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"fact"}]\n```',
   }]);
-  const input = JSON.stringify({ session_id: 'sessXYZ12345', transcript_path: transcript });
+  const input = JSON.stringify({ session_id: 'sessXYZ12345', transcript_path: transcript, cwd: projectDir });
   const result = runScript(input, { OUROBOROS_STUB_PUT_FAIL: '1' });
   assert.strictEqual(result.status, 0);
   assert.match(result.stderr, /put failed/);
@@ -254,7 +271,7 @@ test('stop: metadata injection → hook:stop source and session_id injected, met
   const transcript = writeTranscript([{
     text: 'This is a long main-context message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"decision","title":"first"},{"type":"note","title":"second","metadata":{"custom":"value"}}]\n```',
   }]);
-  const input = JSON.stringify({ session_id: 'sess-metadata-test', transcript_path: transcript });
+  const input = JSON.stringify({ session_id: 'sess-metadata-test', transcript_path: transcript, cwd: projectDir });
   const result = runScript(input, { OUROBOROS_PUT_CAPTURE_FILE: captureFile });
   assert.strictEqual(result.status, 0);
   assert(fs.existsSync(captureFile), `capture file should exist at ${captureFile}`);

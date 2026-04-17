@@ -11,13 +11,30 @@ const FIXTURES_PATH = path.join(__dirname, 'fixtures');
 let tempDir;
 let stubPath;
 let homeDir;
+let workspaceRoot;
+let projectDir;
 
-test('setup: create temp stub dir and HOME isolation', () => {
+test('setup: create temp stub dir, workspace, and HOME isolation', () => {
+  const { execSync } = require('child_process');
+
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-test-'));
   homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-subagent-stop-home-'));
   stubPath = path.join(tempDir, 'ouroboros');
   fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub-capture.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
+
+  // Create workspace with .claude marker and a project dir with git repo
+  workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-workspace-'));
+  fs.mkdirSync(path.join(workspaceRoot, '.claude'));
+  projectDir = path.join(workspaceRoot, 'ouroboros');
+  fs.mkdirSync(projectDir);
+
+  // Initialize git repo in projectDir so projectFromPath works
+  try {
+    execSync('git init', { cwd: projectDir, stdio: 'ignore' });
+  } catch (e) {
+    // Ignore git init errors
+  }
 });
 
 function runScript(input, env = {}) {
@@ -85,6 +102,7 @@ test('subagent-stop: short message (<80 chars) → exit 0, no stdout, but fire+s
 
 test('subagent-stop: kb block + stub put succeeds → log includes count, project, ids, agent_id', () => {
   const input = JSON.stringify({
+    cwd: projectDir,
     agent_type: 'general',
     agent_id: 'abc12345678',
     last_assistant_message: 'This is a long message with enough content to pass the minimum length check and then includes a kb block at the end:\n```kb\n[{"type":"decision","title":"adopt cobra"}]\n```',
@@ -98,6 +116,7 @@ test('subagent-stop: kb block + stub put succeeds → log includes count, projec
 
 test('subagent-stop: kb block + stub put fails → log says put failed', () => {
   const input = JSON.stringify({
+    cwd: projectDir,
     agent_type: 'general',
     agent_id: 'def87654321',
     last_assistant_message: 'This is a long message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"fact"}]\n```',
@@ -225,6 +244,7 @@ test('subagent-stop: subagent_stop event logged with agent_id, agent_type, sessi
 
 test('subagent-stop: persist event logged when kb block present', () => {
   const input = JSON.stringify({
+    cwd: projectDir,
     agent_type: 'general',
     agent_id: 'agent-persist-456',
     last_assistant_message: 'This is a long message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"fact","title":"test fact"}]\n```',
@@ -248,6 +268,7 @@ test('subagent-stop: persist event logged when kb block present', () => {
 test('subagent-stop: metadata injection → hook:subagent_stop source, agent_id, agent_type, session_id injected, metadata merged', () => {
   const captureFile = path.join(tempDir, `capture-${Date.now()}-${Math.random()}.json`);
   const input = JSON.stringify({
+    cwd: projectDir,
     agent_type: 'general',
     agent_id: 'agent-meta-test-789',
     last_assistant_message: 'This is a long message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"decision","title":"first"},{"type":"fact","title":"second","metadata":{"custom":"preserved"}}]\n```',

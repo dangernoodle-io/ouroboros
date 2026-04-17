@@ -11,13 +11,30 @@ const FIXTURES_PATH = path.join(__dirname, 'fixtures');
 let tempDir;
 let stubPath;
 let homeDir;
+let workspaceRoot;
+let projectDir;
 
-test('setup: create temp stub dir and HOME isolation', () => {
+test('setup: create temp stub dir, workspace, and HOME isolation', () => {
+  const { execSync } = require('child_process');
+
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-test-'));
   homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-subagent-start-home-'));
   stubPath = path.join(tempDir, 'ouroboros');
   fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
+
+  // Create workspace with .claude marker and a project dir with git repo
+  workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-workspace-'));
+  fs.mkdirSync(path.join(workspaceRoot, '.claude'));
+  projectDir = path.join(workspaceRoot, 'ouroboros');
+  fs.mkdirSync(projectDir);
+
+  // Initialize git repo in projectDir so projectFromPath works
+  try {
+    execSync('git init', { cwd: projectDir, stdio: 'ignore' });
+  } catch (e) {
+    // Ignore git init errors
+  }
 });
 
 function runScript(input, env = {}) {
@@ -32,7 +49,7 @@ function runScript(input, env = {}) {
 }
 
 test('subagent-start: stub query returns 3 rows → stdout has KB header + 3 indented lines + contract block', () => {
-  const input = JSON.stringify({});
+  const input = JSON.stringify({ cwd: projectDir });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
   const stdout = result.stdout;
@@ -46,7 +63,7 @@ test('subagent-start: stub query returns 3 rows → stdout has KB header + 3 ind
 });
 
 test('subagent-start: stub query returns empty array → exit 0, no stdout', () => {
-  const input = JSON.stringify({});
+  const input = JSON.stringify({ cwd: projectDir });
   const result = runScript(input, { OUROBOROS_STUB_QUERY_EMPTY: '1' });
   assert.strictEqual(result.status, 0);
   assert.strictEqual(result.stdout.trim(), '');
@@ -146,7 +163,7 @@ test('subagent-start: subagent_start event logged with agent_type', () => {
 });
 
 test('subagent-start: KB context still injected to stdout (regression)', () => {
-  const input = JSON.stringify({});
+  const input = JSON.stringify({ cwd: projectDir });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
   const stdout = result.stdout;

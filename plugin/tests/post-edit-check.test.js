@@ -38,7 +38,7 @@ test('post-edit-check: no file_path → exit 0, no stderr', () => {
   assert.strictEqual(result.stderr.trim(), '');
 });
 
-test('post-edit-check: file_path with no git repo but cwd in git repo → still processes', () => {
+test('post-edit-check: file_path with no git repo → exit silently (no project)', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-git-post-edit-'));
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-git-post-edit-home-'));
   try {
@@ -54,8 +54,8 @@ test('post-edit-check: file_path with no git repo but cwd in git repo → still 
       cwd: path.join(__dirname, '..'),
     });
     assert.strictEqual(result.status, 0);
-    // Even though file is not in a git repo, cwd is, so it should find matches
-    assert.match(result.stderr, /KB refs file\.js:/);
+    // File is not in a git repo, so no project can be determined. Script exits silently.
+    assert.strictEqual(result.stderr.trim(), '');
   } finally {
     fs.rmSync(tmpDir, { recursive: true });
     fs.rmSync(testHomeDir, { recursive: true });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, getProject, projectFromPath, getBinaryPath, formatContextLines, logHookEvent, isSkippedAgentType } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, getBinaryPath, formatContextLines, logHookEvent, isSkippedAgentType } = require(__dirname + '/lib');
 
 const MAX_ENTRIES = 8;
 
@@ -24,9 +24,6 @@ async function main() {
     let project = null;
     if (cwd) {
       project = projectFromPath(cwd);
-    }
-    if (!project) {
-      project = getProject();
     }
 
     // Log fire event immediately, before any early exits

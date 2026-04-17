@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { readStdin, projectFromPath, getProject, isWithinCooldown, touchFile, logHookEvent } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, isWithinCooldown, touchFile, logHookEvent } = require(__dirname + '/lib');
 
 const COOLDOWN_FILE = '/tmp/.ouroboros-commit-nudge';
 const COOLDOWN_MS = 300000; // 5 minutes
@@ -24,9 +24,6 @@ async function main() {
     let project = null;
     if (cwd) {
       project = projectFromPath(cwd);
-    }
-    if (!project) {
-      project = getProject();
     }
 
     // Log fire event
