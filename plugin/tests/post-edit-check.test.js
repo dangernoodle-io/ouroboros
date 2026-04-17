@@ -187,6 +187,49 @@ test('post-edit-check: nudge event logged when KB match found', () => {
   }
 });
 
+test('post-edit-check: Write tool_name works like Edit', () => {
+  const gitRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'post-edit-git-write-'));
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-post-edit-write-home-'));
+  try {
+    fs.mkdirSync(path.join(gitRepoDir, '.git'));
+    const srcDir = path.join(gitRepoDir, 'src');
+    fs.mkdirSync(srcDir, { recursive: true });
+    const testFile = path.join(srcDir, 'setup.js');
+    fs.writeFileSync(testFile, '');
+    const input = JSON.stringify({ session_id: 'sess-write-test', tool_name: 'Write', tool_input: { file_path: testFile } });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'post_edit_check' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'should have a fire event for Write tool');
+    const nudgeEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.kind === 'nudge';
+      } catch (e) { return false; }
+    });
+    assert(nudgeEvent, 'should have a nudge event when KB matches (Write tool)');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+    fs.rmSync(gitRepoDir, { recursive: true });
+  }
+});
+
 test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true });
