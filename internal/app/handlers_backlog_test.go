@@ -645,22 +645,20 @@ func TestHandlePlanList(t *testing.T) {
 func TestHandleConfig(t *testing.T) {
 	resetAllDB(t)
 
-	// Set config
+	// Try to set config via MCP should return CLI-only error
 	setReq := makeRequest(map[string]interface{}{
 		"key":   "api_key",
 		"value": "secret123",
 	})
 	setResult, err := handleConfig(db)(context.TODO(), setReq)
 	require.NoError(t, err)
-
-	var setResp map[string]interface{}
-	err = unmarshalResult(setResult, &setResp)
-	require.NoError(t, err)
-	updated, ok := setResp["updated"].(bool)
+	assert.True(t, setResult.IsError)
+	textContent, ok := mcp.AsTextContent(setResult.Content[0])
 	require.True(t, ok)
-	assert.True(t, updated)
+	assert.Contains(t, textContent.Text, "CLI-only")
 
-	// Get config
+	// Get config still works (set it directly in DB for testing)
+	require.NoError(t, backlog.SetConfig(db, "api_key", "secret123"))
 	getReq := makeRequest(map[string]interface{}{
 		"key": "api_key",
 	})
@@ -676,17 +674,11 @@ func TestHandleConfig(t *testing.T) {
 func TestHandleConfigGetAll(t *testing.T) {
 	resetAllDB(t)
 
-	// Set multiple configs
-	for i, key := range []string{"key1", "key2"} {
-		setReq := makeRequest(map[string]interface{}{
-			"key":   key,
-			"value": "value" + string(rune('0'+i+1)),
-		})
-		_, err := handleConfig(db)(context.TODO(), setReq)
-		require.NoError(t, err)
-	}
+	// Set multiple configs directly in DB
+	require.NoError(t, backlog.SetConfig(db, "key1", "value1"))
+	require.NoError(t, backlog.SetConfig(db, "key2", "value2"))
 
-	// Get all configs
+	// Get all configs via MCP
 	getAllReq := makeRequest(map[string]interface{}{})
 	getAllResult, err := handleConfig(db)(context.TODO(), getAllReq)
 	require.NoError(t, err)
@@ -709,6 +701,23 @@ func TestHandleConfigNotFound(t *testing.T) {
 	getResult, err := handleConfig(db)(context.TODO(), getReq)
 	require.NoError(t, err)
 	assert.True(t, getResult.IsError)
+}
+
+func TestHandleConfigSetCliOnly(t *testing.T) {
+	resetAllDB(t)
+
+	// Try to set config via MCP should return CLI-only error
+	setReq := makeRequest(map[string]interface{}{
+		"key":   "api_key",
+		"value": "secret123",
+	})
+	setResult, err := handleConfig(db)(context.TODO(), setReq)
+	require.NoError(t, err)
+	assert.True(t, setResult.IsError)
+	textContent, ok := mcp.AsTextContent(setResult.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "CLI-only")
+	assert.Contains(t, textContent.Text, "ouroboros config set")
 }
 
 func TestHandleItemInvalidPriority(t *testing.T) {

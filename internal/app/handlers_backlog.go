@@ -449,9 +449,7 @@ func handleConfig(d *sql.DB) server.ToolHandlerFunc {
 			return jsonResult(map[string]string{"key": key, "value": v})
 		}
 
-		if err := backlog.SetConfig(d, key, value); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return jsonResult(map[string]interface{}{"key": key, "value": value, "updated": true})
+		// Both key and value provided: set is CLI-only
+		return mcp.NewToolResultError("config set is CLI-only; use: ouroboros config set <key> <value>"), nil
 	}
 }

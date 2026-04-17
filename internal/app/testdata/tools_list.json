@@ -4,7 +4,7 @@
       "annotations": {
         "idempotentHint": true
       },
-      "description": "Get/set config: no args=list, key=get, key+value=set.",
+      "description": "Get config: no args=list, key=get. Mutations are CLI-only (ouroboros config set).",
       "inputSchema": {
         "properties": {
           "key": {
@@ -12,7 +12,7 @@
             "type": "string"
           },
           "value": {
-            "description": "Config value",
+            "description": "(ignored — set is CLI-only)",
             "type": "string"
           }
         },
