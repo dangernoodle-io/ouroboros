@@ -207,18 +207,6 @@ func handleExport(db *sql.DB) server.ToolHandlerFunc {
 
 func handleImport(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		content, err := req.RequireString("content")
-		if err != nil {
-			return mcp.NewToolResultError("content is required"), nil //nolint:nilerr
-		}
-
-		project, _ := req.GetArguments()["project"].(string)
-
-		err = kb.Import(db, project, content)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		return jsonResult(map[string]bool{"ok": true})
+		return mcp.NewToolResultError("import is CLI-only; use: ouroboros import <file|->"), nil //nolint:nilerr
 	}
 }

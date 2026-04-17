@@ -120,9 +120,9 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	), withRecover(handleExport(db)))
 
 	s.AddTool(mcp.NewTool("import",
-		mcp.WithDescription("Import documents from JSON."),
-		mcp.WithString("content", mcp.Required(), mcp.Description("JSON to import")),
-		mcp.WithString("project", mcp.Description("Default project if not specified")),
+		mcp.WithDescription("Import is CLI-only (ouroboros import). This tool returns an error."),
+		mcp.WithString("content", mcp.Description("(ignored — import is CLI-only)")),
+		mcp.WithString("project", mcp.Description("(ignored — import is CLI-only)")),
 		toolAnnotation(nil, nil, nil),
 	), withRecover(handleImport(db)))
 

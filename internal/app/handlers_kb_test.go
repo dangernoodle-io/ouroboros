@@ -615,3 +615,34 @@ func TestHandleSearch_MultiProject(t *testing.T) {
 	assert.True(t, projects["project-b"])
 	assert.False(t, projects["project-c"])
 }
+
+// TestHandleImport tests that import handler returns CLI-only error.
+func TestHandleImport(t *testing.T) {
+	req := makeRequest(map[string]interface{}{
+		"content": `{"documents":[{"type":"decision","project":"test","title":"Test"}]}`,
+		"project": "default-proj",
+	})
+
+	result, err := handleImport(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "CLI-only")
+}
+
+// TestHandleImportNoArgs tests import handler error regardless of arguments.
+func TestHandleImportNoArgs(t *testing.T) {
+	req := makeRequest(map[string]interface{}{})
+
+	result, err := handleImport(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "CLI-only")
+}

@@ -109,21 +109,19 @@
     },
     {
       "annotations": {},
-      "description": "Import documents from JSON.",
+      "description": "Import is CLI-only (ouroboros import). This tool returns an error.",
       "inputSchema": {
         "properties": {
           "content": {
-            "description": "JSON to import",
+            "description": "(ignored — import is CLI-only)",
             "type": "string"
           },
           "project": {
-            "description": "Default project if not specified",
+            "description": "(ignored — import is CLI-only)",
             "type": "string"
           }
         },
-        "required": [
-          "content"
-        ],
+        "required": [],
         "type": "object"
       },
       "name": "import"

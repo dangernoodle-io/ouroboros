@@ -39,6 +39,7 @@ func init() {
 	rootCmd.AddCommand(itemsCmd)
 	rootCmd.AddCommand(putCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(importCmd)
 	rootCmd.AddCommand(statuslineCmd)
 }
 
