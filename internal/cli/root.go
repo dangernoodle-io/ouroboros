@@ -38,6 +38,7 @@ func init() {
 	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(itemsCmd)
 	rootCmd.AddCommand(putCmd)
+	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(statuslineCmd)
 }
 

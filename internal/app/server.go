@@ -156,9 +156,9 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	), withRecover(handlePlan(db, bk)))
 
 	s.AddTool(mcp.NewTool("config",
-		mcp.WithDescription("Get/set config: no args=list, key=get, key+value=set."),
+		mcp.WithDescription("Get config: no args=list, key=get. Mutations are CLI-only (ouroboros config set)."),
 		mcp.WithString("key", mcp.Description("Config key")),
-		mcp.WithString("value", mcp.Description("Config value")),
+		mcp.WithString("value", mcp.Description("(ignored — set is CLI-only)")),
 		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
 	), withRecover(handleConfig(db)))
 }
