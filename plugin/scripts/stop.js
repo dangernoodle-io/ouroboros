@@ -151,20 +151,6 @@ async function main() {
       }
     }
 
-    // Tier-2 check: already persisted
-    if (matchesAnyPattern(message, ALREADY_PERSISTED_PATTERNS)) {
-      console.error(`[ouroboros] main ${sessionShort}: tier-2 self-claim detected (no kb block, but message references persistence)`);
-      logHookEvent({ hook: 'stop', kind: 'nudge', session_id: sessionId, project, reason: 'tier-2' });
-      process.exit(0);
-    }
-
-    // Tier-1 check: decision language
-    if (matchesAnyPattern(message, DECISION_PATTERNS)) {
-      console.error(`[ouroboros] main ${sessionShort}: tier-1 nudge fired (decision language present, no kb block) — call put now`);
-      logHookEvent({ hook: 'stop', kind: 'nudge', session_id: sessionId, project, reason: 'tier-1' });
-      process.exit(0);
-    }
-
     // Default: exit silently (exploratory output)
     logHookEvent({ hook: 'stop', kind: 'noop', session_id: sessionId, project });
     process.exit(0);
