@@ -138,6 +138,16 @@ func UpsertDocument(db *sql.DB, doc Document) (*UpsertResult, error) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Extract session_id: prefer top-level field, fall back to metadata key.
+	sessionID := doc.SessionID
+	if sessionID == "" && doc.Metadata != nil {
+		sessionID = doc.Metadata["session_id"]
+	}
+	var sessionIDArg interface{}
+	if sessionID != "" {
+		sessionIDArg = sessionID
+	}
+
 	// Check if document exists before insert
 	var existingID int64
 	err = db.QueryRow(
@@ -147,11 +157,11 @@ func UpsertDocument(db *sql.DB, doc Document) (*UpsertResult, error) {
 	isUpdate := err == nil
 
 	_, err = db.Exec(`
-		INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO documents (type, project, category, title, content, notes, session_id, metadata, tags, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(type, project, category, title)
-		DO UPDATE SET content = excluded.content, notes = excluded.notes, metadata = excluded.metadata, tags = excluded.tags, updated_at = excluded.updated_at
-	`, doc.Type, doc.Project, doc.Category, doc.Title, doc.Content, doc.Notes, string(metadataJSON), string(tagsJSON), now, now)
+		DO UPDATE SET content = excluded.content, notes = excluded.notes, session_id = excluded.session_id, metadata = excluded.metadata, tags = excluded.tags, updated_at = excluded.updated_at
+	`, doc.Type, doc.Project, doc.Category, doc.Title, doc.Content, doc.Notes, sessionIDArg, string(metadataJSON), string(tagsJSON), now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert document: %w", err)
 	}
@@ -184,11 +194,12 @@ func GetDocument(db *sql.DB, id int64) (*Document, error) {
 	var metadataJSON sql.NullString
 	var tagsJSON sql.NullString
 	var notes sql.NullString
+	var sessionID sql.NullString
 
 	err := db.QueryRow(`
-		SELECT id, type, project, category, title, content, notes, metadata, tags, created_at, updated_at
+		SELECT id, type, project, category, title, content, notes, session_id, metadata, tags, created_at, updated_at
 		FROM documents WHERE id = ?
-	`, id).Scan(&doc.ID, &doc.Type, &doc.Project, &doc.Category, &doc.Title, &doc.Content, &notes, &metadataJSON, &tagsJSON, &doc.CreatedAt, &doc.UpdatedAt)
+	`, id).Scan(&doc.ID, &doc.Type, &doc.Project, &doc.Category, &doc.Title, &doc.Content, &notes, &sessionID, &metadataJSON, &tagsJSON, &doc.CreatedAt, &doc.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -199,6 +210,10 @@ func GetDocument(db *sql.DB, id int64) (*Document, error) {
 
 	if notes.Valid {
 		doc.Notes = notes.String
+	}
+
+	if sessionID.Valid {
+		doc.SessionID = sessionID.String
 	}
 
 	if metadataJSON.Valid {
@@ -216,9 +231,13 @@ func GetDocument(db *sql.DB, id int64) (*Document, error) {
 	return &doc, nil
 }
 
-// QueryDocuments queries documents with optional filters (type, project, category, FTS, tags).
+// QueryDocuments queries documents with optional filters (type, project, category, FTS, tags, sessionID).
 // Returns DocumentSummary (no content, no metadata) to conserve tokens.
-func QueryDocuments(db *sql.DB, docType string, projects []string, category, ftsQuery string, tags []string, limit int) ([]DocumentSummary, error) {
+func QueryDocuments(db *sql.DB, docType string, projects []string, category, ftsQuery string, tags []string, limit int, sessionID ...string) ([]DocumentSummary, error) {
+	sid := ""
+	if len(sessionID) > 0 {
+		sid = sessionID[0]
+	}
 	limit = ClampLimit(limit, 10, 500)
 
 	var query string
@@ -242,6 +261,10 @@ func QueryDocuments(db *sql.DB, docType string, projects []string, category, fts
 		if category != "" {
 			query += " AND d.category = ?"
 			args = append(args, category)
+		}
+		if sid != "" {
+			query += " AND d.session_id = ?"
+			args = append(args, sid)
 		}
 
 		query += " LIMIT ?"
@@ -280,6 +303,13 @@ func QueryDocuments(db *sql.DB, docType string, projects []string, category, fts
 			}
 			whereClause += "category = ?"
 			args = append(args, category)
+		}
+		if sid != "" {
+			if whereClause != "" {
+				whereClause += " AND "
+			}
+			whereClause += "session_id = ?"
+			args = append(args, sid)
 		}
 
 		if whereClause != "" {

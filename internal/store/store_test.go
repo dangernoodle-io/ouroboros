@@ -511,8 +511,8 @@ func TestMigrationVersionTracking(t *testing.T) {
 		versions = append(versions, v)
 	}
 
-	// Should have recorded migrations 1, 2, 3, 4, 5, and 6
-	assert.Equal(t, []int{1, 2, 3, 4, 5, 6}, versions)
+	// Should have recorded migrations 1, 2, 3, 4, 5, 6, and 7
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7}, versions)
 
 	// Verify applied_at is set (not NULL)
 	var appliedAt string
@@ -1001,4 +1001,188 @@ func TestCountDocumentsByTypeEmpty(t *testing.T) {
 	counts, err = store.CountDocumentsByType(db, []string{"nonexistent-project"})
 	require.NoError(t, err)
 	assert.Empty(t, counts)
+}
+
+func TestSessionIDColumnExists(t *testing.T) {
+	db := testDB(t)
+
+	rows, err := db.Query("PRAGMA table_info(documents)")
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var columnNames []string
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dfltValue *string
+		var pk int
+		require.NoError(t, rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk))
+		columnNames = append(columnNames, name)
+	}
+
+	assert.Contains(t, columnNames, "session_id")
+}
+
+func TestUpsertDocumentPersistsSessionIDFromMetadata(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:     "decision",
+		Project:  "acme-corp",
+		Title:    "session-meta-test",
+		Content:  "content",
+		Metadata: map[string]string{"session_id": "sess-abc-123", "source": "hook:stop"},
+	}
+
+	result, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	retrieved, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, "sess-abc-123", retrieved.SessionID)
+}
+
+func TestUpsertDocumentPersistsSessionIDFromField(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:      "decision",
+		Project:   "acme-corp",
+		Title:     "session-field-test",
+		Content:   "content",
+		SessionID: "sess-field-456",
+	}
+
+	result, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	retrieved, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, "sess-field-456", retrieved.SessionID)
+}
+
+func TestQueryDocumentsBySessionID(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := store.Document{
+		Type:      "decision",
+		Project:   "acme-corp",
+		Title:     "in-session",
+		Content:   "content",
+		SessionID: "sess-xyz",
+	}
+	doc2 := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "not-in-session",
+		Content: "other content",
+	}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	summaries, err := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50, "sess-xyz")
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "in-session", summaries[0].Title)
+}
+
+func TestQueryDocumentsNullSessionIDReturnsNone(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "no-session",
+		Content: "content",
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	summaries, err := store.QueryDocuments(db, "", nil, "", "", nil, 50, "sess-nonexistent")
+	require.NoError(t, err)
+	assert.Empty(t, summaries)
+}
+
+func TestBackfillSessionIDFromMetadata(t *testing.T) {
+	// Simulate a database at migration 6 (no session_id column yet).
+	// Insert a row with session_id in metadata JSON, then apply migration 7
+	// and verify the column is backfilled.
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+
+	// Bootstrap schema_migrations tracking table and apply all migrations up to 6.
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY,
+		applied_at TEXT NOT NULL
+	)`)
+	require.NoError(t, err)
+
+	migrations6 := []struct {
+		version int
+		sql     string
+	}{
+		{1, `CREATE TABLE IF NOT EXISTS documents (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			type       TEXT NOT NULL,
+			project    TEXT NOT NULL DEFAULT '',
+			category   TEXT NOT NULL DEFAULT '',
+			title      TEXT NOT NULL,
+			content    TEXT NOT NULL DEFAULT '',
+			metadata   TEXT,
+			tags       TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE(type, project, category, title)
+		);
+		CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+			title, content, tags,
+			content=documents, content_rowid=id
+		);`},
+		{2, `CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, prefix TEXT NOT NULL UNIQUE, created TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id), seq INTEGER NOT NULL, priority TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open', created TEXT NOT NULL, updated TEXT NOT NULL, UNIQUE(project_id, seq));
+		CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER REFERENCES projects(id), item_id TEXT REFERENCES items(id), title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft', created TEXT NOT NULL, updated TEXT NOT NULL);`},
+		{3, `ALTER TABLE documents ADD COLUMN project_id INTEGER REFERENCES projects(id);`},
+		{4, `ALTER TABLE documents ADD COLUMN notes TEXT NOT NULL DEFAULT '';`},
+		{5, `ALTER TABLE items ADD COLUMN notes TEXT NOT NULL DEFAULT '';`},
+		{6, `ALTER TABLE items ADD COLUMN component TEXT NOT NULL DEFAULT '';`},
+	}
+	for _, m := range migrations6 {
+		_, err := db.Exec(m.sql)
+		require.NoError(t, err)
+		_, err = db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, '2024-01-01T00:00:00Z')", m.version)
+		require.NoError(t, err)
+	}
+
+	// Insert a document with session_id in metadata JSON (pre-migration-7 state)
+	_, err = db.Exec(`INSERT INTO documents (type, project, category, title, content, metadata, tags, created_at, updated_at)
+		VALUES ('decision', 'acme-corp', '', 'old-entry', 'content', '{"session_id":"sess-backfill-001","source":"hook:stop"}', '[]', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+
+	// Insert another document without session_id in metadata
+	_, err = db.Exec(`INSERT INTO documents (type, project, category, title, content, metadata, tags, created_at, updated_at)
+		VALUES ('fact', 'acme-corp', '', 'no-session-entry', 'content', '{"source":"hook:stop"}', '[]', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+
+	// Apply migration 7 (session_id column + backfill)
+	require.NoError(t, store.ApplySchema(db))
+
+	// Verify backfill: old-entry should have session_id set
+	var sessionID *string
+	err = db.QueryRow("SELECT session_id FROM documents WHERE title = 'old-entry'").Scan(&sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, sessionID)
+	assert.Equal(t, "sess-backfill-001", *sessionID)
+
+	// no-session-entry should have NULL session_id
+	err = db.QueryRow("SELECT session_id FROM documents WHERE title = 'no-session-entry'").Scan(&sessionID)
+	require.NoError(t, err)
+	assert.Nil(t, sessionID)
 }

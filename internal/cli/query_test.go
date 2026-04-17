@@ -36,7 +36,7 @@ func TestRunQueryByProject(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runQuery(&buf, db, "acme-corp", "", "", 10)
+	err = runQuery(&buf, db, "acme-corp", "", "", "", 10)
 	require.NoError(t, err)
 
 	var summaries []store.DocumentSummary
@@ -57,7 +57,7 @@ func TestRunQueryByType(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runQuery(&buf, db, "", "decision", "", 10)
+	err = runQuery(&buf, db, "", "decision", "", "", 10)
 	require.NoError(t, err)
 
 	var summaries []store.DocumentSummary
@@ -78,7 +78,7 @@ func TestRunQuerySearch(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runQuery(&buf, db, "", "", "PostgreSQL", 10)
+	err = runQuery(&buf, db, "", "", "PostgreSQL", "", 10)
 	require.NoError(t, err)
 
 	var summaries []store.DocumentSummary
@@ -96,10 +96,36 @@ func TestRunQueryLimit(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runQuery(&buf, db, "acme-corp", "", "", 3)
+	err := runQuery(&buf, db, "acme-corp", "", "", "", 3)
 	require.NoError(t, err)
 
 	var summaries []store.DocumentSummary
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &summaries))
 	assert.Len(t, summaries, 3)
+}
+
+func TestRunQueryBySessionID(t *testing.T) {
+	db := newTestDB(t)
+	_, err := store.UpsertDocument(db, store.Document{
+		Type:      "decision",
+		Project:   "acme-corp",
+		Title:     "In-Session Doc",
+		SessionID: "sess-test-001",
+	})
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "No-Session Doc",
+	})
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runQuery(&buf, db, "", "", "", "sess-test-001", 10)
+	require.NoError(t, err)
+
+	var summaries []store.DocumentSummary
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &summaries))
+	assert.Len(t, summaries, 1)
+	assert.Equal(t, "In-Session Doc", summaries[0].Title)
 }
