@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-const { readStdin, projectFromPath, logHookEvent, extractAllKbBlocks } = require(__dirname + '/lib');
+const { execSync } = require('child_process');
+const { readStdin, projectFromPath, logHookEvent, extractAllKbBlocks, getBinaryPath } = require(__dirname + '/lib');
 
 async function main() {
   try {
@@ -29,52 +30,115 @@ async function main() {
 
     const { blocks, turns } = extractAllKbBlocks(transcriptPath);
 
-    // If KB blocks are present, allow compaction
-    if (blocks.length > 0) {
+    // No kb-blocks in transcript: fall back to heuristic (decision language)
+    if (blocks.length === 0) {
+      const decisionTurns = turns.filter(t => t.hasDecisionLanguage).length;
+      const trigger = data.trigger || 'manual';
+      const threshold = trigger === 'auto' ? 3 : 1;
+
+      if (decisionTurns >= threshold) {
+        const reason = '[ouroboros] unpersisted decisions detected — emit ```kb``` blocks for the key decisions from this session before compacting';
+        process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+        logHookEvent({
+          hook: 'pre_compact',
+          kind: 'block',
+          project,
+          trigger,
+          decision_turns: decisionTurns,
+          threshold,
+        });
+        process.exit(0);
+      }
+
       logHookEvent({
         hook: 'pre_compact',
         kind: 'allow',
         project,
-        reason: 'blocks_present',
+        reason: 'no_decisions',
+        trigger,
+        decision_turns: decisionTurns,
+      });
+      process.exit(0);
+    }
+
+    // kb-blocks present: precise session_id diffing
+    const sessionId = data.session_id || '';
+    if (!sessionId) {
+      // No session_id to diff against — allow (can't compare without it)
+      logHookEvent({
+        hook: 'pre_compact',
+        kind: 'allow',
+        project,
+        reason: 'no_session_id',
         block_count: blocks.length,
       });
       process.exit(0);
     }
 
-    // Count turns with decision language
-    const decisionTurns = turns.filter(t => t.hasDecisionLanguage).length;
+    const persistedCount = queryPersistedCount(project, sessionId);
 
-    // Determine threshold based on trigger type
-    const trigger = data.trigger || 'manual';
-    const threshold = trigger === 'auto' ? 3 : 1;
-
-    if (decisionTurns >= threshold) {
-      const reason = '[ouroboros] unpersisted decisions detected — emit ```kb``` blocks for the key decisions from this session before compacting';
-      process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+    if (persistedCount === null) {
+      // Query failed — fail-open
       logHookEvent({
         hook: 'pre_compact',
-        kind: 'block',
+        kind: 'allow',
         project,
-        trigger,
-        decision_turns: decisionTurns,
-        threshold,
+        reason: 'query_error',
+        block_count: blocks.length,
       });
       process.exit(0);
     }
 
+    if (persistedCount >= blocks.length) {
+      logHookEvent({
+        hook: 'pre_compact',
+        kind: 'allow',
+        project,
+        reason: 'all_persisted',
+        block_count: blocks.length,
+        persisted_count: persistedCount,
+        session_id: sessionId,
+      });
+      process.exit(0);
+    }
+
+    const unpersisted = blocks.length - persistedCount;
+    const reason = `[ouroboros] ${unpersisted} of ${blocks.length} kb-blocks unpersisted — persist before compacting`;
+    process.stdout.write(JSON.stringify({ decision: 'block', reason }));
     logHookEvent({
       hook: 'pre_compact',
-      kind: 'allow',
+      kind: 'block',
       project,
-      reason: 'no_decisions',
-      trigger,
-      decision_turns: decisionTurns,
+      reason: 'unpersisted_blocks',
+      block_count: blocks.length,
+      persisted_count: persistedCount,
+      unpersisted_count: unpersisted,
+      session_id: sessionId,
     });
   } catch (e) {
     logHookEvent({ hook: 'pre_compact', kind: 'error', error: String(e) });
   }
 
   process.exit(0);
+}
+
+// queryPersistedCount returns the number of documents persisted for the given
+// project and session_id, or null if the query fails (fail-open).
+function queryPersistedCount(project, sessionId) {
+  const binary = getBinaryPath();
+  if (!binary) {
+    return null;
+  }
+
+  try {
+    const cmd = `"${binary}" query --project "${project}" --session-id "${sessionId}" --limit 500`;
+    const output = execSync(cmd, { timeout: 3000, encoding: 'utf-8' });
+    const parsed = JSON.parse(output.trim());
+    if (!Array.isArray(parsed)) return null;
+    return parsed.length;
+  } catch (e) {
+    return null;
+  }
 }
 
 main();

@@ -5,9 +5,11 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 
-function runPreCompact(inputData) {
+function runPreCompact(inputData, env = {}) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('node', [path.join(__dirname, '../scripts/pre-compact.js')]);
+    const proc = spawn('node', [path.join(__dirname, '../scripts/pre-compact.js')], {
+      env: { ...process.env, ...env },
+    });
 
     let stdout = '';
     let stderr = '';
@@ -31,52 +33,72 @@ function runPreCompact(inputData) {
   });
 }
 
-test('pre-compact - transcript with kb-blocks present → exit 0, no stdout', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-kb-'));
-  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
-  const kbJson = '[{"type":"decision"}]';
-  const line = JSON.stringify({
-    type: 'assistant',
-    isSidechain: false,
-    message: {
-      content: [{ type: 'text', text: `Decision:\n\`\`\`kb\n${kbJson}\n\`\`\`` }],
-    },
-  });
-  fs.writeFileSync(transcriptPath, line + '\n');
+// Helper: write a fake ouroboros binary under pluginDataDir/bin/ouroboros.
+// Returns the pluginDataDir to pass as CLAUDE_PLUGIN_DATA env var.
+function fakeBinary(pluginDataDir, jsonResponse) {
+  const binDir = path.join(pluginDataDir, 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  const binPath = path.join(binDir, 'ouroboros');
+  fs.writeFileSync(binPath, `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify(${JSON.stringify(jsonResponse)}));\n`);
+  fs.chmodSync(binPath, '755');
+  return pluginDataDir;
+}
 
-  const tmpGit = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-git-'));
-  fs.mkdirSync(path.join(tmpGit, '.git'));
+function makeTmpGit() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-git-'));
+  fs.mkdirSync(path.join(dir, '.git'));
+  return dir;
+}
+
+function makeTranscriptWithKbBlocks(count) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-tx-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+  let content = '';
+  for (let i = 0; i < count; i++) {
+    const kbJson = `[{"type":"decision","title":"Decision ${i}","content":"content ${i}"}]`;
+    content += JSON.stringify({
+      type: 'assistant',
+      isSidechain: false,
+      message: {
+        content: [{ type: 'text', text: `Decision:\n\`\`\`kb\n${kbJson}\n\`\`\`` }],
+      },
+    }) + '\n';
+  }
+  fs.writeFileSync(transcriptPath, content);
+  return { tmpDir, transcriptPath };
+}
+
+function makeTranscriptNoBlocks(decisionTurns) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-nodec-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+  let content = '';
+  for (let i = 0; i < decisionTurns; i++) {
+    content += JSON.stringify({
+      type: 'assistant',
+      isSidechain: false,
+      message: { content: [{ type: 'text', text: 'We decided to use TypeScript' }] },
+    }) + '\n';
+  }
+  if (decisionTurns === 0) {
+    content += JSON.stringify({
+      type: 'assistant',
+      isSidechain: false,
+      message: { content: [{ type: 'text', text: 'Just some regular text' }] },
+    }) + '\n';
+  }
+  fs.writeFileSync(transcriptPath, content);
+  return { tmpDir, transcriptPath };
+}
+
+// --- Heuristic path (no kb-blocks) ---
+
+test('pre-compact - no kb-blocks, no decision language → allow', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(0);
+  const gitDir = makeTmpGit();
 
   const result = await runPreCompact({
     transcript_path: transcriptPath,
-    cwd: tmpGit,
-    session_id: 'test-1',
-    trigger: 'manual',
-  });
-
-  assert.strictEqual(result.code, 0);
-  assert.strictEqual(result.stdout, '');
-
-  fs.rmSync(tmpDir, { recursive: true });
-  fs.rmSync(tmpGit, { recursive: true });
-});
-
-test('pre-compact - no kb-blocks, no decision language, manual trigger → exit 0, no stdout', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-no-dec-'));
-  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
-  const line = JSON.stringify({
-    type: 'assistant',
-    isSidechain: false,
-    message: { content: [{ type: 'text', text: 'Just some regular text' }] },
-  });
-  fs.writeFileSync(transcriptPath, line + '\n');
-
-  const tmpGit = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-git2-'));
-  fs.mkdirSync(path.join(tmpGit, '.git'));
-
-  const result = await runPreCompact({
-    transcript_path: transcriptPath,
-    cwd: tmpGit,
+    cwd: gitDir,
     session_id: 'test-2',
     trigger: 'manual',
   });
@@ -85,25 +107,16 @@ test('pre-compact - no kb-blocks, no decision language, manual trigger → exit 
   assert.strictEqual(result.stdout, '');
 
   fs.rmSync(tmpDir, { recursive: true });
-  fs.rmSync(tmpGit, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
 });
 
-test('pre-compact - 1 decision turn, manual trigger (threshold=1) → stdout contains decision:block', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-1dec-'));
-  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
-  const line = JSON.stringify({
-    type: 'assistant',
-    isSidechain: false,
-    message: { content: [{ type: 'text', text: 'We decided to use TypeScript' }] },
-  });
-  fs.writeFileSync(transcriptPath, line + '\n');
-
-  const tmpGit = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-git3-'));
-  fs.mkdirSync(path.join(tmpGit, '.git'));
+test('pre-compact - no kb-blocks, 1 decision turn, manual trigger (threshold=1) → block', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(1);
+  const gitDir = makeTmpGit();
 
   const result = await runPreCompact({
     transcript_path: transcriptPath,
-    cwd: tmpGit,
+    cwd: gitDir,
     session_id: 'test-3',
     trigger: 'manual',
   });
@@ -115,28 +128,16 @@ test('pre-compact - 1 decision turn, manual trigger (threshold=1) → stdout con
   assert(output.reason.includes('unpersisted decisions'));
 
   fs.rmSync(tmpDir, { recursive: true });
-  fs.rmSync(tmpGit, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
 });
 
-test('pre-compact - 2 decision turns, auto trigger (threshold=3) → exit 0, no stdout', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-2dec-'));
-  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
-  let content = '';
-  for (let i = 0; i < 2; i++) {
-    content += JSON.stringify({
-      type: 'assistant',
-      isSidechain: false,
-      message: { content: [{ type: 'text', text: 'We decided to use something' }] },
-    }) + '\n';
-  }
-  fs.writeFileSync(transcriptPath, content);
-
-  const tmpGit = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-git4-'));
-  fs.mkdirSync(path.join(tmpGit, '.git'));
+test('pre-compact - no kb-blocks, 2 decision turns, auto trigger (threshold=3) → allow', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(2);
+  const gitDir = makeTmpGit();
 
   const result = await runPreCompact({
     transcript_path: transcriptPath,
-    cwd: tmpGit,
+    cwd: gitDir,
     session_id: 'test-4',
     trigger: 'auto',
   });
@@ -145,28 +146,16 @@ test('pre-compact - 2 decision turns, auto trigger (threshold=3) → exit 0, no 
   assert.strictEqual(result.stdout, '');
 
   fs.rmSync(tmpDir, { recursive: true });
-  fs.rmSync(tmpGit, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
 });
 
-test('pre-compact - 3 decision turns, auto trigger (threshold=3) → stdout contains decision:block', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-3dec-'));
-  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
-  let content = '';
-  for (let i = 0; i < 3; i++) {
-    content += JSON.stringify({
-      type: 'assistant',
-      isSidechain: false,
-      message: { content: [{ type: 'text', text: 'We chose the best approach' }] },
-    }) + '\n';
-  }
-  fs.writeFileSync(transcriptPath, content);
-
-  const tmpGit = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-git5-'));
-  fs.mkdirSync(path.join(tmpGit, '.git'));
+test('pre-compact - no kb-blocks, 3 decision turns, auto trigger (threshold=3) → block', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3);
+  const gitDir = makeTmpGit();
 
   const result = await runPreCompact({
     transcript_path: transcriptPath,
-    cwd: tmpGit,
+    cwd: gitDir,
     session_id: 'test-5',
     trigger: 'auto',
   });
@@ -177,15 +166,176 @@ test('pre-compact - 3 decision turns, auto trigger (threshold=3) → stdout cont
   assert.strictEqual(output.decision, 'block');
 
   fs.rmSync(tmpDir, { recursive: true });
-  fs.rmSync(tmpGit, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
 });
 
-test('pre-compact - missing transcript_path → exit 0, no stdout', async () => {
-  const tmpGit = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-git6-'));
-  fs.mkdirSync(path.join(tmpGit, '.git'));
+// --- Session_id diffing path (kb-blocks present) ---
+
+test('pre-compact - kb-blocks present, all persisted (persisted >= blocks) → allow', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptWithKbBlocks(2);
+  const gitDir = makeTmpGit();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
+
+  // Fake binary returns 2 entries (matches block count)
+  fakeBinary(binDir, [{ id: 1 }, { id: 2 }]);
+
+  const result = await runPreCompact(
+    {
+      transcript_path: transcriptPath,
+      cwd: gitDir,
+      session_id: 'sess-allow-001',
+      trigger: 'manual',
+    },
+    { CLAUDE_PLUGIN_DATA: binDir }
+  );
+
+  assert.strictEqual(result.code, 0);
+  assert.strictEqual(result.stdout, '');
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.rmSync(binDir, { recursive: true });
+});
+
+test('pre-compact - kb-blocks present, more persisted than blocks → allow', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptWithKbBlocks(1);
+  const gitDir = makeTmpGit();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
+
+  // Fake binary returns 3 entries (more than block count of 1)
+  fakeBinary(binDir, [{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+  const result = await runPreCompact(
+    {
+      transcript_path: transcriptPath,
+      cwd: gitDir,
+      session_id: 'sess-allow-002',
+      trigger: 'manual',
+    },
+    { CLAUDE_PLUGIN_DATA: binDir }
+  );
+
+  assert.strictEqual(result.code, 0);
+  assert.strictEqual(result.stdout, '');
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.rmSync(binDir, { recursive: true });
+});
+
+test('pre-compact - kb-blocks present, fewer persisted than blocks → block', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptWithKbBlocks(3);
+  const gitDir = makeTmpGit();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
+
+  // Fake binary returns 1 entry (less than block count of 3)
+  fakeBinary(binDir, [{ id: 1 }]);
+
+  const result = await runPreCompact(
+    {
+      transcript_path: transcriptPath,
+      cwd: gitDir,
+      session_id: 'sess-block-001',
+      trigger: 'manual',
+    },
+    { CLAUDE_PLUGIN_DATA: binDir }
+  );
+
+  assert.strictEqual(result.code, 0);
+  assert(result.stdout.length > 0);
+  const output = JSON.parse(result.stdout);
+  assert.strictEqual(output.decision, 'block');
+  assert(output.reason.includes('2 of 3 kb-blocks unpersisted'));
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.rmSync(binDir, { recursive: true });
+});
+
+test('pre-compact - kb-blocks present, zero persisted → block', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptWithKbBlocks(2);
+  const gitDir = makeTmpGit();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
+
+  // Fake binary returns empty array
+  fakeBinary(binDir, []);
+
+  const result = await runPreCompact(
+    {
+      transcript_path: transcriptPath,
+      cwd: gitDir,
+      session_id: 'sess-block-002',
+      trigger: 'manual',
+    },
+    { CLAUDE_PLUGIN_DATA: binDir }
+  );
+
+  assert.strictEqual(result.code, 0);
+  assert(result.stdout.length > 0);
+  const output = JSON.parse(result.stdout);
+  assert.strictEqual(output.decision, 'block');
+  assert(output.reason.includes('2 of 2 kb-blocks unpersisted'));
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.rmSync(binDir, { recursive: true });
+});
+
+test('pre-compact - kb-blocks present, query error → fail-open (allow)', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptWithKbBlocks(2);
+  const gitDir = makeTmpGit();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
+
+  // Fake binary that exits with error
+  const binSubDir = path.join(binDir, 'bin');
+  fs.mkdirSync(binSubDir, { recursive: true });
+  const binPath = path.join(binSubDir, 'ouroboros');
+  fs.writeFileSync(binPath, '#!/usr/bin/env node\nprocess.exit(1);\n');
+  fs.chmodSync(binPath, '755');
+
+  const result = await runPreCompact(
+    {
+      transcript_path: transcriptPath,
+      cwd: gitDir,
+      session_id: 'sess-error-001',
+      trigger: 'manual',
+    },
+    { CLAUDE_PLUGIN_DATA: binDir }
+  );
+
+  assert.strictEqual(result.code, 0);
+  assert.strictEqual(result.stdout, '');
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.rmSync(binDir, { recursive: true });
+});
+
+test('pre-compact - kb-blocks present, no session_id → allow (cannot diff)', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptWithKbBlocks(2);
+  const gitDir = makeTmpGit();
 
   const result = await runPreCompact({
-    cwd: tmpGit,
+    transcript_path: transcriptPath,
+    cwd: gitDir,
+    // no session_id
+    trigger: 'manual',
+  });
+
+  assert.strictEqual(result.code, 0);
+  assert.strictEqual(result.stdout, '');
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+});
+
+// --- Edge cases ---
+
+test('pre-compact - missing transcript_path → exit 0, no stdout', async () => {
+  const gitDir = makeTmpGit();
+
+  const result = await runPreCompact({
+    cwd: gitDir,
     session_id: 'test-6',
     trigger: 'manual',
   });
@@ -193,7 +343,7 @@ test('pre-compact - missing transcript_path → exit 0, no stdout', async () => 
   assert.strictEqual(result.code, 0);
   assert.strictEqual(result.stdout, '');
 
-  fs.rmSync(tmpGit, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
 });
 
 test('pre-compact - missing cwd / project → exit 0, no stdout', async () => {
@@ -220,6 +370,5 @@ test('pre-compact - internal error → exit 0 (fail-open)', async () => {
     session_id: 'test-8',
   });
 
-  // Internal errors should cause silent fail
   assert.strictEqual(result.code, 0);
 });

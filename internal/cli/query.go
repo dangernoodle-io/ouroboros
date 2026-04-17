@@ -12,10 +12,11 @@ import (
 )
 
 var (
-	queryProjectFlag string
-	queryTypeFlag    string
-	querySearchFlag  string
-	queryLimitFlag   int
+	queryProjectFlag   string
+	queryTypeFlag      string
+	querySearchFlag    string
+	querySessionIDFlag string
+	queryLimitFlag     int
 )
 
 var queryCmd = &cobra.Command{
@@ -27,7 +28,7 @@ var queryCmd = &cobra.Command{
 			return fmt.Errorf("query: open database: %w", err)
 		}
 		defer db.Close()
-		return runQuery(cmd.OutOrStdout(), db, queryProjectFlag, queryTypeFlag, querySearchFlag, queryLimitFlag)
+		return runQuery(cmd.OutOrStdout(), db, queryProjectFlag, queryTypeFlag, querySearchFlag, querySessionIDFlag, queryLimitFlag)
 	},
 }
 
@@ -35,10 +36,11 @@ func init() {
 	queryCmd.Flags().StringVar(&queryProjectFlag, "project", "", "Project name filter")
 	queryCmd.Flags().StringVar(&queryTypeFlag, "type", "", "Document type filter")
 	queryCmd.Flags().StringVar(&querySearchFlag, "search", "", "Full-text search query")
+	queryCmd.Flags().StringVar(&querySessionIDFlag, "session-id", "", "Session ID filter")
 	queryCmd.Flags().IntVar(&queryLimitFlag, "limit", 10, "Maximum number of results")
 }
 
-func runQuery(out io.Writer, db *sql.DB, project, docType, search string, limit int) error {
+func runQuery(out io.Writer, db *sql.DB, project, docType, search, sessionID string, limit int) error {
 	var summaries []store.DocumentSummary
 	var err error
 
@@ -53,7 +55,7 @@ func runQuery(out io.Writer, db *sql.DB, project, docType, search string, limit 
 			return fmt.Errorf("query: search failed: %w", err)
 		}
 	} else {
-		summaries, err = store.QueryDocuments(db, docType, projects, "", "", nil, limit)
+		summaries, err = store.QueryDocuments(db, docType, projects, "", "", nil, limit, sessionID)
 		if err != nil {
 			return fmt.Errorf("query: list failed: %w", err)
 		}

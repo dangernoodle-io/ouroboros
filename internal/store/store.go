@@ -24,6 +24,7 @@ type Document struct {
 	Title     string            `json:"title"`
 	Content   string            `json:"content,omitempty"`
 	Notes     string            `json:"notes,omitempty"`
+	SessionID string            `json:"session_id,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	Tags      []string          `json:"tags,omitempty"`
 	CreatedAt string            `json:"created_at"`
@@ -162,6 +163,14 @@ var migrations = []struct {
 	{
 		version: 6,
 		sql:     `ALTER TABLE items ADD COLUMN component TEXT NOT NULL DEFAULT '';`,
+	},
+	{
+		version: 7,
+		sql: `ALTER TABLE documents ADD COLUMN session_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_documents_session_id ON documents(session_id) WHERE session_id IS NOT NULL;
+
+UPDATE documents SET session_id = json_extract(metadata, '$.session_id') WHERE session_id IS NULL AND json_extract(metadata, '$.session_id') IS NOT NULL;`,
 	},
 }
 
