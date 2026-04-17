@@ -60,6 +60,15 @@
         "timeout": 5
       }],
       "description": "Inject KB context for current project"
+    }],
+    "PreCompact": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-compact.js",
+        "timeout": 10
+      }],
+      "description": "Persistence safety net: block compaction if unpersisted decisions detected"
     }]
   }
 }
