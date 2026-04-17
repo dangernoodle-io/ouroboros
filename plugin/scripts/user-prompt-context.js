@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent, KB_BLOCK_CONTRACT_LINES } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 1800000; // 30 minutes per project
+const CONTRACT_COOLDOWN_MS = 86400000; // 24 hours per project
 const RESUME_COOLDOWN_MS = 0; // no cooldown for resume prompts
 const MAX_ENTRIES = 10;
 const MAX_SEARCH = 5;
@@ -127,6 +128,16 @@ async function main() {
     const lines = [`[ouroboros] ${project} KB (${rows.length}):`];
     for (const row of rows) {
       lines.push(`  [${row.type}] ${row.title}`);
+    }
+
+    // Inject contract block on first fire (separate cooldown)
+    const contractCooldownFile = `/tmp/.ouroboros-contract-${project}`;
+    const contractWithinCooldown = isWithinCooldown(contractCooldownFile, CONTRACT_COOLDOWN_MS);
+    if (!contractWithinCooldown) {
+      lines.push('');
+      lines.push('persist any decisions/facts via a fenced kb block (project: ' + project + '):');
+      lines.push(...KB_BLOCK_CONTRACT_LINES);
+      touchFile(contractCooldownFile);
     }
 
     // For resume intent, also query backlog items
