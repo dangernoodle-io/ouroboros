@@ -2,8 +2,16 @@
 
 const { readStdin, projectFromPath, isWithinCooldown, touchFile, logHookEvent } = require(__dirname + '/lib');
 
-const COOLDOWN_FILE = '/tmp/.ouroboros-commit-nudge';
 const COOLDOWN_MS = 300000; // 5 minutes
+
+function getCooldownFile(project) {
+  if (!project) {
+    return '/tmp/.ouroboros-commit-nudge-unknown';
+  }
+  // Sanitize project name: replace path-unsafe characters with hyphens
+  const sanitized = project.replace(/[^a-zA-Z0-9._-]/g, '-');
+  return `/tmp/.ouroboros-commit-nudge-${sanitized}`;
+}
 
 async function main() {
   try {
@@ -38,13 +46,14 @@ async function main() {
     }
 
     // Check cooldown
-    if (isWithinCooldown(COOLDOWN_FILE, COOLDOWN_MS)) {
+    const cooldownFile = getCooldownFile(project);
+    if (isWithinCooldown(cooldownFile, COOLDOWN_MS)) {
       logHookEvent({ hook: 'post_commit_nudge', kind: 'noop', session_id, project });
       process.exit(0);
     }
 
     // Touch the cooldown file
-    touchFile(COOLDOWN_FILE);
+    touchFile(cooldownFile);
 
     // Write to stderr
     console.error('[ouroboros] /persist to save decisions');
