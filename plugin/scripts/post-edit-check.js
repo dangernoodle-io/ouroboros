@@ -3,7 +3,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
-const { readStdin, getProject, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, logHookEvent } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, logHookEvent } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 600000; // 10 minutes per file
 
@@ -23,9 +23,6 @@ async function main() {
 
     // Determine project for fire event, prefer path-based resolution
     let project = projectFromPath(filePath);
-    if (!project) {
-      project = getProject();
-    }
 
     // Log fire event
     logHookEvent({ hook: 'post_edit_check', kind: 'fire', session_id, project });

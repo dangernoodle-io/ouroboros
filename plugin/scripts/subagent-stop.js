@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, getProject, projectFromPath, getBinaryPath, extractKbBlock, matchesAnyPattern, logHookEvent, isSkippedAgentType } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, getBinaryPath, extractKbBlock, matchesAnyPattern, logHookEvent, isSkippedAgentType } = require(__dirname + '/lib');
 
 // Tier-2 check: patterns indicating the subagent already persisted
 const ALREADY_PERSISTED_PATTERNS = [
@@ -48,9 +48,6 @@ async function main() {
     let project = null;
     if (cwd) {
       project = projectFromPath(cwd);
-    }
-    if (!project) {
-      project = getProject();
     }
 
     // Log fire event

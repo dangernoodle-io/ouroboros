@@ -15,17 +15,6 @@ function readStdin() {
   });
 }
 
-function getProject() {
-  try {
-    return execSync('git rev-parse --show-toplevel 2>/dev/null', {
-      encoding: 'utf-8',
-      timeout: 2000,
-    }).trim().split('/').pop();
-  } catch (e) {
-    return null;
-  }
-}
-
 function getBinaryPath() {
   if (process.env.CLAUDE_PLUGIN_DATA) {
     const pluginPath = `${process.env.CLAUDE_PLUGIN_DATA}/bin/ouroboros`;
@@ -170,28 +159,12 @@ function listWorkspaceProjects(root) {
   }
 }
 
-function resolveProject(hints = {}, workspaceRoot, skipGit = false) {
-  // Priority 1: git rev-parse --show-toplevel (same as getProject)
-  // Skip this if explicitly disabled (for testing or workspace-mode operation)
-  if (!skipGit) {
-    try {
-      const gitRoot = execSync('git rev-parse --show-toplevel 2>/dev/null', {
-        encoding: 'utf-8',
-        timeout: 2000,
-      }).trim();
-      if (gitRoot) {
-        return gitRoot.split('/').pop();
-      }
-    } catch (e) {
-      // Fall through to next priority
-    }
-  }
-
+function resolveProject(hints = {}, workspaceRoot) {
   // Determine workspace root if not provided
   const root = workspaceRoot || findWorkspaceRoot();
   const projects = root ? listWorkspaceProjects(root) : [];
 
-  // Priority 2: hints.filePath — extract project name from file path
+  // Priority 1: hints.filePath — extract project name from file path
   if (hints.filePath && root) {
     try {
       const relativePath = path.relative(root, hints.filePath);
@@ -204,7 +177,7 @@ function resolveProject(hints = {}, workspaceRoot, skipGit = false) {
     }
   }
 
-  // Priority 3: hints.message — word-boundary regex match of project names
+  // Priority 2: hints.message — word-boundary regex match of project names
   if (hints.message && projects.length > 0) {
     for (const projectName of projects) {
       const escaped = projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -215,7 +188,7 @@ function resolveProject(hints = {}, workspaceRoot, skipGit = false) {
     }
   }
 
-  // Priority 4: hints.transcriptPath — scan JSONL backwards for tool_use entries
+  // Priority 3: hints.transcriptPath — scan JSONL backwards for tool_use entries
   if (hints.transcriptPath && root && projects.length > 0) {
     try {
       const content = fs.readFileSync(hints.transcriptPath, 'utf-8');
@@ -365,4 +338,4 @@ function isSkippedAgentType(agentType) {
   return SKIP_AGENT_TYPES.includes(tail);
 }
 
-module.exports = { readStdin, getProject, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType };
+module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType };

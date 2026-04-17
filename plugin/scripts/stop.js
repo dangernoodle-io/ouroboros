@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const { execSync } = require('child_process');
-const { readStdin, getProject, projectFromPath, getBinaryPath, extractKbBlock, matchesAnyPattern, logHookEvent } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, getBinaryPath, extractKbBlock, matchesAnyPattern, logHookEvent } = require(__dirname + '/lib');
 
 // Tier-2 check: patterns indicating the main context already persisted
 const ALREADY_PERSISTED_PATTERNS = [
@@ -85,9 +85,6 @@ async function main() {
     let project = null;
     if (cwd) {
       project = projectFromPath(cwd);
-    }
-    if (!project) {
-      project = getProject();
     }
 
     const sessionId = data.session_id;

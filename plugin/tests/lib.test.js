@@ -276,7 +276,7 @@ test('listWorkspaceProjects - read error → []', () => {
 // Tests for resolveProject
 test('resolveProject - no hints, no git, no workspace → null', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'resolve-none-'));
-  const result = resolveProject({}, tmpDir, true);
+  const result = resolveProject({}, tmpDir);
   assert.strictEqual(result, null);
   fs.rmSync(tmpDir, { recursive: true });
 });
@@ -288,7 +288,7 @@ test('resolveProject - filePath hint matches project', () => {
   fs.writeFileSync(path.join(tmpRoot, 'my-project', 'file.js'), '');
 
   const filePath = path.join(tmpRoot, 'my-project', 'file.js');
-  const result = resolveProject({ filePath }, tmpRoot, true);
+  const result = resolveProject({ filePath }, tmpRoot);
   assert.strictEqual(result, 'my-project');
 
   fs.rmSync(tmpRoot, { recursive: true });
@@ -301,7 +301,7 @@ test('resolveProject - message hint matches project name (word boundary)', () =>
   fs.mkdirSync(path.join(tmpRoot, 'terranoodle'));
 
   const message = 'I need help with the ouroboros project setup';
-  const result = resolveProject({ message }, tmpRoot, true);
+  const result = resolveProject({ message }, tmpRoot);
   assert.strictEqual(result, 'ouroboros');
 
   fs.rmSync(tmpRoot, { recursive: true });
@@ -314,7 +314,7 @@ test('resolveProject - message does NOT match without word boundary', () => {
 
   // "testing" should NOT match project "test" without word boundary
   const message = 'I am testing this feature';
-  const result = resolveProject({ message }, tmpRoot, true);
+  const result = resolveProject({ message }, tmpRoot);
   assert.strictEqual(result, null);
 
   fs.rmSync(tmpRoot, { recursive: true });
@@ -326,7 +326,7 @@ test('resolveProject - message hint is case-insensitive', () => {
   fs.mkdirSync(path.join(tmpRoot, 'MyProject'));
 
   const message = 'working on myproject now';
-  const result = resolveProject({ message }, tmpRoot, true);
+  const result = resolveProject({ message }, tmpRoot);
   assert.strictEqual(result, 'MyProject');
 
   fs.rmSync(tmpRoot, { recursive: true });
@@ -345,7 +345,7 @@ test('resolveProject - transcriptPath scans backwards for tool_use', () => {
   });
   fs.writeFileSync(transcriptPath, line1 + '\n' + line2 + '\n');
 
-  const result = resolveProject({ transcriptPath }, tmpRoot, true);
+  const result = resolveProject({ transcriptPath }, tmpRoot);
   assert.strictEqual(result, 'projectX');
 
   fs.rmSync(tmpRoot, { recursive: true });
@@ -366,7 +366,7 @@ test('resolveProject - transcriptPath scans first match (backwards)', () => {
   });
   fs.writeFileSync(transcriptPath, line1 + '\n' + line2 + '\n');
 
-  const result = resolveProject({ transcriptPath }, tmpRoot, true);
+  const result = resolveProject({ transcriptPath }, tmpRoot);
   // Scanning backwards, line2 (second) is encountered first
   assert.strictEqual(result, 'second');
 
@@ -391,7 +391,7 @@ test('resolveProject - transcriptPath respects 2000-line scan cap', () => {
   content = targetLine + '\n' + content;
   fs.writeFileSync(transcriptPath, content);
 
-  const result = resolveProject({ transcriptPath }, tmpRoot, true);
+  const result = resolveProject({ transcriptPath }, tmpRoot);
   // Should NOT find it because it's beyond the 2000-line scan window
   assert.strictEqual(result, null);
 
@@ -411,7 +411,7 @@ test('resolveProject - transcriptPath with path/abs_path fallbacks', () => {
   });
   fs.writeFileSync(transcriptPath, line);
 
-  const result = resolveProject({ transcriptPath }, tmpRoot, true);
+  const result = resolveProject({ transcriptPath }, tmpRoot);
   assert.strictEqual(result, 'proj');
 
   fs.rmSync(tmpRoot, { recursive: true });
@@ -426,7 +426,7 @@ test('resolveProject - priority: git > filePath > message > transcript', () => {
 
   // Without git, filePath (priority 2) should win over message (priority 3)
   const filePath = path.join(tmpRoot, 'from-file', 'x.js');
-  const result = resolveProject({ filePath, message: 'from-message text' }, tmpRoot, true);
+  const result = resolveProject({ filePath, message: 'from-message text' }, tmpRoot);
   // filePath (priority 2) should win over message (priority 3)
   assert.strictEqual(result, 'from-file');
 
