@@ -30,7 +30,7 @@
       "hooks": [{
         "type": "command",
         "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/subagent-stop.js",
-        "timeout": 4
+        "timeout": 6
       }],
       "description": "Nudge main context to persist subagent decisions"
     }],
@@ -39,7 +39,7 @@
       "hooks": [{
         "type": "command",
         "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/stop.js",
-        "timeout": 4
+        "timeout": 6
       }],
       "description": "Auto-persist or nudge main-context KB blocks/decisions when a turn ends"
     }],
