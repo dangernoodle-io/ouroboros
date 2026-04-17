@@ -128,18 +128,24 @@ async function main() {
 
     // Tier-2 check: already persisted
     if (matchesAnyPattern(message, ALREADY_PERSISTED_PATTERNS)) {
-      console.error(`[ouroboros] subagent ${agent_id_short}: tier-2 self-claim detected (no kb block, but message references persistence)`);
       logHookEvent({ hook: 'subagent_stop', kind: 'nudge', session_id, project, reason: 'tier-2' });
-
-      process.exit(0);
+      const decision = {
+        decision: 'block',
+        reason: `[ouroboros] subagent ${agent_id_short}: tier-2 self-claim detected (no kb block, but message references persistence)`,
+      };
+      process.stdout.write(JSON.stringify(decision) + '\n');
+      process.exit(2);
     }
 
     // Tier-1 check: decision language
     if (matchesAnyPattern(message, DECISION_PATTERNS)) {
-      console.error(`[ouroboros] subagent ${agent_id_short}: tier-1 nudge fired (decision language present, no kb block)`);
       logHookEvent({ hook: 'subagent_stop', kind: 'nudge', session_id, project, reason: 'tier-1' });
-
-      process.exit(0);
+      const decision = {
+        decision: 'block',
+        reason: `[ouroboros] subagent ${agent_id_short}: tier-1 nudge fired (decision language present, no kb block)`,
+      };
+      process.stdout.write(JSON.stringify(decision) + '\n');
+      process.exit(2);
     }
 
     // Default: exit silently (exploratory output)

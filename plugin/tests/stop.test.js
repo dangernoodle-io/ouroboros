@@ -107,27 +107,46 @@ test('stop: kb block with malformed JSON → logs parse error, does NOT fall thr
   assert(!result.stderr.includes('persisted'));
 });
 
-test('stop: no kb block + tier-2 self-claim → logs tier-2 detection', () => {
-  const transcript = writeTranscript([{
-    text: 'This is a long main-context message that mentions the knowledge base which is a tier-2 pattern and should be logged as a self-claim',
-  }]);
-  const input = JSON.stringify({ session_id: 'sesst2abc123', transcript_path: transcript });
-  const result = runScript(input);
-  assert.strictEqual(result.status, 0);
-  assert.match(result.stderr, /tier-2 self-claim/);
-  assert(result.stderr.includes('sesst2ab'));
+test('stop: no kb block + tier-2 self-claim → exit 0, no stdout/stderr beyond logs', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-tier2-clean-'));
+  try {
+    const transcript = writeTranscript([{
+      text: 'This is a long main-context message that mentions the knowledge base which is a tier-2 pattern and should be logged as a self-claim',
+    }]);
+    const input = JSON.stringify({ session_id: 'sesst2abc123', transcript_path: transcript });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
 });
 
-test('stop: no kb block + tier-1 decision language → tier-1 nudge log', () => {
-  const transcript = writeTranscript([{
-    text: 'This is a long main-context message with enough content where we decided to adopt a new architecture for the system based on rationale',
-  }]);
-  const input = JSON.stringify({ session_id: 'sesst1abc123', transcript_path: transcript });
-  const result = runScript(input);
-  assert.strictEqual(result.status, 0);
-  assert.match(result.stderr, /tier-1 nudge fired/);
-  assert.match(result.stderr, /call put now/);
-  assert(result.stderr.includes('sesst1ab'));
+test('stop: no kb block + tier-1 decision language → exit 0, no stdout/stderr beyond logs', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-tier1-clean-'));
+  try {
+    const transcript = writeTranscript([{
+      text: 'This is a long main-context message with enough content where we decided to adopt a new architecture for the system based on rationale',
+    }]);
+    const input = JSON.stringify({ session_id: 'sesst1abc123', transcript_path: transcript });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
 });
 
 test('stop: no kb block + neutral content → exit 0, no stdout', () => {
@@ -141,15 +160,26 @@ test('stop: no kb block + neutral content → exit 0, no stdout', () => {
 });
 
 test('stop: skips sidechain (subagent) turns and uses last main-context turn', () => {
-  const transcript = writeTranscript([
-    { text: 'Earlier main turn with enough length to be considered for processing but not the most recent', sidechain: false },
-    { text: 'Subagent sidechain turn that we decided to ignore for architectural reasons of separation between main and sub', sidechain: true },
-    { text: 'Latest main-context turn that we decided to adopt the new architecture in for clear rationale and decision making', sidechain: false },
-  ]);
-  const input = JSON.stringify({ session_id: 'sessmain1234', transcript_path: transcript });
-  const result = runScript(input);
-  assert.strictEqual(result.status, 0);
-  assert.match(result.stderr, /tier-1 nudge fired/);
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-sidechain-clean-'));
+  try {
+    const transcript = writeTranscript([
+      { text: 'Earlier main turn with enough length to be considered for processing but not the most recent', sidechain: false },
+      { text: 'Subagent sidechain turn that we decided to ignore for architectural reasons of separation between main and sub', sidechain: true },
+      { text: 'Latest main-context turn with neutral content not triggering any nudges', sidechain: false },
+    ]);
+    const input = JSON.stringify({ session_id: 'sessmain1234', transcript_path: transcript });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
 });
 
 test('stop: only sidechain turns present → exit 0, no stdout', () => {
@@ -243,39 +273,6 @@ test('stop: metadata injection → hook:stop source and session_id injected, met
   const secondEntry = entries[1];
   assert.strictEqual(secondEntry.metadata.custom, 'value', 'second entry should preserve custom metadata');
   assert.strictEqual(secondEntry.metadata.source, 'hook:stop', 'second entry should also have injected source');
-});
-
-test('stop: nudge event logged on tier-1 decision language detection', () => {
-  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-nudge-home-'));
-  try {
-    const transcript = writeTranscript([{
-      text: 'This is a long main-context message with enough content where we decided to adopt a new architecture for the system based on solid rationale',
-    }]);
-    const input = JSON.stringify({ session_id: 'sess-nudge-123', transcript_path: transcript });
-
-    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
-    const result = spawnSync('node', [SCRIPT_PATH], {
-      input: input,
-      encoding: 'utf-8',
-      env: envVars,
-      cwd: path.join(__dirname, '..'),
-    });
-    assert.strictEqual(result.status, 0);
-
-    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
-    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
-    const nudgeEvent = lines.find(line => {
-      try {
-        const entry = JSON.parse(line);
-        return entry.kind === 'nudge';
-      } catch (e) { return false; }
-    });
-    assert(nudgeEvent, 'should have a nudge event');
-    const parsed = JSON.parse(nudgeEvent);
-    assert.strictEqual(parsed.reason, 'tier-1');
-  } finally {
-    fs.rmSync(testHomeDir, { recursive: true });
-  }
 });
 
 test('stop: noop event logged for neutral content', () => {

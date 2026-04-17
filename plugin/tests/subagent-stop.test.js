@@ -121,28 +121,32 @@ test('subagent-stop: kb block with malformed JSON → logs parse error, does NOT
   assert(!result.stderr.includes('persisted'));
 });
 
-test('subagent-stop: no kb block + tier-2 self-claim → logs tier-2 detection', () => {
+test('subagent-stop: no kb block + tier-2 self-claim → decision:block JSON on stdout, exit 2', () => {
   const input = JSON.stringify({
     agent_type: 'general',
     agent_id: 'abc12345678',
     last_assistant_message: 'This is a long message that mentions the knowledge base which is a tier-2 pattern and should be logged as a self-claim',
   });
   const result = runScript(input);
-  assert.strictEqual(result.status, 0);
-  assert.match(result.stderr, /tier-2 self-claim/);
-  assert(result.stderr.includes('abc12345'));
+  assert.strictEqual(result.status, 2);
+  const outputJson = JSON.parse(result.stdout.trim());
+  assert.strictEqual(outputJson.decision, 'block');
+  assert.match(outputJson.reason, /tier-2/);
+  assert(outputJson.reason.includes('abc12345'));
 });
 
-test('subagent-stop: no kb block + tier-1 decision language → tier-1 nudge log', () => {
+test('subagent-stop: no kb block + tier-1 decision language → decision:block JSON on stdout, exit 2', () => {
   const input = JSON.stringify({
     agent_type: 'general',
     agent_id: 'abc12345678',
     last_assistant_message: 'This is a long message with enough content where we decided to adopt a new architecture for the system',
   });
   const result = runScript(input);
-  assert.strictEqual(result.status, 0);
-  assert.match(result.stderr, /tier-1 nudge fired/);
-  assert(result.stderr.includes('abc12345'));
+  assert.strictEqual(result.status, 2);
+  const outputJson = JSON.parse(result.stdout.trim());
+  assert.strictEqual(outputJson.decision, 'block');
+  assert.match(outputJson.reason, /tier-1/);
+  assert(outputJson.reason.includes('abc12345'));
 });
 
 test('subagent-stop: message with no kb block + neutral content → exit 0, no stdout', () => {
