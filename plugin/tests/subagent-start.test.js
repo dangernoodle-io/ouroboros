@@ -212,6 +212,91 @@ test('subagent-start: plugin-qualified knowledge-explorer agent skipped (regress
   }
 });
 
+test('subagent-start: cwd resolves project via projectFromPath, KB injected', () => {
+  const gitRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagent-start-cwd-git-'));
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagent-start-cwd-home-'));
+  try {
+    fs.mkdirSync(path.join(gitRepoDir, '.git'));
+    const cwdPath = path.join(gitRepoDir, 'src');
+    fs.mkdirSync(cwdPath, { recursive: true });
+
+    const input = JSON.stringify({
+      session_id: 'cwd-resolve-test',
+      agent_type: 'general',
+      cwd: cwdPath
+    });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+
+    const stdout = result.stdout;
+    assert(stdout.includes('[ouroboros]'), 'KB header should be injected');
+    assert(stdout.includes('KB (3)'), 'KB context should show 3 entries from stub');
+    assert(stdout.includes('[note] sample one'), 'KB entries should be formatted');
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'subagent_start' && entry.kind === 'fire' && entry.project;
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'fire event should be logged with project from cwd');
+  } finally {
+    fs.rmSync(gitRepoDir, { recursive: true });
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('subagent-start: no cwd → no project → silent exit with events logged', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagent-start-no-cwd-home-'));
+  try {
+    const input = JSON.stringify({
+      session_id: 'no-cwd-test',
+      agent_type: 'general'
+    });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '', 'no KB context should be output when no cwd/project');
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'subagent_start' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    const startEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.kind === 'subagent_start';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'fire event should be logged even without project');
+    assert(startEvent, 'subagent_start event should be logged even without project');
+    assert(!fireEvent.includes('"project":"'), 'fire event should not have project field when cwd is missing');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
 test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true });
