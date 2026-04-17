@@ -59,6 +59,80 @@ function extractKbBlock(message) {
   return { matched: false, json: null };
 }
 
+function extractAllKbBlocks(transcriptPath, opts = { maxLines: 2000 }) {
+  const maxLines = opts.maxLines || 2000;
+  const blocks = [];
+  const turns = [];
+
+  // Decision language patterns (simple, case-insensitive)
+  const decisionPatterns = [
+    /\bdecision\b/i,  // decision (exact word)
+    /\bdecid/i,       // decide, decided, deciding
+    /\bchose\b/i,     // chose
+    /\bchosen\b/i,    // chosen
+    /\bchoose\b/i,    // choose
+    /\bgoing with\b/i,
+    /\bapproach\b/i,  // approach (exact word)
+    /\buse\b/i,       // we'll use, will use, use
+    /\breject/i,      // reject, rejected, rejecting
+    /\bpick/i,        // pick, picked, picking
+    /\bselect/i,      // select, selected, selecting
+    /\bopting\b/i,
+  ];
+
+  let raw;
+  try {
+    raw = fs.readFileSync(transcriptPath, 'utf-8');
+  } catch (e) {
+    return { blocks: [], turns: [] };
+  }
+
+  const lines = raw.split('\n').filter(line => line.trim());
+  const startIdx = Math.max(0, lines.length - maxLines);
+
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i];
+
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch (e) {
+      continue;
+    }
+
+    // Only include main-context assistant entries (not sidechain)
+    if (obj.type !== 'assistant') continue;
+    if (obj.isSidechain === true) continue;
+
+    // Extract text content blocks
+    const content = (obj.message && obj.message.content) || [];
+    const text = content
+      .filter(c => c && c.type === 'text' && typeof c.text === 'string')
+      .map(c => c.text)
+      .join('\n');
+
+    if (!text) continue;
+
+    // Extract KB blocks from this turn's text
+    const { matched, json } = extractKbBlock(text);
+    const blockData = matched ? { text: json } : null;
+    if (blockData) {
+      blocks.push(blockData);
+    }
+
+    // Detect decision language in this turn
+    const hasDecisionLanguage = decisionPatterns.some(pattern => pattern.test(text));
+
+    turns.push({
+      text,
+      hasKbBlock: matched,
+      hasDecisionLanguage,
+    });
+  }
+
+  return { blocks, turns };
+}
+
 function matchesAnyPattern(message, patterns) {
   if (!patterns || patterns.length === 0) {
     return false;
@@ -343,4 +417,4 @@ function isSkippedAgentType(agentType) {
   return SKIP_AGENT_TYPES.includes(tail);
 }
 
-module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, KB_BLOCK_CONTRACT_LINES };
+module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, KB_BLOCK_CONTRACT_LINES };

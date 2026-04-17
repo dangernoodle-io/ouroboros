@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType } = require('../scripts/lib');
+const { extractKbBlock, extractAllKbBlocks, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -918,4 +918,221 @@ test('isSkippedAgentType - empty string → false', () => {
 test('isSkippedAgentType - undefined → false', () => {
   const result = isSkippedAgentType(undefined);
   assert.strictEqual(result, false);
+});
+
+// Tests for extractAllKbBlocks
+test('extractAllKbBlocks - missing file → empty blocks and turns', () => {
+  const result = extractAllKbBlocks('/nonexistent/path.jsonl');
+  assert.deepStrictEqual(result.blocks, []);
+  assert.deepStrictEqual(result.turns, []);
+});
+
+test('extractAllKbBlocks - 0 kb-blocks → returns empty blocks array', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-0blocks-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+  const line1 = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: 'Just some regular text, no kb block' }] },
+  });
+  fs.writeFileSync(transcriptPath, line1 + '\n');
+
+  const result = extractAllKbBlocks(transcriptPath);
+  assert.deepStrictEqual(result.blocks, []);
+  assert.strictEqual(result.turns.length, 1);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('extractAllKbBlocks - 1 kb-block in 1 turn → returns that block', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-1block-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+  const kbJson = '[{"type":"decision","title":"adopt cobra"}]';
+  const line1 = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: {
+      content: [{ type: 'text', text: `Here is a decision:\n\`\`\`kb\n${kbJson}\n\`\`\`` }],
+    },
+  });
+  fs.writeFileSync(transcriptPath, line1 + '\n');
+
+  const result = extractAllKbBlocks(transcriptPath);
+  assert.strictEqual(result.blocks.length, 1);
+  assert.strictEqual(result.blocks[0].text, kbJson);
+  assert.strictEqual(result.turns.length, 1);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('extractAllKbBlocks - N kb-blocks across multiple turns → returns all', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-nblocks-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+  const kbJson1 = '[{"type":"decision","title":"first"}]';
+  const kbJson2 = '[{"type":"fact","title":"second"}]';
+  const line1 = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: `Turn 1:\n\`\`\`kb\n${kbJson1}\n\`\`\`` }] },
+  });
+  const line2 = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: `Turn 2:\n\`\`\`kb\n${kbJson2}\n\`\`\`` }] },
+  });
+  fs.writeFileSync(transcriptPath, line1 + '\n' + line2 + '\n');
+
+  const result = extractAllKbBlocks(transcriptPath);
+  assert.strictEqual(result.blocks.length, 2);
+  assert.strictEqual(result.blocks[0].text, kbJson1);
+  assert.strictEqual(result.blocks[1].text, kbJson2);
+  assert.strictEqual(result.turns.length, 2);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('extractAllKbBlocks - sidechain turns with kb-blocks → excluded from results', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-sidechain-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+  const kbJson1 = '[{"type":"decision"}]';
+  const kbJson2 = '[{"type":"note"}]';
+  const line1 = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: `Main:\n\`\`\`kb\n${kbJson1}\n\`\`\`` }] },
+  });
+  const line2 = JSON.stringify({
+    type: 'assistant',
+    isSidechain: true,
+    message: { content: [{ type: 'text', text: `Sidechain:\n\`\`\`kb\n${kbJson2}\n\`\`\`` }] },
+  });
+  fs.writeFileSync(transcriptPath, line1 + '\n' + line2 + '\n');
+
+  const result = extractAllKbBlocks(transcriptPath);
+  assert.strictEqual(result.blocks.length, 1);
+  assert.strictEqual(result.blocks[0].text, kbJson1);
+  assert.strictEqual(result.turns.length, 1);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('extractAllKbBlocks - malformed JSONL line mixed with valid → only valid counted', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-malformed-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+  const kbJson = '[{"type":"decision"}]';
+  const line1 = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: `Turn 1:\n\`\`\`kb\n${kbJson}\n\`\`\`` }] },
+  });
+  const line2 = 'this is not valid json';
+  const line3 = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: 'Turn 2: plain text' }] },
+  });
+  fs.writeFileSync(transcriptPath, line1 + '\n' + line2 + '\n' + line3 + '\n');
+
+  const result = extractAllKbBlocks(transcriptPath);
+  assert.strictEqual(result.blocks.length, 1);
+  assert.strictEqual(result.turns.length, 2);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('extractAllKbBlocks - decision language detection: positive cases', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-decision-pos-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+
+  const samples = [
+    'We decided to use Postgres',
+    'We chose nodeJS over python',
+    'the chosen approach is REST',
+    'This is a design decision here',
+    'going with TypeScript',
+    'The approach: modular',
+    "we'll use go-template",
+    'We rejected the first proposal',
+    'We picked the simpler solution',
+    'I selected the best option',
+    'opting for a simple design',
+  ];
+
+  let content = '';
+  for (const sample of samples) {
+    const line = JSON.stringify({
+      type: 'assistant',
+      isSidechain: false,
+      message: { content: [{ type: 'text', text: sample }] },
+    });
+    content += line + '\n';
+  }
+  fs.writeFileSync(transcriptPath, content);
+
+  const result = extractAllKbBlocks(transcriptPath);
+  const decisionCount = result.turns.filter(t => t.hasDecisionLanguage).length;
+  assert.strictEqual(decisionCount, samples.length);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('extractAllKbBlocks - decision language detection: negative cases', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-decision-neg-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+
+  const samples = [
+    'Just some regular text here',
+    'Code example without decisions',
+    'Let me explain the concept',
+    'Here is what happened',
+  ];
+
+  let content = '';
+  for (const sample of samples) {
+    const line = JSON.stringify({
+      type: 'assistant',
+      isSidechain: false,
+      message: { content: [{ type: 'text', text: sample }] },
+    });
+    content += line + '\n';
+  }
+  fs.writeFileSync(transcriptPath, content);
+
+  const result = extractAllKbBlocks(transcriptPath);
+  const decisionCount = result.turns.filter(t => t.hasDecisionLanguage).length;
+  assert.strictEqual(decisionCount, 0);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('extractAllKbBlocks - line cap: file with 2600 lines, maxLines=1000 → only last 1000 considered', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-cap-'));
+  const transcriptPath = path.join(tmpDir, 'trans.jsonl');
+
+  let content = '';
+  // Write 2500 lines of non-decision text
+  for (let i = 0; i < 2500; i++) {
+    content += JSON.stringify({
+      type: 'assistant',
+      isSidechain: false,
+      message: { content: [{ type: 'text', text: 'Regular text without decisions' }] },
+    }) + '\n';
+  }
+  // Write 100 decision lines at the end (within the 1000-line cap)
+  for (let i = 0; i < 100; i++) {
+    content += JSON.stringify({
+      type: 'assistant',
+      isSidechain: false,
+      message: { content: [{ type: 'text', text: 'We decided something here' }] },
+    }) + '\n';
+  }
+  fs.writeFileSync(transcriptPath, content);
+
+  const result = extractAllKbBlocks(transcriptPath, { maxLines: 1000 });
+  // Last 1000 lines: 900 non-decision + 100 decision
+  assert.strictEqual(result.turns.length, 1000);
+  const decisionCount = result.turns.filter(t => t.hasDecisionLanguage).length;
+  assert.strictEqual(decisionCount, 100);
+
+  fs.rmSync(tmpDir, { recursive: true });
 });
