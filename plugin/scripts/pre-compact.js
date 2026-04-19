@@ -30,8 +30,31 @@ async function main() {
 
     const { blocks, turns } = extractAllKbBlocks(transcriptPath);
 
-    // No kb-blocks in transcript: fall back to heuristic (decision language)
+    // No kb-blocks in transcript: check if docs exist via session_id, else fall back to heuristic
     if (blocks.length === 0) {
+      const sessionId = data.session_id || '';
+
+      // If session_id exists, query ouroboros for persisted docs in this session
+      if (sessionId) {
+        const persistedCount = queryPersistedCount(project, sessionId);
+
+        // If query succeeded and found docs, allow (persisted via tool path)
+        if (persistedCount !== null && persistedCount > 0) {
+          logHookEvent({
+            hook: 'pre_compact',
+            kind: 'allow',
+            project,
+            reason: 'persisted_via_tool',
+            persisted_count: persistedCount,
+            session_id: sessionId,
+          });
+          process.exit(0);
+        }
+
+        // Query failed or no docs found: fall through to heuristic
+      }
+
+      // Heuristic path: check for decision language
       const decisionTurns = turns.filter(t => t.hasDecisionLanguage).length;
       const trigger = data.trigger || 'manual';
       const threshold = trigger === 'auto' ? 3 : 1;

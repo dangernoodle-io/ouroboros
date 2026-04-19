@@ -32,6 +32,8 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
    - Stored: `[type] title — project`
    - Skipped: `[type] title — already identical`
 
+6. **Emit KB block.** After storing, emit a summary ```kb``` fenced block listing all persisted entries. Use the KB block contract (JSON array of entries). Keep it terse — this signals successful persistence to the PreCompact hook's transcript scanner. Do not run `put` twice.
+
 ## Be selective
 
 Skip trivial implementation details, anything derivable from code, temporary debugging notes, and obvious/redundant details.
