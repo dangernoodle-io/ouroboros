@@ -90,6 +90,117 @@ function makeTranscriptNoBlocks(decisionTurns) {
   return { tmpDir, transcriptPath };
 }
 
+// --- Tool path (no kb-blocks, but persisted via tool) ---
+
+test('pre-compact - no kb-blocks, ≥1 persisted docs via tool → allow', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(0);
+  const gitDir = makeTmpGit();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
+
+  // Fake binary returns 1 entry (persisted via /persist tool)
+  fakeBinary(binDir, [{ id: 1 }]);
+
+  const result = await runPreCompact(
+    {
+      transcript_path: transcriptPath,
+      cwd: gitDir,
+      session_id: 'sess-tool-001',
+      trigger: 'manual',
+    },
+    { CLAUDE_PLUGIN_DATA: binDir }
+  );
+
+  assert.strictEqual(result.code, 0);
+  assert.strictEqual(result.stdout, '');
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.rmSync(binDir, { recursive: true });
+});
+
+test('pre-compact - no kb-blocks, 0 persisted docs, decision language present → block', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(1);
+  const gitDir = makeTmpGit();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
+
+  // Fake binary returns empty array (query succeeded, no docs found)
+  fakeBinary(binDir, []);
+
+  const result = await runPreCompact(
+    {
+      transcript_path: transcriptPath,
+      cwd: gitDir,
+      session_id: 'sess-tool-002',
+      trigger: 'manual',
+    },
+    { CLAUDE_PLUGIN_DATA: binDir }
+  );
+
+  assert.strictEqual(result.code, 0);
+  assert(result.stdout.length > 0);
+  const output = JSON.parse(result.stdout);
+  assert.strictEqual(output.decision, 'block');
+  assert(output.reason.includes('unpersisted decisions'));
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.rmSync(binDir, { recursive: true });
+});
+
+test('pre-compact - no kb-blocks, no session_id → heuristic (decision language)', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(1);
+  const gitDir = makeTmpGit();
+
+  const result = await runPreCompact({
+    transcript_path: transcriptPath,
+    cwd: gitDir,
+    // no session_id
+    trigger: 'manual',
+  });
+
+  assert.strictEqual(result.code, 0);
+  assert(result.stdout.length > 0);
+  const output = JSON.parse(result.stdout);
+  assert.strictEqual(output.decision, 'block');
+  assert(output.reason.includes('unpersisted decisions'));
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+});
+
+test('pre-compact - no kb-blocks, query error → heuristic (decision language)', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(1);
+  const gitDir = makeTmpGit();
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
+
+  // Fake binary that exits with error
+  const binSubDir = path.join(binDir, 'bin');
+  fs.mkdirSync(binSubDir, { recursive: true });
+  const binPath = path.join(binSubDir, 'ouroboros');
+  fs.writeFileSync(binPath, '#!/usr/bin/env node\nprocess.exit(1);\n');
+  fs.chmodSync(binPath, '755');
+
+  const result = await runPreCompact(
+    {
+      transcript_path: transcriptPath,
+      cwd: gitDir,
+      session_id: 'sess-error-tool-001',
+      trigger: 'manual',
+    },
+    { CLAUDE_PLUGIN_DATA: binDir }
+  );
+
+  assert.strictEqual(result.code, 0);
+  assert(result.stdout.length > 0);
+  const output = JSON.parse(result.stdout);
+  assert.strictEqual(output.decision, 'block');
+  assert(output.reason.includes('unpersisted decisions'));
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+  fs.rmSync(binDir, { recursive: true });
+});
+
 // --- Heuristic path (no kb-blocks) ---
 
 test('pre-compact - no kb-blocks, no decision language → allow', async () => {
