@@ -72,8 +72,6 @@ function extractAllKbBlocks(transcriptPath, opts = { maxLines: 2000 }) {
     /\bchosen\b/i,    // chosen
     /\bchoose\b/i,    // choose
     /\bgoing with\b/i,
-    /\bapproach\b/i,  // approach (exact word)
-    /\buse\b/i,       // we'll use, will use, use
     /\breject/i,      // reject, rejected, rejecting
     /\bpick/i,        // pick, picked, picking
     /\bselect/i,      // select, selected, selecting

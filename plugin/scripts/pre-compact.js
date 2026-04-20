@@ -57,7 +57,7 @@ async function main() {
       // Heuristic path: check for decision language
       const decisionTurns = turns.filter(t => t.hasDecisionLanguage).length;
       const trigger = data.trigger || 'manual';
-      const threshold = trigger === 'auto' ? 3 : 1;
+      const threshold = 3;
 
       if (decisionTurns >= threshold) {
         const reason = '[ouroboros] unpersisted decisions detected — emit ```kb``` blocks for the key decisions from this session before compacting';

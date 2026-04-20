@@ -1045,13 +1045,11 @@ test('extractAllKbBlocks - decision language detection: positive cases', () => {
   const transcriptPath = path.join(tmpDir, 'trans.jsonl');
 
   const samples = [
-    'We decided to use Postgres',
+    'We decided on Postgres',
     'We chose nodeJS over python',
-    'the chosen approach is REST',
+    'the chosen pattern is REST',
     'This is a design decision here',
     'going with TypeScript',
-    'The approach: modular',
-    "we'll use go-template",
     'We rejected the first proposal',
     'We picked the simpler solution',
     'I selected the best option',
