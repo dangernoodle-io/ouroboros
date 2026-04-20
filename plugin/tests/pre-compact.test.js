@@ -68,15 +68,16 @@ function makeTranscriptWithKbBlocks(count) {
   return { tmpDir, transcriptPath };
 }
 
-function makeTranscriptNoBlocks(decisionTurns) {
+function makeTranscriptNoBlocks(decisionTurns, customText = null) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-nodec-'));
   const transcriptPath = path.join(tmpDir, 'trans.jsonl');
   let content = '';
   for (let i = 0; i < decisionTurns; i++) {
+    const text = customText || 'We decided to use TypeScript';
     content += JSON.stringify({
       type: 'assistant',
       isSidechain: false,
-      message: { content: [{ type: 'text', text: 'We decided to use TypeScript' }] },
+      message: { content: [{ type: 'text', text }] },
     }) + '\n';
   }
   if (decisionTurns === 0) {
@@ -119,7 +120,7 @@ test('pre-compact - no kb-blocks, ≥1 persisted docs via tool → allow', async
 });
 
 test('pre-compact - no kb-blocks, 0 persisted docs, decision language present → block', async () => {
-  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(1);
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3);
   const gitDir = makeTmpGit();
   const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
 
@@ -148,7 +149,7 @@ test('pre-compact - no kb-blocks, 0 persisted docs, decision language present �
 });
 
 test('pre-compact - no kb-blocks, no session_id → heuristic (decision language)', async () => {
-  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(1);
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3);
   const gitDir = makeTmpGit();
 
   const result = await runPreCompact({
@@ -169,7 +170,7 @@ test('pre-compact - no kb-blocks, no session_id → heuristic (decision language
 });
 
 test('pre-compact - no kb-blocks, query error → heuristic (decision language)', async () => {
-  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(1);
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3);
   const gitDir = makeTmpGit();
   const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
 
@@ -221,7 +222,7 @@ test('pre-compact - no kb-blocks, no decision language → allow', async () => {
   fs.rmSync(gitDir, { recursive: true });
 });
 
-test('pre-compact - no kb-blocks, 1 decision turn, manual trigger (threshold=1) → block', async () => {
+test('pre-compact - no kb-blocks, 1 decision turn, manual trigger (threshold=3) → allow', async () => {
   const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(1);
   const gitDir = makeTmpGit();
 
@@ -233,10 +234,7 @@ test('pre-compact - no kb-blocks, 1 decision turn, manual trigger (threshold=1) 
   });
 
   assert.strictEqual(result.code, 0);
-  assert(result.stdout.length > 0);
-  const output = JSON.parse(result.stdout);
-  assert.strictEqual(output.decision, 'block');
-  assert(output.reason.includes('unpersisted decisions'));
+  assert.strictEqual(result.stdout, '');
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
@@ -275,6 +273,65 @@ test('pre-compact - no kb-blocks, 3 decision turns, auto trigger (threshold=3) �
   assert(result.stdout.length > 0);
   const output = JSON.parse(result.stdout);
   assert.strictEqual(output.decision, 'block');
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+});
+
+// --- New tests for loosened decision detection (removed /\buse\b/ and /\bapproach\b/ patterns) ---
+
+test('pre-compact - only "use"/"approach" language, no true decision words → allow', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(2, 'I will use the Read tool. This approach is sound.');
+  const gitDir = makeTmpGit();
+
+  const result = await runPreCompact({
+    transcript_path: transcriptPath,
+    cwd: gitDir,
+    session_id: 'test-use-approach',
+    trigger: 'manual',
+  });
+
+  assert.strictEqual(result.code, 0);
+  assert.strictEqual(result.stdout, '');
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+});
+
+test('pre-compact - no kb-blocks, 1-2 decision turns, manual trigger (threshold=3) → allow', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(2, 'We decided to use TypeScript');
+  const gitDir = makeTmpGit();
+
+  const result = await runPreCompact({
+    transcript_path: transcriptPath,
+    cwd: gitDir,
+    session_id: 'test-2-decisions-manual',
+    trigger: 'manual',
+  });
+
+  assert.strictEqual(result.code, 0);
+  assert.strictEqual(result.stdout, '');
+
+  fs.rmSync(tmpDir, { recursive: true });
+  fs.rmSync(gitDir, { recursive: true });
+});
+
+test('pre-compact - no kb-blocks, 3+ decision turns, manual trigger (threshold=3) → block', async () => {
+  const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3, 'We decided to use TypeScript');
+  const gitDir = makeTmpGit();
+
+  const result = await runPreCompact({
+    transcript_path: transcriptPath,
+    cwd: gitDir,
+    session_id: 'test-3-decisions-manual',
+    trigger: 'manual',
+  });
+
+  assert.strictEqual(result.code, 0);
+  assert(result.stdout.length > 0);
+  const output = JSON.parse(result.stdout);
+  assert.strictEqual(output.decision, 'block');
+  assert(output.reason.includes('unpersisted decisions'));
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
