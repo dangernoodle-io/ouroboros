@@ -78,7 +78,7 @@ test('formatContextLines - empty rows (null) → empty array', () => {
   assert.deepStrictEqual(result, []);
 });
 
-test('formatContextLines - N rows → header + N indented lines + contract block (default)', () => {
+test('formatContextLines - N rows → header + N indented lines + single reminder line (default)', () => {
   const rows = [
     { type: 'decision', title: 'adopt cobra' },
     { type: 'fact', title: 'FTS5 cap' },
@@ -88,10 +88,10 @@ test('formatContextLines - N rows → header + N indented lines + contract block
   assert.strictEqual(result[0], '[ouroboros] myproject KB (2):');
   assert.strictEqual(result[1], '  [decision] adopt cobra');
   assert.strictEqual(result[2], '  [fact] FTS5 cap');
-  assert.strictEqual(result[3], '');
-  assert(result.some(line => line.includes('persist any decisions/facts')));
-  assert(result.some(line => line === '```kb'));
-  assert(result.some(line => line === '```'));
+  assert.strictEqual(result[3], 'persist decisions/facts to the knowledge base via a fenced kb block (project: myproject)');
+  assert.strictEqual(result.length, 4, 'should be exactly 4 lines (header + 2 KB + reminder)');
+  assert(!result.some(line => line === '```kb'));
+  assert(!result.some(line => line === '```'));
 });
 
 test('formatContextLines - options.includeContract=false → header + N lines WITHOUT contract', () => {
@@ -110,11 +110,11 @@ test('formatContextLines - options.includeContract=false → header + N lines WI
   assert(!result.some(line => line === '```'));
 });
 
-test('formatContextLines - project name interpolated correctly (with contract)', () => {
+test('formatContextLines - project name interpolated in reminder line', () => {
   const rows = [{ type: 'note', title: 'test' }];
   const result = formatContextLines('special-proj', rows);
   assert(result[0].includes('special-proj'));
-  assert(result.some(line => line.includes('(project: special-proj)')));
+  assert(result[2].includes('(project: special-proj)'));
 });
 
 test('formatContextLines - project name interpolated, no contract when includeContract=false', () => {

@@ -338,7 +338,7 @@ test('user-prompt-context: KB context still injected to stdout (regression)', ()
   assert(stdout.includes('[ouroboros]') || stdout.trim() === '');
 });
 
-test('user-prompt-context: contract injected on first fire (no prior contract cooldown)', () => {
+test('user-prompt-context: contract reminder injected on every fire with KB', () => {
   if (!fs.existsSync(FIXTURES_PATH)) {
     return;
   }
@@ -351,10 +351,6 @@ test('user-prompt-context: contract injected on first fire (no prior contract co
   fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
 
-  // Clean contract cooldown file
-  const contractFile = `/tmp/.ouroboros-contract-test-project-contract`;
-  try { fs.unlinkSync(contractFile); } catch (e) {}
-
   // Use cwd param to resolve project directly (projectFromPath will walk up to find git root)
   const input = JSON.stringify({ cwd: testProj, prompt: 'picking up work' });
   const result = runScript(input, { PATH: `${testStubDir}:${process.env.PATH}` });
@@ -362,49 +358,47 @@ test('user-prompt-context: contract injected on first fire (no prior contract co
   const stdout = result.stdout;
 
   // Since we need git root, this may not have output. Just verify contract logic separately.
-  // Alternative: check that contract is NOT in output due to missing project
   // Skip if no output expected (project not found)
   if (stdout.includes('[ouroboros]')) {
-    assert(stdout.includes('persist any decisions/facts'), 'should have contract preamble if KB found');
-    assert(stdout.includes('```kb'), 'should have contract block if KB found');
+    assert(stdout.includes('persist decisions/facts to the knowledge base'), 'should have contract reminder if KB found');
+    assert(!stdout.includes('```kb'), 'should NOT have fenced block');
   }
 
   fs.rmSync(testProj, { recursive: true });
   fs.rmSync(testStubDir, { recursive: true });
 });
 
-test('user-prompt-context: contract cooldown prevents re-injection for 24h', () => {
-  // This test directly checks the cooldown file logic without needing full KB query
+test('user-prompt-context: contract reminder injected on back-to-back prompts (no cooldown)', () => {
+  // Regression test: ensure contract is shown on consecutive prompts (no 24h cooldown)
   if (!fs.existsSync(FIXTURES_PATH)) {
     return;
   }
 
-  const testProj = path.join(homeDir, 'test-project-cooldown');
+  const testProj = path.join(homeDir, 'test-project-backtoback');
   fs.mkdirSync(testProj);
 
-  const testStubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upc-cooldown-bin-'));
+  const testStubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upc-backtoback-bin-'));
   const stubPath = path.join(testStubDir, 'ouroboros');
   fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
 
-  const contractFile = `/tmp/.ouroboros-contract-test-project-cooldown`;
-  // Touch contract cooldown file to mark it as recently touched
-  fs.writeFileSync(contractFile, '');
+  // First prompt
+  const input1 = JSON.stringify({ cwd: testProj, prompt: 'starting work' });
+  const result1 = runScript(input1, { PATH: `${testStubDir}:${process.env.PATH}` });
+  assert.strictEqual(result1.status, 0);
 
-  // Use resume intent to bypass KB query cooldown, just test contract cooldown independently
-  const input = JSON.stringify({ cwd: testProj, prompt: 'what\'s next?' });
-  const result = runScript(input, { PATH: `${testStubDir}:${process.env.PATH}` });
-  assert.strictEqual(result.status, 0);
+  // Second prompt immediately after
+  const input2 = JSON.stringify({ cwd: testProj, prompt: 'continuing work' });
+  const result2 = runScript(input2, { PATH: `${testStubDir}:${process.env.PATH}` });
+  assert.strictEqual(result2.status, 0);
 
-  // If we get KB output, verify contract is NOT there (within cooldown)
-  const stdout = result.stdout;
-  if (stdout.includes('[ouroboros]')) {
-    assert(!stdout.includes('persist any decisions/facts'), 'contract should not appear within 24h cooldown');
+  // If KB output on both, both should have the reminder (no cooldown blocking second)
+  if (result2.stdout.includes('[ouroboros]')) {
+    assert(result2.stdout.includes('persist decisions/facts to the knowledge base'), 'contract should appear on second prompt (no cooldown)');
   }
 
   fs.rmSync(testProj, { recursive: true });
   fs.rmSync(testStubDir, { recursive: true });
-  try { fs.unlinkSync(contractFile); } catch (e) {}
 });
 
 test('cleanup: remove temp stub dir and HOME', () => {
@@ -416,5 +410,4 @@ test('cleanup: remove temp stub dir and HOME', () => {
   }
   // Clean cooldown files
   try { fs.unlinkSync(`/tmp/.ouroboros-ctx-ouroboros`); } catch (e) {}
-  try { fs.unlinkSync(`/tmp/.ouroboros-contract-ouroboros`); } catch (e) {}
 });

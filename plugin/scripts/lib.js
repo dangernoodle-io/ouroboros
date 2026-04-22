@@ -6,12 +6,6 @@ const SKIP_AGENT_TYPES = ['Explore', 'knowledge-explorer', 'backlog-manager'];
 const LOG_PATH = `${process.env.HOME}/.ouroboros/hooks.log`;
 let logDirCreated = false;
 
-// kb-block contract: shape for users to persist decisions/facts to KB
-const KB_BLOCK_CONTRACT_LINES = [
-  '```kb',
-  '[{"type":"decision|fact|note|plan|relation","title":"…","content":"≤500 chars","notes":"narrative","tags":["…"]}]',
-  '```'
-];
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -151,9 +145,7 @@ function formatContextLines(project, rows, options = {}) {
   }
 
   if (includeContract) {
-    lines.push('');
-    lines.push('persist any decisions/facts via a fenced kb block (project: ' + project + '):');
-    lines.push(...KB_BLOCK_CONTRACT_LINES);
+    lines.push(`persist decisions/facts to the knowledge base via a fenced kb block (project: ${project})`);
   }
 
   return lines;
@@ -419,4 +411,4 @@ function isSkippedAgentType(agentType) {
   return SKIP_AGENT_TYPES.includes(tail);
 }
 
-module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, KB_BLOCK_CONTRACT_LINES };
+module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType };
