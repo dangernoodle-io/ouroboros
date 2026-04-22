@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -55,13 +56,14 @@ Plans:
 
 Config: No args = list all; key = get; key+value = set.`
 
+// buildServer creates a new MCP server with progressive tool registration.
 func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServer {
 	s := server.NewMCPServer("ouroboros", version,
 		server.WithToolCapabilities(true),
 		server.WithInstructions(serverInstructions),
 	)
 
-	registerTools(s, db, bk)
+	registerTier0(s, db, bk)
 	return s
 }
 
@@ -76,13 +78,14 @@ func toolAnnotation(readOnly, destructive, idempotent *bool) mcp.ToolOption {
 	})
 }
 
-func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
-	s.AddTool(mcp.NewTool("put",
-		mcp.WithDescription("Create/update KB documents (batch). Each: type, project, title, content, notes?, category?, tags?, metadata?"),
-		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to upsert")),
-		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
-	), withRecover(handlePut(db)))
+// tier1Once gates lazy registration of tier-1 tools.
+var tier1Once sync.Once
 
+// tier2Once gates lazy registration of tier-2 tools.
+var tier2Once sync.Once
+
+// registerTier0 registers the entry-point tools: get and search.
+func registerTier0(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	s.AddTool(mcp.NewTool("get",
 		mcp.WithDescription("Get documents: ids array for fetch, or filters for list."),
 		mcp.WithArray("ids", mcp.Description("Document IDs (batch fetch)")),
@@ -94,13 +97,7 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithNumber("limit", mcp.Description("Limit, default 10, max 500")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
-	), withRecover(handleGet(db)))
-
-	s.AddTool(mcp.NewTool("delete",
-		mcp.WithDescription("Delete a document."),
-		mcp.WithNumber("id", mcp.Required(), mcp.Description("Document ID")),
-		toolAnnotation(nil, mcp.ToBoolPtr(true), mcp.ToBoolPtr(true)),
-	), withRecover(handleDelete(db)))
+	), withRecover(handleGetWithProgress(db, bk, s)))
 
 	s.AddTool(mcp.NewTool("search",
 		mcp.WithDescription("Keyword search (FTS5). Single query or queries[] batch. Multi-word = AND."),
@@ -110,21 +107,16 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithArray("projects", mcp.Description("Filter by project names")),
 		mcp.WithNumber("limit", mcp.Description("Limit per query, default 10, max 500")),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
-	), withRecover(handleSearch(db)))
+	), withRecover(handleSearchWithProgress(db, bk, s)))
+}
 
-	s.AddTool(mcp.NewTool("export",
-		mcp.WithDescription("Export KB to markdown."),
-		mcp.WithArray("projects", mcp.Description("Filter by project names")),
-		mcp.WithString("type", mcp.Description("Filter by type")),
-		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
-	), withRecover(handleExport(db)))
-
-	s.AddTool(mcp.NewTool("import",
-		mcp.WithDescription("Import is CLI-only (ouroboros import). This tool returns an error."),
-		mcp.WithString("content", mcp.Description("(ignored — import is CLI-only)")),
-		mcp.WithString("project", mcp.Description("(ignored — import is CLI-only)")),
-		toolAnnotation(nil, nil, nil),
-	), withRecover(handleImport(db)))
+// registerTier1 registers tools for document creation and backlog management.
+func registerTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
+	s.AddTool(mcp.NewTool("put",
+		mcp.WithDescription("Create/update KB documents (batch). Each: type, project, title, content, notes?, category?, tags?, metadata?"),
+		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to upsert")),
+		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
+	), withRecover(handlePutWithProgress(db, bk, s)))
 
 	s.AddTool(mcp.NewTool("project",
 		mcp.WithDescription("Create, rename, or list projects."),
@@ -145,7 +137,7 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithString("component", mcp.Description("Component tag (subproject/plugin); filter or set")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
 		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
-	), withRecover(handleItem(db, bk)))
+	), withRecover(handleItemWithProgress(db, bk, s)))
 
 	s.AddTool(mcp.NewTool("plan",
 		mcp.WithDescription("Manage plans: ids fetch, entries create/update, or filters list."),
@@ -154,7 +146,30 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithArray("projects", mcp.Description("Filter by project names")),
 		mcp.WithString("status", mcp.Description("draft, active, or complete")),
 		toolAnnotation(nil, nil, nil),
-	), withRecover(handlePlan(db, bk)))
+	), withRecover(handlePlanWithProgress(db, bk, s)))
+}
+
+// registerTier2 registers advanced tools: delete, import, export, config.
+func registerTier2(s *server.MCPServer, db *sql.DB) {
+	s.AddTool(mcp.NewTool("delete",
+		mcp.WithDescription("Delete a document."),
+		mcp.WithNumber("id", mcp.Required(), mcp.Description("Document ID")),
+		toolAnnotation(nil, mcp.ToBoolPtr(true), mcp.ToBoolPtr(true)),
+	), withRecover(handleDelete(db)))
+
+	s.AddTool(mcp.NewTool("import",
+		mcp.WithDescription("Import is CLI-only (ouroboros import). This tool returns an error."),
+		mcp.WithString("content", mcp.Description("(ignored — import is CLI-only)")),
+		mcp.WithString("project", mcp.Description("(ignored — import is CLI-only)")),
+		toolAnnotation(nil, nil, nil),
+	), withRecover(handleImport(db)))
+
+	s.AddTool(mcp.NewTool("export",
+		mcp.WithDescription("Export KB to markdown."),
+		mcp.WithArray("projects", mcp.Description("Filter by project names")),
+		mcp.WithString("type", mcp.Description("Filter by type")),
+		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
+	), withRecover(handleExport(db)))
 
 	s.AddTool(mcp.NewTool("config",
 		mcp.WithDescription("Get config: no args=list, key=get. Mutations are CLI-only (ouroboros config set)."),
@@ -162,4 +177,21 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithString("value", mcp.Description("(ignored — set is CLI-only)")),
 		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
 	), withRecover(handleConfig(db)))
+}
+
+// unlockTier1 registers tier-1 tools once and notifies clients.
+func unlockTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
+	tier1Once.Do(func() {
+		registerTier1(s, db, bk)
+		s.SendNotificationToAllClients("tools/list_changed", nil)
+	})
+}
+
+// unlockTier2 registers tier-2 tools once and notifies clients.
+// bk is accepted for symmetry with tier1 handlers; tier-2 tools don't need it.
+func unlockTier2(s *server.MCPServer, db *sql.DB, bk *backup.Backup) { //nolint:unparam
+	tier2Once.Do(func() {
+		registerTier2(s, db)
+		s.SendNotificationToAllClients("tools/list_changed", nil)
+	})
 }
