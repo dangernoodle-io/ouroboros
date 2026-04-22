@@ -83,29 +83,43 @@ func backupCommit(bk *backup.Backup, msg string) {
 func handleProject(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		name, ok := req.GetArguments()["name"].(string)
-		if !ok || name == "" {
-			projects, err := backlog.ListProjects(d)
+		newName, hasNewName := req.GetArguments()["new_name"].(string)
+
+		// Check for rename mode (both name and new_name present)
+		if ok && name != "" && hasNewName && newName != "" {
+			proj, err := backlog.RenameProject(d, name, newName)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			if projects == nil {
-				projects = []backlog.Project{}
+			backupCommit(bk, fmt.Sprintf("project: rename %s → %s", name, newName))
+			return jsonResult(proj)
+		}
+
+		// Check for create mode (name only, no new_name)
+		if ok && name != "" {
+			prefix, err := derivePrefix(d, name)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
 			}
-			return jsonResult(projects)
+
+			proj, err := backlog.CreateProject(d, name, prefix)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			backupCommit(bk, fmt.Sprintf("project: %s (%s)", name, prefix))
+			return jsonResult(proj)
 		}
 
-		prefix, err := derivePrefix(d, name)
+		// List mode (no args)
+		projects, err := backlog.ListProjects(d)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-
-		proj, err := backlog.CreateProject(d, name, prefix)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		if projects == nil {
+			projects = []backlog.Project{}
 		}
-
-		backupCommit(bk, fmt.Sprintf("project: %s (%s)", name, prefix))
-		return jsonResult(proj)
+		return jsonResult(projects)
 	}
 }
 

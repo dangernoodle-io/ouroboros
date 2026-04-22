@@ -127,8 +127,9 @@ func registerTools(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	), withRecover(handleImport(db)))
 
 	s.AddTool(mcp.NewTool("project",
-		mcp.WithDescription("Create project (with name) or list all (no args)."),
+		mcp.WithDescription("Create, rename, or list projects."),
 		mcp.WithString("name", mcp.Description("Project name")),
+		mcp.WithString("new_name", mcp.Description("New project name (for rename)")),
 		toolAnnotation(nil, nil, nil),
 	), withRecover(handleProject(db, bk)))
 
