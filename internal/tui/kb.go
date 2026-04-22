@@ -2,13 +2,13 @@ package tui
 
 import (
 	"database/sql"
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -118,7 +118,7 @@ func (m *KBModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusList = false
 		return m, nil
 
-	case tea.Key:
+	case tea.KeyMsg:
 		if msg.Type == tea.KeyEsc {
 			if m.searchMode {
 				m.searchMode = false
@@ -204,7 +204,7 @@ func (m *KBModel) View() string {
 		return listView
 	}
 
-	return fmt.Sprintf("%-40s | %s", listView, m.viewport.View())
+	return lipgloss.JoinHorizontal(lipgloss.Top, listView, "  ", m.viewport.View())
 }
 
 // LoadDocuments dispatches a command to load KB documents.

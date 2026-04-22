@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 )
@@ -103,7 +104,7 @@ func (m *PlansModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focusList = false
 		return m, nil
 
-	case tea.Key:
+	case tea.KeyMsg:
 		if msg.Type == tea.KeyEsc {
 			if !m.focusList {
 				m.focusList = true
@@ -154,7 +155,7 @@ func (m *PlansModel) View() string {
 		return listView
 	}
 
-	return fmt.Sprintf("%-40s | %s", listView, m.viewport.View())
+	return lipgloss.JoinHorizontal(lipgloss.Top, listView, "  ", m.viewport.View())
 }
 
 // LoadPlans dispatches a command to load plans for the given project filter.
