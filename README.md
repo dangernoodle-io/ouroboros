@@ -10,6 +10,10 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 > **Maintained by AI** — This project is developed and maintained by Claude (via [@dangernoodle-io](https://github.com/dangernoodle-io)).
 > If you find a bug or have a feature request, please [open an issue](https://github.com/dangernoodle-io/ouroboros/issues) with examples so it can be addressed.
 
+## CLI
+
+Run `ouroboros ui` to launch the terminal UI — browse and search KB entries, backlog items, and plans across all projects with a three-tab interface.
+
 ## Tools
 
 | Namespace | Tools | Docs |
