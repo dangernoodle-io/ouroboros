@@ -63,6 +63,30 @@ func (pf *ProjectFilter) NameSlice() []string {
 	return pf.nameSlice
 }
 
+// IsAll reports whether the filter is set to show all projects.
+func (pf *ProjectFilter) IsAll() bool {
+	return pf.selected == 0
+}
+
+// NameByID returns the project name for a given project ID, or "" if unknown.
+func (pf *ProjectFilter) NameByID(id int64) string {
+	for _, p := range pf.projects {
+		if p.ID == id {
+			return p.Name
+		}
+	}
+	return ""
+}
+
+// AllByID returns a map of all project IDs to names (not filtered by current selection).
+func (pf *ProjectFilter) AllByID() map[int64]string {
+	m := make(map[int64]string)
+	for _, p := range pf.projects {
+		m[p.ID] = p.Name
+	}
+	return m
+}
+
 // Label returns the user-visible label (e.g., "All" or "acme-corp").
 func (pf *ProjectFilter) Label() string {
 	if pf.selected == 0 {

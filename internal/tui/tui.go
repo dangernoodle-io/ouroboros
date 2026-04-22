@@ -190,14 +190,16 @@ func (m *Root) renderHelp() string {
 func (m *Root) loadTabData(tab int) tea.Cmd {
 	projIDs := m.projects.IDSlice()
 	projNames := m.projects.NameSlice()
+	showProject := m.projects.IsAll()
+	projectNames := m.projects.AllByID()
 
 	switch tab {
 	case 0:
-		return m.backlog.LoadItems(projIDs)
+		return m.backlog.LoadItems(projIDs, showProject, projectNames)
 	case 1:
 		return m.kb.LoadDocuments(projNames)
 	case 2:
-		return m.plans.LoadPlans(projIDs)
+		return m.plans.LoadPlans(projIDs, showProject, projectNames)
 	}
 	return nil
 }

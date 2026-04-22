@@ -3,6 +3,7 @@ package tui
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -15,11 +16,15 @@ import (
 
 // planRow represents a plan in the list.
 type planRow struct {
-	plan *backlog.Plan
+	plan        *backlog.Plan
+	projectName string // populated when filter is All; empty otherwise
 }
 
 func (pr planRow) Title() string {
-	return fmt.Sprintf("#%d", pr.plan.ID)
+	if pr.projectName != "" {
+		return pr.projectName + " · #" + fmt.Sprintf("%d", pr.plan.ID)
+	}
+	return "#" + fmt.Sprintf("%d", pr.plan.ID)
 }
 
 func (pr planRow) Description() string {
@@ -79,9 +84,29 @@ func (m *PlansModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.error = ""
 		if len(m.plans) > 0 {
+			if msg.showProject {
+				sort.SliceStable(m.plans, func(i, j int) bool {
+					iProj := int64(0)
+					if m.plans[i].ProjectID != nil {
+						iProj = *m.plans[i].ProjectID
+					}
+					jProj := int64(0)
+					if m.plans[j].ProjectID != nil {
+						jProj = *m.plans[j].ProjectID
+					}
+					if iProj != jProj {
+						return iProj < jProj
+					}
+					return m.plans[i].ID < m.plans[j].ID
+				})
+			}
 			items := make([]list.Item, len(m.plans))
 			for i := range m.plans {
-				items[i] = planRow{&m.plans[i]}
+				row := planRow{plan: &m.plans[i]}
+				if msg.showProject && m.plans[i].ProjectID != nil {
+					row.projectName = msg.projectNames[*m.plans[i].ProjectID]
+				}
+				items[i] = row
 			}
 			m.list.SetItems(items)
 		}
@@ -159,7 +184,9 @@ func (m *PlansModel) View() string {
 }
 
 // LoadPlans dispatches a command to load plans for the given project filter.
-func (m *PlansModel) LoadPlans(projIDs []int64) tea.Cmd {
+// When showProject is true, rows display their project name and results are
+// clustered by project; projectNames maps ProjectID to display name.
+func (m *PlansModel) LoadPlans(projIDs []int64, showProject bool, projectNames map[int64]string) tea.Cmd {
 	m.loading = true
 	m.plans = nil
 	m.selectedPlan = nil
@@ -171,7 +198,7 @@ func (m *PlansModel) LoadPlans(projIDs []int64) tea.Cmd {
 		if err != nil {
 			return plansErrorMsg{err: err}
 		}
-		return loadPlansMsg{plans: plans}
+		return loadPlansMsg{plans: plans, showProject: showProject, projectNames: projectNames}
 	}
 }
 
@@ -200,7 +227,9 @@ func formatPlanDetail(plan *backlog.Plan, styles Styles) string {
 
 // Message types.
 type loadPlansMsg struct {
-	plans []backlog.Plan
+	plans        []backlog.Plan
+	showProject  bool
+	projectNames map[int64]string
 }
 
 type plansErrorMsg struct {

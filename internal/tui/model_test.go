@@ -128,13 +128,14 @@ func TestStatusStyle(t *testing.T) {
 // TestItemRowFormatting tests backlog item row formatting.
 func TestItemRowFormatting(t *testing.T) {
 	tests := []struct {
-		name    string
-		item    *backlog.Item
-		hasID   bool
-		hasDesc bool
+		name        string
+		item        *backlog.Item
+		projectName string
+		expectTitle string
+		hasDesc     bool
 	}{
 		{
-			name: "with component",
+			name: "with component, no project",
 			item: &backlog.Item{
 				ID:        "AC-1",
 				Priority:  "P0",
@@ -142,28 +143,41 @@ func TestItemRowFormatting(t *testing.T) {
 				Title:     "example task",
 				Component: "backend",
 			},
-			hasID:   true,
-			hasDesc: true,
+			projectName: "",
+			expectTitle: "AC-1",
+			hasDesc:     true,
 		},
 		{
-			name: "without component",
+			name: "without component, with project",
 			item: &backlog.Item{
 				ID:       "AC-1",
 				Priority: "P2",
 				Status:   "done",
 				Title:    "another task",
 			},
-			hasID:   true,
-			hasDesc: true,
+			projectName: "acme-corp",
+			expectTitle: "acme-corp · AC-1",
+			hasDesc:     true,
+		},
+		{
+			name: "with both component and project",
+			item: &backlog.Item{
+				ID:        "OP-1",
+				Priority:  "P1",
+				Status:    "open",
+				Title:     "third task",
+				Component: "frontend",
+			},
+			projectName: "other-project",
+			expectTitle: "other-project · OP-1",
+			hasDesc:     true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			row := itemRow{item: tt.item}
-			if tt.hasID {
-				require.Equal(t, "AC-1", row.Title())
-			}
+			row := itemRow{item: tt.item, projectName: tt.projectName}
+			require.Equal(t, tt.expectTitle, row.Title())
 			if tt.hasDesc {
 				desc := row.Description()
 				require.NotEmpty(t, desc)
@@ -216,16 +230,110 @@ func TestKBRowFormatting(t *testing.T) {
 
 // TestPlanRowFormatting tests plan row formatting.
 func TestPlanRowFormatting(t *testing.T) {
-	plan := &backlog.Plan{
-		ID:     42,
-		Title:  "implementation roadmap",
-		Status: "active",
+	tests := []struct {
+		name        string
+		plan        *backlog.Plan
+		projectName string
+		expectTitle string
+	}{
+		{
+			name: "without project",
+			plan: &backlog.Plan{
+				ID:     42,
+				Title:  "implementation roadmap",
+				Status: "active",
+			},
+			projectName: "",
+			expectTitle: "#42",
+		},
+		{
+			name: "with project",
+			plan: &backlog.Plan{
+				ID:     99,
+				Title:  "migration plan",
+				Status: "draft",
+			},
+			projectName: "acme-corp",
+			expectTitle: "acme-corp · #99",
+		},
 	}
 
-	row := planRow{plan: plan}
-	require.NotEmpty(t, row.Title())
-	require.Contains(t, row.Title(), "42")
-	require.NotEmpty(t, row.Description())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			row := planRow{plan: tt.plan, projectName: tt.projectName}
+			require.Equal(t, tt.expectTitle, row.Title())
+			require.NotEmpty(t, row.Description())
+		})
+	}
+}
+
+// TestProjectFilterIsAll tests IsAll method.
+func TestProjectFilterIsAll(t *testing.T) {
+	projects := []backlog.Project{
+		{ID: 1, Name: "acme-corp", Prefix: "AC"},
+		{ID: 2, Name: "other-project", Prefix: "OP"},
+	}
+
+	pf := &ProjectFilter{
+		projects: projects,
+		selected: 0,
+	}
+	pf.updateSlices()
+
+	// Should be true when selected is 0 (All)
+	require.True(t, pf.IsAll())
+
+	// Should be false when a specific project is selected
+	pf.selected = 1
+	require.False(t, pf.IsAll())
+
+	pf.selected = 2
+	require.False(t, pf.IsAll())
+}
+
+// TestProjectFilterNameByID tests NameByID method.
+func TestProjectFilterNameByID(t *testing.T) {
+	projects := []backlog.Project{
+		{ID: 1, Name: "acme-corp", Prefix: "AC"},
+		{ID: 2, Name: "other-project", Prefix: "OP"},
+	}
+
+	pf := &ProjectFilter{
+		projects: projects,
+		selected: 0,
+	}
+
+	// Test hit
+	require.Equal(t, "acme-corp", pf.NameByID(1))
+	require.Equal(t, "other-project", pf.NameByID(2))
+
+	// Test miss
+	require.Equal(t, "", pf.NameByID(999))
+}
+
+// TestProjectFilterAllByID tests AllByID method.
+func TestProjectFilterAllByID(t *testing.T) {
+	projects := []backlog.Project{
+		{ID: 1, Name: "acme-corp", Prefix: "AC"},
+		{ID: 2, Name: "other-project", Prefix: "OP"},
+	}
+
+	pf := &ProjectFilter{
+		projects: projects,
+		selected: 0,
+	}
+
+	allByID := pf.AllByID()
+	require.Equal(t, 2, len(allByID))
+	require.Equal(t, "acme-corp", allByID[1])
+	require.Equal(t, "other-project", allByID[2])
+
+	// Test that it returns all projects even when filter is on specific project
+	pf.selected = 1
+	allByID = pf.AllByID()
+	require.Equal(t, 2, len(allByID))
+	require.Equal(t, "acme-corp", allByID[1])
+	require.Equal(t, "other-project", allByID[2])
 }
 
 // TestDefaultStyles tests that all styles are initialized.

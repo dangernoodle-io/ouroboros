@@ -2,6 +2,7 @@ package tui
 
 import (
 	"database/sql"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -14,10 +15,14 @@ import (
 
 // itemRow represents a backlog item in the list.
 type itemRow struct {
-	item *backlog.Item
+	item        *backlog.Item
+	projectName string // populated when filter is All; empty otherwise
 }
 
 func (ir itemRow) Title() string {
+	if ir.projectName != "" {
+		return ir.projectName + " · " + ir.item.ID
+	}
 	return ir.item.ID
 }
 
@@ -83,9 +88,21 @@ func (m *BacklogModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.error = ""
 		if len(m.items) > 0 {
+			if msg.showProject {
+				sort.SliceStable(m.items, func(i, j int) bool {
+					if m.items[i].ProjectID != m.items[j].ProjectID {
+						return m.items[i].ProjectID < m.items[j].ProjectID
+					}
+					return m.items[i].Priority < m.items[j].Priority
+				})
+			}
 			items := make([]list.Item, len(m.items))
 			for i := range m.items {
-				items[i] = itemRow{&m.items[i]}
+				row := itemRow{item: &m.items[i]}
+				if msg.showProject {
+					row.projectName = msg.projectNames[m.items[i].ProjectID]
+				}
+				items[i] = row
 			}
 			m.list.SetItems(items)
 		}
@@ -163,7 +180,9 @@ func (m *BacklogModel) View() string {
 }
 
 // LoadItems dispatches a command to load backlog items for the given project filter.
-func (m *BacklogModel) LoadItems(projIDs []int64) tea.Cmd {
+// When showProject is true, rows display their project name and results are
+// clustered by project; projectNames maps ProjectID to display name.
+func (m *BacklogModel) LoadItems(projIDs []int64, showProject bool, projectNames map[int64]string) tea.Cmd {
 	m.loading = true
 	m.items = nil
 	m.selectedItem = nil
@@ -175,7 +194,7 @@ func (m *BacklogModel) LoadItems(projIDs []int64) tea.Cmd {
 		if err != nil {
 			return backlogErrorMsg{err: err}
 		}
-		return loadBacklogMsg{items: items}
+		return loadBacklogMsg{items: items, showProject: showProject, projectNames: projectNames}
 	}
 }
 
@@ -210,7 +229,9 @@ func formatBacklogDetail(item *backlog.Item, styles Styles) string {
 
 // Message types.
 type loadBacklogMsg struct {
-	items []backlog.Item
+	items        []backlog.Item
+	showProject  bool
+	projectNames map[int64]string
 }
 
 type backlogErrorMsg struct {
