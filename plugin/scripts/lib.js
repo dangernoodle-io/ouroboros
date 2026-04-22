@@ -138,19 +138,23 @@ function matchesAnyPattern(message, patterns) {
   return patterns.some(p => p.test(message));
 }
 
-function formatContextLines(project, rows) {
+function formatContextLines(project, rows, options = {}) {
   if (!rows || rows.length === 0) {
     return [];
   }
 
+  const includeContract = options.includeContract !== false;
   const lines = [];
   lines.push(`[ouroboros] ${project} KB (${rows.length}):`);
   for (const row of rows) {
     lines.push(`  [${row.type}] ${row.title}`);
   }
-  lines.push('');
-  lines.push('persist any decisions/facts via a fenced kb block (project: ' + project + '):');
-  lines.push(...KB_BLOCK_CONTRACT_LINES);
+
+  if (includeContract) {
+    lines.push('');
+    lines.push('persist any decisions/facts via a fenced kb block (project: ' + project + '):');
+    lines.push(...KB_BLOCK_CONTRACT_LINES);
+  }
 
   return lines;
 }

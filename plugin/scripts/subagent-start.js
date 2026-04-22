@@ -63,8 +63,8 @@ async function main() {
       process.exit(0);
     }
 
-    // Format and output context with contract block
-    const lines = formatContextLines(project, rows);
+    // Format and output context without contract block (prevent subagent hallucination)
+    const lines = formatContextLines(project, rows, { includeContract: false });
     if (lines.length === 0) {
       process.exit(0);
     }

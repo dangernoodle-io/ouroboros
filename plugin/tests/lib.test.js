@@ -78,7 +78,7 @@ test('formatContextLines - empty rows (null) → empty array', () => {
   assert.deepStrictEqual(result, []);
 });
 
-test('formatContextLines - N rows → header + N indented lines + contract block', () => {
+test('formatContextLines - N rows → header + N indented lines + contract block (default)', () => {
   const rows = [
     { type: 'decision', title: 'adopt cobra' },
     { type: 'fact', title: 'FTS5 cap' },
@@ -94,11 +94,34 @@ test('formatContextLines - N rows → header + N indented lines + contract block
   assert(result.some(line => line === '```'));
 });
 
-test('formatContextLines - project name interpolated correctly', () => {
+test('formatContextLines - options.includeContract=false → header + N lines WITHOUT contract', () => {
+  const rows = [
+    { type: 'decision', title: 'adopt cobra' },
+    { type: 'fact', title: 'FTS5 cap' },
+  ];
+  const result = formatContextLines('myproject', rows, { includeContract: false });
+
+  assert.strictEqual(result[0], '[ouroboros] myproject KB (2):');
+  assert.strictEqual(result[1], '  [decision] adopt cobra');
+  assert.strictEqual(result[2], '  [fact] FTS5 cap');
+  assert.strictEqual(result.length, 3, 'should be exactly 3 lines (no contract)');
+  assert(!result.some(line => line.includes('persist any decisions/facts')));
+  assert(!result.some(line => line === '```kb'));
+  assert(!result.some(line => line === '```'));
+});
+
+test('formatContextLines - project name interpolated correctly (with contract)', () => {
   const rows = [{ type: 'note', title: 'test' }];
   const result = formatContextLines('special-proj', rows);
   assert(result[0].includes('special-proj'));
   assert(result.some(line => line.includes('(project: special-proj)')));
+});
+
+test('formatContextLines - project name interpolated, no contract when includeContract=false', () => {
+  const rows = [{ type: 'note', title: 'test' }];
+  const result = formatContextLines('special-proj', rows, { includeContract: false });
+  assert(result[0].includes('special-proj'));
+  assert(!result.some(line => line.includes('(project: special-proj)')));
 });
 
 // Tests for findGitRoot
