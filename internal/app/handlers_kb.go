@@ -7,6 +7,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"dangernoodle.io/ouroboros/internal/backup"
 	"dangernoodle.io/ouroboros/internal/kb"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -208,5 +209,32 @@ func handleExport(db *sql.DB) server.ToolHandlerFunc {
 func handleImport(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return mcp.NewToolResultError("import is CLI-only; use: ouroboros import <file|->"), nil //nolint:nilerr
+	}
+}
+
+// handleGetWithProgress wraps handleGet to trigger tier-1 progression.
+func handleGetWithProgress(db *sql.DB, bk *backup.Backup, s *server.MCPServer) server.ToolHandlerFunc {
+	handler := handleGet(db)
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		unlockTier1(s, db, bk)
+		return handler(ctx, req)
+	}
+}
+
+// handleSearchWithProgress wraps handleSearch to trigger tier-1 progression.
+func handleSearchWithProgress(db *sql.DB, bk *backup.Backup, s *server.MCPServer) server.ToolHandlerFunc {
+	handler := handleSearch(db)
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		unlockTier1(s, db, bk)
+		return handler(ctx, req)
+	}
+}
+
+// handlePutWithProgress wraps handlePut to trigger tier-2 progression.
+func handlePutWithProgress(db *sql.DB, bk *backup.Backup, s *server.MCPServer) server.ToolHandlerFunc {
+	handler := handlePut(db)
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		unlockTier2(s, db, bk)
+		return handler(ctx, req)
 	}
 }

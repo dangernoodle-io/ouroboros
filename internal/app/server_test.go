@@ -2,15 +2,18 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/pkoukk/tiktoken-go"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
@@ -156,6 +159,107 @@ func TestBatchRoundTripSavings(t *testing.T) {
 	newCalls := 1
 	t.Logf("batch round-trip savings: %d calls → %d call (%d-item batch)", oldCalls, newCalls, items)
 	require.Equal(t, 1, newCalls)
+}
+
+// TestProgressiveRegistration verifies three-tier lazy registration: tier-0
+// tools are registered at startup; tier-1 registers on first tier-0 invocation;
+// tier-2 registers on first tier-1 invocation.
+func TestProgressiveRegistration(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, store.ApplySchema(db))
+
+	// Reset gates for test isolation
+	tier1Once = sync.Once{}
+	tier2Once = sync.Once{}
+
+	srv := buildServer(db, nil, "test")
+
+	// ---- Step 1: assert only tier-0 tools registered ----
+	allTools := srv.ListTools()
+	t.Logf("startup: %d total tools (expected 2)", len(allTools))
+	require.Equal(t, 2, len(allTools), "should have exactly 2 tools at startup")
+	assertToolsPresent(t, allTools, []string{"get", "search"})
+
+	// ---- Step 2: invoke tier-0 handler to unlock tier-1 ----
+	toolGet := allTools["get"]
+	require.NotNil(t, toolGet, "get tool should exist")
+
+	result, err := toolGet.Handler(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "get",
+			Arguments: map[string]interface{}{
+				"limit": 10.0,
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// ---- Step 3: assert tier-1 tools now registered ----
+	allTools = srv.ListTools()
+	t.Logf("after tier-0 call: %d total tools (expected 6)", len(allTools))
+	require.Equal(t, 6, len(allTools), "should have 6 tools after tier-1 unlock")
+	assertToolsPresent(t, allTools, []string{"get", "search", "put", "project", "item", "plan"})
+
+	// ---- Step 4: invoke tier-1 handler to unlock tier-2 ----
+	toolPut := allTools["put"]
+	require.NotNil(t, toolPut, "put tool should now exist")
+
+	result, err = toolPut.Handler(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "put",
+			Arguments: map[string]interface{}{
+				"entries": []interface{}{
+					map[string]interface{}{
+						"type":    "test",
+						"project": "proj",
+						"title":   "test entry",
+						"content": "test",
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// ---- Step 5: assert all tier-2 tools now registered ----
+	allTools = srv.ListTools()
+	t.Logf("after tier-1 call: %d total tools (expected 10)", len(allTools))
+	require.Equal(t, 10, len(allTools), "should have all 10 tools after tier-2 unlock")
+	assertToolsPresent(t, allTools, []string{
+		"get", "search", "put", "project", "item", "plan",
+		"delete", "import", "export", "config",
+	})
+
+	// ---- Step 6: verify idempotency ----
+	// Call tier-0 again; tier-1 should not re-register (no duplicate tools)
+	toolGet = allTools["get"]
+	require.NotNil(t, toolGet)
+
+	_, err = toolGet.Handler(context.Background(), mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name: "get",
+			Arguments: map[string]interface{}{
+				"limit": 10.0,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	allTools = srv.ListTools()
+	t.Logf("after second tier-0 call: %d total tools (should be 10, not more)", len(allTools))
+	require.Equal(t, 10, len(allTools), "tools should not re-register (idempotency)")
+}
+
+// assertToolsPresent verifies that all named tools exist in the server tool map.
+func assertToolsPresent(t *testing.T, tools map[string]*server.ServerTool, names []string) {
+	t.Helper()
+	for _, name := range names {
+		require.NotNil(t, tools[name], "tool %s should be present", name)
+	}
 }
 
 // instructionSection is one logical block of serverInstructions, used for the

@@ -467,3 +467,23 @@ func handleConfig(d *sql.DB) server.ToolHandlerFunc {
 		return mcp.NewToolResultError("config set is CLI-only; use: ouroboros config set <key> <value>"), nil
 	}
 }
+
+// Tier-2 progression wrappers for tier-1 handlers.
+
+// handleItemWithProgress wraps handleItem to trigger tier-2 progression.
+func handleItemWithProgress(d *sql.DB, bk *backup.Backup, s *server.MCPServer) server.ToolHandlerFunc {
+	handler := handleItem(d, bk)
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		unlockTier2(s, d, bk)
+		return handler(ctx, req)
+	}
+}
+
+// handlePlanWithProgress wraps handlePlan to trigger tier-2 progression.
+func handlePlanWithProgress(d *sql.DB, bk *backup.Backup, s *server.MCPServer) server.ToolHandlerFunc {
+	handler := handlePlan(d, bk)
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		unlockTier2(s, d, bk)
+		return handler(ctx, req)
+	}
+}
