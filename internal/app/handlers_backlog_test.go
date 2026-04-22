@@ -58,6 +58,47 @@ func TestHandleProject(t *testing.T) {
 	assert.Equal(t, "acme-corp", projects[0].Name)
 }
 
+func TestHandleProjectRename(t *testing.T) {
+	resetAllDB(t)
+
+	// Create project
+	createReq := makeRequest(map[string]interface{}{
+		"name": "old-name",
+	})
+	createResult, err := handleProject(db, bk)(context.TODO(), createReq)
+	require.NoError(t, err)
+
+	var proj backlog.Project
+	err = unmarshalResult(createResult, &proj)
+	require.NoError(t, err)
+	assert.Equal(t, "old-name", proj.Name)
+
+	// Rename project
+	renameReq := makeRequest(map[string]interface{}{
+		"name":     "old-name",
+		"new_name": "new-name",
+	})
+	renameResult, err := handleProject(db, bk)(context.TODO(), renameReq)
+	require.NoError(t, err)
+
+	var renamedProj backlog.Project
+	err = unmarshalResult(renameResult, &renamedProj)
+	require.NoError(t, err)
+	assert.Equal(t, "new-name", renamedProj.Name)
+	assert.Equal(t, proj.ID, renamedProj.ID)
+
+	// Verify GetProjectByName("new-name") succeeds
+	getNewReq := makeRequest(map[string]interface{}{})
+	getNewResult, err := handleProject(db, bk)(context.TODO(), getNewReq)
+	require.NoError(t, err)
+
+	var projects []backlog.Project
+	err = unmarshalResult(getNewResult, &projects)
+	require.NoError(t, err)
+	assert.Len(t, projects, 1)
+	assert.Equal(t, "new-name", projects[0].Name)
+}
+
 func TestHandleProjectPrefixCollision(t *testing.T) {
 	resetAllDB(t)
 

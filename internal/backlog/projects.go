@@ -66,3 +66,51 @@ func GetProjectByID(db *sql.DB, id int64) (*Project, error) {
 	}
 	return &p, nil
 }
+
+func RenameProject(db *sql.DB, oldName, newName string) (*Project, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("rename project: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Validate oldName exists
+	var projectID int64
+	err = tx.QueryRow("SELECT id FROM projects WHERE name = ?", oldName).Scan(&projectID)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("project not found: %s", oldName)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("rename project: %w", err)
+	}
+
+	// Validate newName does NOT exist
+	var existing int
+	err = tx.QueryRow("SELECT 1 FROM projects WHERE name = ?", newName).Scan(&existing)
+	if err == nil {
+		return nil, fmt.Errorf("project already exists: %s", newName)
+	}
+	if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("rename project: %w", err)
+	}
+
+	// Update projects table
+	_, err = tx.Exec("UPDATE projects SET name = ? WHERE id = ?", newName, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("rename project: %w", err)
+	}
+
+	// Update documents table (cascade)
+	_, err = tx.Exec("UPDATE documents SET project = ? WHERE project = ?", newName, oldName)
+	if err != nil {
+		return nil, fmt.Errorf("rename project: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("rename project: %w", err)
+	}
+
+	// Fetch and return refreshed project
+	return GetProjectByName(db, newName)
+}

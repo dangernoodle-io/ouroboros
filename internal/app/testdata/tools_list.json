@@ -204,11 +204,15 @@
     },
     {
       "annotations": {},
-      "description": "Create project (with name) or list all (no args).",
+      "description": "Create, rename, or list projects.",
       "inputSchema": {
         "properties": {
           "name": {
             "description": "Project name",
+            "type": "string"
+          },
+          "new_name": {
+            "description": "New project name (for rename)",
             "type": "string"
           }
         },
