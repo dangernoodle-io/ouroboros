@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -14,37 +14,10 @@ import (
 	"dangernoodle.io/ouroboros/internal/backlog"
 )
 
-// planRow represents a plan in the list.
-type planRow struct {
-	plan        *backlog.Plan
-	projectName string // populated when filter is All; empty otherwise
-}
-
-func (pr planRow) Title() string {
-	if pr.projectName != "" {
-		return pr.projectName + " · #" + fmt.Sprintf("%d", pr.plan.ID)
-	}
-	return "#" + fmt.Sprintf("%d", pr.plan.ID)
-}
-
-func (pr planRow) Description() string {
-	parts := []string{}
-	if pr.plan.Status != "" {
-		parts = append(parts, "["+pr.plan.Status+"]")
-	}
-	parts = append(parts, "—")
-	parts = append(parts, truncate(pr.plan.Title, 50))
-	return strings.Join(parts, " ")
-}
-
-func (pr planRow) FilterValue() string {
-	return fmt.Sprintf("%d %s", pr.plan.ID, pr.plan.Title)
-}
-
 // PlansModel represents the plans tab.
 type PlansModel struct {
 	db       *sql.DB
-	list     list.Model
+	table    table.Model
 	viewport viewport.Model
 	styles   Styles
 
@@ -57,13 +30,12 @@ type PlansModel struct {
 
 // NewPlansModel creates a new plans tab model.
 func NewPlansModel(db *sql.DB, styles Styles) *PlansModel {
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	l.SetShowHelp(false)
+	tbl := table.New(table.WithFocused(true), table.WithHeight(0))
 	vp := viewport.New(0, 0)
 
 	return &PlansModel{
 		db:        db,
-		list:      l,
+		table:     tbl,
 		viewport:  vp,
 		styles:    styles,
 		focusList: true,
@@ -100,15 +72,18 @@ func (m *PlansModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.plans[i].ID < m.plans[j].ID
 				})
 			}
-			items := make([]list.Item, len(m.plans))
+			cols := planColumns(msg.showProject, 30) // placeholder width
+			rows := []table.Row{}
 			for i := range m.plans {
-				row := planRow{plan: &m.plans[i]}
+				projectName := ""
 				if msg.showProject && m.plans[i].ProjectID != nil {
-					row.projectName = msg.projectNames[*m.plans[i].ProjectID]
+					projectName = msg.projectNames[*m.plans[i].ProjectID]
 				}
-				items[i] = row
+				row := planToRow(m.plans[i], msg.showProject, projectName, m.styles)
+				rows = append(rows, row)
 			}
-			m.list.SetItems(items)
+			m.table.SetColumns(cols)
+			m.table.SetRows(rows)
 		}
 		return m, nil
 
@@ -139,8 +114,8 @@ func (m *PlansModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if msg.Type == tea.KeyEnter && m.focusList {
-			if len(m.plans) > 0 && m.list.Index() < len(m.plans) {
-				selectedPlan := m.plans[m.list.Index()]
+			if len(m.plans) > 0 && m.table.Cursor() < len(m.plans) {
+				selectedPlan := m.plans[m.table.Cursor()]
 				return m, func() tea.Msg {
 					return fetchPlansDetailMsg{id: selectedPlan.ID}
 				}
@@ -149,7 +124,7 @@ func (m *PlansModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.focusList {
 			var cmd tea.Cmd
-			m.list, cmd = m.list.Update(msg)
+			m.table, cmd = m.table.Update(msg)
 			return m, cmd
 		}
 		if !m.focusList {
@@ -175,12 +150,12 @@ func (m *PlansModel) View() string {
 		return "No plans found.\n"
 	}
 
-	listView := m.list.View()
+	tableView := m.table.View()
 	if m.focusList {
-		return listView
+		return tableView
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, listView, "  ", m.viewport.View())
+	return lipgloss.JoinHorizontal(lipgloss.Top, tableView, "  ", m.viewport.View())
 }
 
 // LoadPlans dispatches a command to load plans for the given project filter.
@@ -202,11 +177,74 @@ func (m *PlansModel) LoadPlans(projIDs []int64, showProject bool, projectNames m
 	}
 }
 
-// SetSize updates the size of list and viewport.
+// SetSize updates the size of table and viewport.
 func (m *PlansModel) SetSize(width, height int) {
-	m.list.SetSize(width/2-2, height-2)
+	tableWidth := width/2 - 2
+	tableHeight := height - 2
+
+	// Compute title width based on showProject
+	showProject := len(m.table.Columns()) > 3 // 4 cols when All, 3 when single project
+	titleWidth := computePlanTitleWidth(tableWidth, showProject)
+
+	// Rebuild columns with correct width
+	cols := planColumns(showProject, titleWidth)
+	m.table.SetColumns(cols)
+	m.table.SetWidth(tableWidth)
+	m.table.SetHeight(tableHeight)
+
 	m.viewport.Width = width / 2
-	m.viewport.Height = height - 2
+	m.viewport.Height = tableHeight
+}
+
+// computePlanTitleWidth calculates the title column width for plans.
+func computePlanTitleWidth(totalWidth int, showProject bool) int {
+	idWidth := 8
+	statusWidth := 10
+	padding := 2 * 3 // 2 per column (3 columns base, 4 with project)
+
+	used := idWidth + statusWidth + padding
+	if showProject {
+		projectWidth := 14
+		used = idWidth + statusWidth + projectWidth + padding
+	}
+
+	titleWidth := totalWidth - used
+	if titleWidth < 20 {
+		titleWidth = 20
+	}
+	return titleWidth
+}
+
+// planColumns builds column definitions for the plans table.
+func planColumns(showProject bool, titleWidth int) []table.Column {
+	cols := []table.Column{
+		{Title: "#", Width: 8},
+		{Title: "Status", Width: 10},
+	}
+	if showProject {
+		cols = append(cols, table.Column{Title: "Project", Width: 14})
+	}
+	cols = append(cols, table.Column{Title: "Title", Width: titleWidth})
+	return cols
+}
+
+// planToRow converts a plan to a table row.
+func planToRow(plan backlog.Plan, showProject bool, projectName string, styles Styles) table.Row {
+	// Format status with color
+	status := styles.StatusStyle(plan.Status).Render(plan.Status)
+
+	row := table.Row{
+		fmt.Sprintf("%d", plan.ID),
+		status,
+	}
+
+	if showProject {
+		row = append(row, projectName)
+	}
+
+	row = append(row, truncate(plan.Title, 50))
+
+	return row
 }
 
 // formatPlanDetail formats a full plan for display.

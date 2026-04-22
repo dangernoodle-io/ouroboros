@@ -125,65 +125,67 @@ func TestStatusStyle(t *testing.T) {
 	require.NotNil(t, unknownStyle)
 }
 
-// TestItemRowFormatting tests backlog item row formatting.
-func TestItemRowFormatting(t *testing.T) {
-	tests := []struct {
-		name        string
-		item        *backlog.Item
-		projectName string
-		expectTitle string
-		hasDesc     bool
-	}{
-		{
-			name: "with component, no project",
-			item: &backlog.Item{
-				ID:        "AC-1",
-				Priority:  "P0",
-				Status:    "open",
-				Title:     "example task",
-				Component: "backend",
-			},
-			projectName: "",
-			expectTitle: "AC-1",
-			hasDesc:     true,
-		},
-		{
-			name: "without component, with project",
-			item: &backlog.Item{
-				ID:       "AC-1",
-				Priority: "P2",
-				Status:   "done",
-				Title:    "another task",
-			},
-			projectName: "acme-corp",
-			expectTitle: "acme-corp · AC-1",
-			hasDesc:     true,
-		},
-		{
-			name: "with both component and project",
-			item: &backlog.Item{
-				ID:        "OP-1",
-				Priority:  "P1",
-				Status:    "open",
-				Title:     "third task",
-				Component: "frontend",
-			},
-			projectName: "other-project",
-			expectTitle: "other-project · OP-1",
-			hasDesc:     true,
-		},
+// TestItemToRow_NoProject tests itemToRow without project column.
+func TestItemToRow_NoProject(t *testing.T) {
+	item := backlog.Item{
+		ID:        "AC-1",
+		Priority:  "P0",
+		Status:    "open",
+		Title:     "example task",
+		Component: "backend",
 	}
+	styles := DefaultStyles()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			row := itemRow{item: tt.item, projectName: tt.projectName}
-			require.Equal(t, tt.expectTitle, row.Title())
-			if tt.hasDesc {
-				desc := row.Description()
-				require.NotEmpty(t, desc)
-			}
-		})
+	row := itemToRow(item, false, "", styles)
+	require.Equal(t, 5, len(row)) // ID, P, Status, Title, Component
+	require.Equal(t, "AC-1", row[0])
+	require.Contains(t, row[1], "P0") // Priority cell contains styled P0
+	require.Contains(t, row[2], "open")
+	require.Contains(t, row[3], "example task")
+	require.Equal(t, "backend", row[4])
+}
+
+// TestItemToRow_WithProject tests itemToRow with project column.
+func TestItemToRow_WithProject(t *testing.T) {
+	item := backlog.Item{
+		ID:        "AC-1",
+		Priority:  "P2",
+		Status:    "done",
+		Title:     "another task",
+		Component: "api",
 	}
+	styles := DefaultStyles()
+
+	row := itemToRow(item, true, "acme-corp", styles)
+	require.Equal(t, 6, len(row)) // ID, P, Status, Project, Title, Component
+	require.Equal(t, "AC-1", row[0])
+	require.Contains(t, row[1], "P2")
+	require.Contains(t, row[2], "done")
+	require.Equal(t, "acme-corp", row[3])
+	require.Contains(t, row[4], "another task")
+	require.Equal(t, "api", row[5])
+}
+
+// TestBacklogColumns_Shape tests backlog column structure.
+func TestBacklogColumns_Shape(t *testing.T) {
+	// Single project: 5 columns (ID, P, Status, Title, Component)
+	colsSingle := backlogColumns(false, 30)
+	require.Equal(t, 5, len(colsSingle))
+	require.Equal(t, "ID", colsSingle[0].Title)
+	require.Equal(t, "P", colsSingle[1].Title)
+	require.Equal(t, "Status", colsSingle[2].Title)
+	require.Equal(t, "Title", colsSingle[3].Title)
+	require.Equal(t, "Component", colsSingle[4].Title)
+
+	// All projects: 6 columns (ID, P, Status, Project, Title, Component)
+	colsAll := backlogColumns(true, 30)
+	require.Equal(t, 6, len(colsAll))
+	require.Equal(t, "ID", colsAll[0].Title)
+	require.Equal(t, "P", colsAll[1].Title)
+	require.Equal(t, "Status", colsAll[2].Title)
+	require.Equal(t, "Project", colsAll[3].Title)
+	require.Equal(t, "Title", colsAll[4].Title)
+	require.Equal(t, "Component", colsAll[5].Title)
 }
 
 // TestKBRowFormatting tests KB row formatting.
@@ -228,43 +230,73 @@ func TestKBRowFormatting(t *testing.T) {
 	}
 }
 
-// TestPlanRowFormatting tests plan row formatting.
-func TestPlanRowFormatting(t *testing.T) {
-	tests := []struct {
-		name        string
-		plan        *backlog.Plan
-		projectName string
-		expectTitle string
-	}{
-		{
-			name: "without project",
-			plan: &backlog.Plan{
-				ID:     42,
-				Title:  "implementation roadmap",
-				Status: "active",
-			},
-			projectName: "",
-			expectTitle: "#42",
-		},
-		{
-			name: "with project",
-			plan: &backlog.Plan{
-				ID:     99,
-				Title:  "migration plan",
-				Status: "draft",
-			},
-			projectName: "acme-corp",
-			expectTitle: "acme-corp · #99",
-		},
+// TestPlanToRow_NoProject tests planToRow without project column.
+func TestPlanToRow_NoProject(t *testing.T) {
+	plan := backlog.Plan{
+		ID:     42,
+		Title:  "implementation roadmap",
+		Status: "active",
 	}
+	styles := DefaultStyles()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			row := planRow{plan: tt.plan, projectName: tt.projectName}
-			require.Equal(t, tt.expectTitle, row.Title())
-			require.NotEmpty(t, row.Description())
-		})
+	row := planToRow(plan, false, "", styles)
+	require.Equal(t, 3, len(row)) // #, Status, Title
+	require.Equal(t, "42", row[0])
+	require.Contains(t, row[1], "active")
+	require.Contains(t, row[2], "implementation roadmap")
+}
+
+// TestPlanToRow_WithProject tests planToRow with project column.
+func TestPlanToRow_WithProject(t *testing.T) {
+	plan := backlog.Plan{
+		ID:     99,
+		Title:  "migration plan",
+		Status: "draft",
 	}
+	styles := DefaultStyles()
+
+	row := planToRow(plan, true, "acme-corp", styles)
+	require.Equal(t, 4, len(row)) // #, Status, Project, Title
+	require.Equal(t, "99", row[0])
+	require.Contains(t, row[1], "draft")
+	require.Equal(t, "acme-corp", row[2])
+	require.Contains(t, row[3], "migration plan")
+}
+
+// TestPlanToRow_NilProjectID tests planToRow with nil ProjectID.
+func TestPlanToRow_NilProjectID(t *testing.T) {
+	plan := backlog.Plan{
+		ID:        77,
+		Title:     "orphaned plan",
+		Status:    "draft",
+		ProjectID: nil, // nil ProjectID
+	}
+	styles := DefaultStyles()
+
+	row := planToRow(plan, true, "", styles)
+	require.Equal(t, 4, len(row))
+	require.Equal(t, "77", row[0])
+	require.Contains(t, row[1], "draft")
+	require.Equal(t, "", row[2]) // empty project cell
+	require.Contains(t, row[3], "orphaned plan")
+}
+
+// TestPlanColumns_Shape tests plan column structure.
+func TestPlanColumns_Shape(t *testing.T) {
+	// Single project: 3 columns (#, Status, Title)
+	colsSingle := planColumns(false, 30)
+	require.Equal(t, 3, len(colsSingle))
+	require.Equal(t, "#", colsSingle[0].Title)
+	require.Equal(t, "Status", colsSingle[1].Title)
+	require.Equal(t, "Title", colsSingle[2].Title)
+
+	// All projects: 4 columns (#, Status, Project, Title)
+	colsAll := planColumns(true, 30)
+	require.Equal(t, 4, len(colsAll))
+	require.Equal(t, "#", colsAll[0].Title)
+	require.Equal(t, "Status", colsAll[1].Title)
+	require.Equal(t, "Project", colsAll[2].Title)
+	require.Equal(t, "Title", colsAll[3].Title)
 }
 
 // TestProjectFilterIsAll tests IsAll method.
