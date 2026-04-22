@@ -41,6 +41,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(importCmd)
 	rootCmd.AddCommand(statuslineCmd)
+	rootCmd.AddCommand(lsCmd)
 }
 
 // Execute runs the root command.
