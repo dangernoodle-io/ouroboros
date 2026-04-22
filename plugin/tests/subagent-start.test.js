@@ -48,7 +48,7 @@ function runScript(input, env = {}) {
   });
 }
 
-test('subagent-start: stub query returns 3 rows → stdout has KB header + 3 indented lines + contract block', () => {
+test('subagent-start: stub query returns 3 rows → stdout has KB header + 3 lines WITHOUT contract block', () => {
   const input = JSON.stringify({ cwd: projectDir });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
@@ -58,8 +58,9 @@ test('subagent-start: stub query returns 3 rows → stdout has KB header + 3 ind
   assert(stdout.includes('[note] sample one'));
   assert(stdout.includes('[decision] sample two'));
   assert(stdout.includes('[fact] sample three'));
-  assert(stdout.includes('```kb'));
-  assert(stdout.includes('persist any decisions/facts'));
+  // Contract block should NOT be present for subagents
+  assert(!stdout.includes('```kb'), 'contract block (```kb) should not appear for subagents');
+  assert(!stdout.includes('persist any decisions/facts'), 'contract preamble should not appear for subagents');
 });
 
 test('subagent-start: stub query returns empty array → exit 0, no stdout', () => {
@@ -162,7 +163,7 @@ test('subagent-start: subagent_start event logged with agent_type', () => {
   }
 });
 
-test('subagent-start: KB context still injected to stdout (regression)', () => {
+test('subagent-start: KB summary still injected, contract block absent (regression)', () => {
   const input = JSON.stringify({ cwd: projectDir });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
@@ -172,8 +173,9 @@ test('subagent-start: KB context still injected to stdout (regression)', () => {
   assert(stdout.includes('[note] sample one'));
   assert(stdout.includes('[decision] sample two'));
   assert(stdout.includes('[fact] sample three'));
-  assert(stdout.includes('```kb'));
-  assert(stdout.includes('persist any decisions/facts'));
+  // Contract block should be absent
+  assert(!stdout.includes('```kb'), 'contract block should not appear');
+  assert(!stdout.includes('persist any decisions/facts'), 'contract preamble should not appear');
 });
 
 test('subagent-start: plugin-qualified knowledge-explorer agent skipped (regression test)', () => {
