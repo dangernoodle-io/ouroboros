@@ -10,6 +10,7 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 > **Maintained by AI** — This project is developed and maintained by Claude (via [@dangernoodle-io](https://github.com/dangernoodle-io)).
 > If you find a bug or have a feature request, please [open an issue](https://github.com/dangernoodle-io/ouroboros/issues) with examples so it can be addressed.
 
+
 ## Tools
 
 | Namespace | Tools | Docs |
@@ -62,6 +63,21 @@ claude mcp add --scope user ouroboros /absolute/path/to/ouroboros
 ```
 
 This gives you the 10 MCP tools but none of the auto-context injection or persistence hooks that the plugin provides.
+
+## Browse with `ls`
+
+When you're not using the MCP server, the `ls` subcommands provide a read-only CLI for browsing. All commands support tabular output and `--json` for scripting.
+
+```bash
+ouroboros ls projects                              # list all projects
+ouroboros ls items --project acme-corp             # list items in a project
+ouroboros ls items AC-1                            # show item detail
+ouroboros ls kb --search caching                   # search knowledge base
+ouroboros ls kb 42 --json                          # fetch document as JSON
+ouroboros ls plans --status active                 # list active plans
+```
+
+Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. All subcommands: `--json`.
 
 ## Configuration
 
