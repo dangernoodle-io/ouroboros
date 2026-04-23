@@ -360,7 +360,7 @@ test('user-prompt-context: contract reminder injected on every fire with KB', ()
   // Since we need git root, this may not have output. Just verify contract logic separately.
   // Skip if no output expected (project not found)
   if (stdout.includes('[ouroboros]')) {
-    assert(stdout.includes('persist decisions/facts to the knowledge base'), 'should have contract reminder if KB found');
+    assert(stdout.includes('if a decision or fact is worth persisting'), 'should have contract reminder if KB found');
     assert(!stdout.includes('```kb'), 'should NOT have fenced block');
   }
 
@@ -394,7 +394,7 @@ test('user-prompt-context: contract reminder injected on back-to-back prompts (n
 
   // If KB output on both, both should have the reminder (no cooldown blocking second)
   if (result2.stdout.includes('[ouroboros]')) {
-    assert(result2.stdout.includes('persist decisions/facts to the knowledge base'), 'contract should appear on second prompt (no cooldown)');
+    assert(result2.stdout.includes('if a decision or fact is worth persisting'), 'contract should appear on second prompt (no cooldown)');
   }
 
   fs.rmSync(testProj, { recursive: true });

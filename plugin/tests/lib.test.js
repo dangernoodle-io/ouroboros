@@ -88,7 +88,7 @@ test('formatContextLines - N rows → header + N indented lines + single reminde
   assert.strictEqual(result[0], '[ouroboros] myproject KB (2):');
   assert.strictEqual(result[1], '  [decision] adopt cobra');
   assert.strictEqual(result[2], '  [fact] FTS5 cap');
-  assert.strictEqual(result[3], 'persist decisions/facts to the knowledge base via a fenced kb block (project: myproject)');
+  assert.strictEqual(result[3], 'if a decision or fact is worth persisting, emit a fenced kb block (project: myproject); otherwise say nothing');
   assert.strictEqual(result.length, 4, 'should be exactly 4 lines (header + 2 KB + reminder)');
   assert(!result.some(line => line === '```kb'));
   assert(!result.some(line => line === '```'));

@@ -145,7 +145,7 @@ function formatContextLines(project, rows, options = {}) {
   }
 
   if (includeContract) {
-    lines.push(`persist decisions/facts to the knowledge base via a fenced kb block (project: ${project})`);
+    lines.push(`if a decision or fact is worth persisting, emit a fenced kb block (project: ${project}); otherwise say nothing`);
   }
 
   return lines;

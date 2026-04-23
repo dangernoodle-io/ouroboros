@@ -130,7 +130,7 @@ async function main() {
     }
 
     // Inject contract reminder on every prompt
-    lines.push(`persist decisions/facts to the knowledge base via a fenced kb block (project: ${project})`);
+    lines.push(`if a decision or fact is worth persisting, emit a fenced kb block (project: ${project}); otherwise say nothing`);
 
     // For resume intent, also query backlog items
     if (intent === 'resume') {
