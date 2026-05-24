@@ -35,7 +35,7 @@ make lint     # golangci-lint run
 | search | KB | Full-text search across knowledge entries |
 | export | KB | Export knowledge base to markdown |
 | import | KB | Import knowledge entries from JSON |
-| project | Backlog | Create a project (with name) or list all (no params) |
+| project | Backlog | Manage projects: get/create/list/rename/delete (op-dispatched) |
 | item | Backlog | Create, get, update, or list backlog items (mode by inputs) |
 | plan | Backlog | Create, get, update, or list implementation plans |
 | config | Backlog | Get or set key-value configuration |

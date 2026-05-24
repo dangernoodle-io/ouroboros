@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 
@@ -181,4 +182,59 @@ func TestRunConfigListMultipleValues(t *testing.T) {
 	for _, key := range keys {
 		assert.True(t, strings.Contains(output, key), "output should contain key %s", key)
 	}
+}
+
+func TestVersionFlagDevBuild(t *testing.T) {
+	// Ensure Version is empty so the dev-build branch is taken.
+	orig := Version
+	Version = ""
+	defer func() { Version = orig }()
+
+	versionFlag = false
+	rootCmd.SetArgs([]string{"--version"})
+
+	// Capture stdout since rootCmd.RunE uses fmt.Println.
+	oldStdout, r, w, err := captureStdout()
+	require.NoError(t, err)
+	execErr := rootCmd.Execute()
+	output := restoreStdout(oldStdout, r, w)
+
+	require.NoError(t, execErr)
+	assert.Contains(t, output, "development build")
+}
+
+func TestVersionFlagWithVersion(t *testing.T) {
+	orig := Version
+	Version = "v1.2.3-test"
+	defer func() { Version = orig }()
+
+	versionFlag = false
+	rootCmd.SetArgs([]string{"--version"})
+
+	oldStdout, r, w, err := captureStdout()
+	require.NoError(t, err)
+	execErr := rootCmd.Execute()
+	output := restoreStdout(oldStdout, r, w)
+
+	require.NoError(t, execErr)
+	assert.Contains(t, output, "v1.2.3-test")
+}
+
+func captureStdout() (oldStdout *os.File, r *os.File, w *os.File, err error) {
+	r, w, err = os.Pipe()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	oldStdout = os.Stdout
+	os.Stdout = w
+	return oldStdout, r, w, nil
+}
+
+func restoreStdout(oldStdout *os.File, r *os.File, w *os.File) string {
+	w.Close() //nolint:errcheck
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r) //nolint:errcheck
+	r.Close()       //nolint:errcheck
+	return buf.String()
 }

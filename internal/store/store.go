@@ -172,6 +172,10 @@ CREATE INDEX IF NOT EXISTS idx_documents_session_id ON documents(session_id) WHE
 
 UPDATE documents SET session_id = json_extract(metadata, '$.session_id') WHERE session_id IS NULL AND json_extract(metadata, '$.session_id') IS NOT NULL;`,
 	},
+	{
+		version: 8,
+		sql:     `CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_ci ON projects(LOWER(name));`,
+	},
 }
 
 // ApplySchema applies all pending migrations to the database.

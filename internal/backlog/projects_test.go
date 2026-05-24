@@ -189,3 +189,321 @@ func TestRenameProjectCollision(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "bar", bar.Name)
 }
+
+func TestValidateProjectName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid hyphenated", "acme-corp", false},
+		{"valid with digit", "my-project-1", false},
+		{"valid underscores", "a_b_c", false},
+		{"valid mixed", "a-1-b", false},
+		{"empty", "", true},
+		{"too short", "ab", true},
+		{"digit start", "1start", true},
+		{"uppercase prefix AB", "AB", true},
+		{"uppercase prefix ABCD", "ABCD", true},
+		{"punct start", "-foo", true},
+		{"trailing space", "foo ", true},
+		{"contains exclamation", "foo!", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := backlog.ValidateProjectName(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCreateProjectValidationFails(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "AB", "AB")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid project name")
+}
+
+func TestRenameProjectValidationFails(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "foo-bar", "FB")
+	require.NoError(t, err)
+
+	_, err = backlog.RenameProject(d, "foo-bar", "AB")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid project name")
+}
+
+func TestGetProjectByNameCaseInsensitive(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "Acme-corp", "AC")
+	require.NoError(t, err)
+
+	p, err := backlog.GetProjectByName(d, "acme-corp")
+	require.NoError(t, err)
+	assert.Equal(t, "Acme-corp", p.Name)
+}
+
+func TestCreateProjectCaseCollision(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "Acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = backlog.CreateProject(d, "acme-corp", "AC2")
+	assert.Error(t, err)
+}
+
+func TestDeleteProjectEmpty(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	err = backlog.DeleteProject(d, "acme-corp", false, "")
+	assert.NoError(t, err)
+
+	_, err = backlog.GetProjectByName(d, "acme-corp")
+	assert.Error(t, err)
+}
+
+func TestDeleteProjectBlocked(t *testing.T) {
+	d := testDB(t)
+
+	proj, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
+	require.NoError(t, err)
+
+	err = backlog.DeleteProject(d, "acme-corp", false, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "1 items")
+}
+
+func TestDeleteProjectForce(t *testing.T) {
+	d := testDB(t)
+
+	proj, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "Task 1", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P2", "Task 2", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.CreatePlan(d, "Plan A", "content", &proj.ID, nil)
+	require.NoError(t, err)
+	_, err = d.Exec("INSERT INTO documents (type, project, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		"decision", "acme-corp", "Doc 1", "content", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	err = backlog.DeleteProject(d, "acme-corp", true, "")
+	require.NoError(t, err)
+
+	var itemCount, planCount, docCount int
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM items WHERE project_id = ?", proj.ID).Scan(&itemCount))
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM plans WHERE project_id = ?", proj.ID).Scan(&planCount))
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM documents WHERE project = ?", "acme-corp").Scan(&docCount))
+	assert.Equal(t, 0, itemCount)
+	assert.Equal(t, 0, planCount)
+	assert.Equal(t, 0, docCount)
+
+	_, err = backlog.GetProjectByName(d, "acme-corp")
+	assert.Error(t, err)
+}
+
+func TestDeleteProjectReassign(t *testing.T) {
+	d := testDB(t)
+
+	src, err := backlog.CreateProject(d, "src-proj", "SP")
+	require.NoError(t, err)
+	dst, err := backlog.CreateProject(d, "dst-proj", "DP")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P1", "Task", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.CreatePlan(d, "Plan", "content", &src.ID, nil)
+	require.NoError(t, err)
+	_, err = d.Exec("INSERT INTO documents (type, project, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		"decision", "src-proj", "Doc", "content", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	err = backlog.DeleteProject(d, "src-proj", false, "dst-proj")
+	require.NoError(t, err)
+
+	var itemCount, planCount, docCount int
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM items WHERE project_id = ?", dst.ID).Scan(&itemCount))
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM plans WHERE project_id = ?", dst.ID).Scan(&planCount))
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM documents WHERE project = ?", "dst-proj").Scan(&docCount))
+	assert.Equal(t, 1, itemCount)
+	assert.Equal(t, 1, planCount)
+	assert.Equal(t, 1, docCount)
+
+	_, err = backlog.GetProjectByName(d, "src-proj")
+	assert.Error(t, err)
+}
+
+func TestDeleteProjectMutex(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	err = backlog.DeleteProject(d, "acme-corp", true, "other-proj")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestDeleteProjectNotFound(t *testing.T) {
+	d := testDB(t)
+
+	err := backlog.DeleteProject(d, "nonexistent", false, "")
+	assert.Error(t, err)
+}
+
+func TestDeleteProjectReassignToSelf(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	err = backlog.DeleteProject(d, "acme-corp", false, "acme-corp")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot reassign to self")
+}
+
+func TestDeleteProjectReassignTargetNotFound(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	err = backlog.DeleteProject(d, "acme-corp", false, "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reassign target not found")
+}
+
+func TestReassignProjectChildren(t *testing.T) {
+	d := testDB(t)
+
+	src, err := backlog.CreateProject(d, "src-proj", "SP")
+	require.NoError(t, err)
+	dst, err := backlog.CreateProject(d, "dst-proj", "DP")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P1", "Task 1", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P2", "Task 2", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.CreatePlan(d, "Plan A", "content", &src.ID, nil)
+	require.NoError(t, err)
+	_, err = d.Exec("INSERT INTO documents (type, project, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		"decision", "Src-Proj", "Doc 1", "content", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	tx, err := d.Begin()
+	require.NoError(t, err)
+	err = backlog.ReassignProjectChildren(tx, src.ID, src.Name, dst.ID, dst.Name)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	var itemCount, planCount, docCount int
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM items WHERE project_id = ?", dst.ID).Scan(&itemCount))
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM plans WHERE project_id = ?", dst.ID).Scan(&planCount))
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM documents WHERE project = ?", "dst-proj").Scan(&docCount))
+	assert.Equal(t, 2, itemCount)
+	assert.Equal(t, 1, planCount)
+	assert.Equal(t, 1, docCount) // case-insensitive match on "Src-Proj"
+
+	// src should now have none
+	require.NoError(t, d.QueryRow("SELECT COUNT(*) FROM items WHERE project_id = ?", src.ID).Scan(&itemCount))
+	assert.Equal(t, 0, itemCount)
+}
+
+func TestReassignProjectChildrenClosedTx(t *testing.T) {
+	d := testDB(t)
+
+	src, err := backlog.CreateProject(d, "src-proj", "SP")
+	require.NoError(t, err)
+	dst, err := backlog.CreateProject(d, "dst-proj", "DP")
+	require.NoError(t, err)
+
+	tx, err := d.Begin()
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
+
+	// tx is now closed — Exec should fail
+	err = backlog.ReassignProjectChildren(tx, src.ID, src.Name, dst.ID, dst.Name)
+	require.Error(t, err)
+}
+
+func TestDerivePrefixHappyPath(t *testing.T) {
+	d := testDB(t)
+
+	prefix, err := backlog.DerivePrefix(d, "acme-corp")
+	require.NoError(t, err)
+	assert.Equal(t, "AC", prefix)
+}
+
+func TestDerivePrefixCollisionFallback(t *testing.T) {
+	d := testDB(t)
+
+	// Seed AC to force collision
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	// "account" also starts with AC — should fall back to A1
+	prefix, err := backlog.DerivePrefix(d, "account")
+	require.NoError(t, err)
+	assert.Equal(t, "A1", prefix)
+}
+
+func TestDerivePrefixExhaustion(t *testing.T) {
+	d := testDB(t)
+
+	// For "another", base prefix is "AN". Exhaust AN + A1..A9.
+	_, err := backlog.CreateProject(d, "another", "AN")
+	require.NoError(t, err)
+	for i := 1; i <= 9; i++ {
+		name := "alpha-0" + string(rune('0'+i))
+		prefix := "A" + string(rune('0'+i))
+		_, err = backlog.CreateProject(d, name, prefix)
+		require.NoError(t, err)
+	}
+
+	// Now DerivePrefix for any "an*" name should fail
+	_, err = backlog.DerivePrefix(d, "anything")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot derive unique prefix")
+}
+
+func TestDerivePrefixShortName(t *testing.T) {
+	d := testDB(t)
+
+	// Single-char name should be padded with X
+	prefix, err := backlog.DerivePrefix(d, "a")
+	require.NoError(t, err)
+	assert.Equal(t, "AX", prefix)
+}
+
+func TestRenameProjectCaseInsensitiveCollision(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "foo-bar", "FO")
+	require.NoError(t, err)
+
+	_, err = backlog.CreateProject(d, "Bar-baz", "BB")
+	require.NoError(t, err)
+
+	// Rename "Bar-baz" to "FOO-BAR" — case-insensitive collision with "foo-bar"
+	_, err = backlog.RenameProject(d, "Bar-baz", "foo-bar")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "project already exists")
+}

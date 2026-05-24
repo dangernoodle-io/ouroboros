@@ -33,6 +33,7 @@ func TestHandleProject(t *testing.T) {
 
 	// Create a project
 	req := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 
@@ -47,7 +48,9 @@ func TestHandleProject(t *testing.T) {
 	assert.NotZero(t, proj.ID)
 
 	// List projects
-	req = makeRequest(map[string]interface{}{})
+	req = makeRequest(map[string]interface{}{
+		"op": "list",
+	})
 	result, err = handleProject(db, bk)(context.TODO(), req)
 	require.NoError(t, err)
 
@@ -63,6 +66,7 @@ func TestHandleProjectRename(t *testing.T) {
 
 	// Create project
 	createReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "old-name",
 	})
 	createResult, err := handleProject(db, bk)(context.TODO(), createReq)
@@ -75,6 +79,7 @@ func TestHandleProjectRename(t *testing.T) {
 
 	// Rename project
 	renameReq := makeRequest(map[string]interface{}{
+		"op":       "rename",
 		"name":     "old-name",
 		"new_name": "new-name",
 	})
@@ -87,13 +92,15 @@ func TestHandleProjectRename(t *testing.T) {
 	assert.Equal(t, "new-name", renamedProj.Name)
 	assert.Equal(t, proj.ID, renamedProj.ID)
 
-	// Verify GetProjectByName("new-name") succeeds
-	getNewReq := makeRequest(map[string]interface{}{})
-	getNewResult, err := handleProject(db, bk)(context.TODO(), getNewReq)
+	// Verify list shows new name
+	listReq := makeRequest(map[string]interface{}{
+		"op": "list",
+	})
+	listResult, err := handleProject(db, bk)(context.TODO(), listReq)
 	require.NoError(t, err)
 
 	var projects []backlog.Project
-	err = unmarshalResult(getNewResult, &projects)
+	err = unmarshalResult(listResult, &projects)
 	require.NoError(t, err)
 	assert.Len(t, projects, 1)
 	assert.Equal(t, "new-name", projects[0].Name)
@@ -104,6 +111,7 @@ func TestHandleProjectPrefixCollision(t *testing.T) {
 
 	// Create first project with AC prefix
 	req := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	result, err := handleProject(db, bk)(context.TODO(), req)
@@ -116,6 +124,7 @@ func TestHandleProjectPrefixCollision(t *testing.T) {
 
 	// Create second project starting with A — should get derived prefix
 	req = makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "alpha-team",
 	})
 	result, err = handleProject(db, bk)(context.TODO(), req)
@@ -132,6 +141,7 @@ func TestHandleItemCreate(t *testing.T) {
 
 	// Create project first
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	projResult, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -186,6 +196,7 @@ func TestHandleItemGet(t *testing.T) {
 
 	// Create project and item
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -230,6 +241,7 @@ func TestHandleItemUpdate(t *testing.T) {
 
 	// Create project and item
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -288,6 +300,7 @@ func TestHandleItemDone(t *testing.T) {
 
 	// Create project and item
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -341,6 +354,7 @@ func TestHandleItemList(t *testing.T) {
 
 	// Create project
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -387,6 +401,7 @@ func TestHandleItemListFilter(t *testing.T) {
 
 	// Create project
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -492,6 +507,7 @@ func TestHandlePlanCreateLinked(t *testing.T) {
 
 	// Create project and item
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -651,6 +667,7 @@ func TestHandlePlanList(t *testing.T) {
 
 	// Create project
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -761,11 +778,262 @@ func TestHandleConfigSetCliOnly(t *testing.T) {
 	assert.Contains(t, textContent.Text, "ouroboros config set")
 }
 
+func TestHandleProjectGet(t *testing.T) {
+	resetAllDB(t)
+
+	// Create project via handler
+	createReq := makeRequest(map[string]interface{}{
+		"op":   "create",
+		"name": "acme-corp",
+	})
+	_, err := handleProject(db, bk)(context.TODO(), createReq)
+	require.NoError(t, err)
+
+	// Get project by name
+	getReq := makeRequest(map[string]interface{}{
+		"op":   "get",
+		"name": "acme-corp",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), getReq)
+	require.NoError(t, err)
+
+	var proj backlog.Project
+	err = unmarshalResult(result, &proj)
+	require.NoError(t, err)
+	assert.Equal(t, "acme-corp", proj.Name)
+	assert.Equal(t, "AC", proj.Prefix)
+	assert.NotZero(t, proj.ID)
+}
+
+func TestHandleProjectDeleteBlocked(t *testing.T) {
+	resetAllDB(t)
+
+	// Create project and add an item
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op":   "delete",
+		"name": "acme-corp",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "items")
+}
+
+func TestHandleProjectDeleteForce(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op":    "delete",
+		"name":  "acme-corp",
+		"force": true,
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "acme-corp")
+}
+
+func TestHandleProjectDeleteReassign(t *testing.T) {
+	resetAllDB(t)
+
+	src, err := backlog.CreateProject(db, "src-proj", "SP")
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "dst-proj", "DP")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, src.ID, src.Prefix, "P1", "Task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op":          "delete",
+		"name":        "src-proj",
+		"reassign_to": "dst-proj",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "src-proj")
+}
+
+func TestHandleProjectDeleteMutex(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op":          "delete",
+		"name":        "acme-corp",
+		"force":       true,
+		"reassign_to": "other-proj",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "mutually exclusive")
+}
+
+func TestHandleProjectMissingOp(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "op is required")
+}
+
+func TestHandleProjectUnknownOp(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "foo",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "unknown op")
+}
+
+func TestHandleProjectCreateMissingName(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "create",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "name is required")
+}
+
+func TestHandleProjectCreateValidationError(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op":   "create",
+		"name": "AB",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "invalid project name")
+}
+
+func TestHandleProjectGetMissingName(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "get",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "name is required")
+}
+
+func TestHandleProjectGetNotFound(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op":   "get",
+		"name": "nonexistent",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+func TestHandleProjectRenameMissingName(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op":       "rename",
+		"new_name": "new-name",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "name is required")
+}
+
+func TestHandleProjectRenameMissingNewName(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op":   "rename",
+		"name": "old-name",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "new_name is required")
+}
+
+func TestHandleProjectRenameError(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op":       "rename",
+		"name":     "nonexistent",
+		"new_name": "new-name",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+func TestHandleProjectDeleteMissingName(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "delete",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "name is required")
+}
+
 func TestHandleItemInvalidPriority(t *testing.T) {
 	resetAllDB(t)
 
 	// Create project
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -993,6 +1261,7 @@ func TestHandleItemCreateWithComponent(t *testing.T) {
 
 	// Create project first
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -1036,6 +1305,7 @@ func TestHandleItemListFilterComponent(t *testing.T) {
 
 	// Create project
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -1090,6 +1360,7 @@ func TestHandleItemListOutputIncludesComponent(t *testing.T) {
 
 	// Create project
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -1136,6 +1407,7 @@ func TestHandleItemDeleteSingle(t *testing.T) {
 
 	// Create project and two items
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -1198,6 +1470,7 @@ func TestHandleItemDeleteMultiple(t *testing.T) {
 
 	// Create project and three items
 	projReq := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "acme-corp",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq)
@@ -1268,17 +1541,97 @@ func TestHandleItemDeleteNonexistent(t *testing.T) {
 }
 
 // TestHandleItemListMultiProject tests item list with multiple project filters.
+func TestHandleProjectCreatePrefixExhausted(t *testing.T) {
+	resetAllDB(t)
+
+	// Exhaust all prefixes starting with A: base AL + A1..A9
+	_, err := backlog.CreateProject(db, "alpha-00", "AL")
+	require.NoError(t, err)
+	for i := 1; i <= 9; i++ {
+		name := "alpha-0" + string(rune('0'+i))
+		prefix := "A" + string(rune('0'+i))
+		_, err = backlog.CreateProject(db, name, prefix)
+		require.NoError(t, err)
+	}
+
+	req := makeRequest(map[string]interface{}{
+		"op":   "create",
+		"name": "alpha-xyz",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "prefix")
+}
+
+func TestHandleProjectListEmpty(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "list",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	var projects []backlog.Project
+	err = unmarshalResult(result, &projects)
+	require.NoError(t, err)
+	assert.NotNil(t, projects)
+	assert.Len(t, projects, 0)
+}
+
+func TestHandleItemWithProgressCallsHandler(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	srv := buildServer(db, bk, "test")
+	handler := handleItemWithProgress(db, bk, srv)
+
+	// Call with list mode — should succeed and return "no items"
+	req := makeRequest(map[string]interface{}{
+		"projects": []interface{}{"acme-corp"},
+	})
+	result, err := handler(context.TODO(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+func TestHandlePlanWithProgressCallsHandler(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	srv := buildServer(db, bk, "test")
+	handler := handlePlanWithProgress(db, bk, srv)
+
+	// Call with list mode — should succeed and return empty plans list
+	req := makeRequest(map[string]interface{}{
+		"projects": []interface{}{"acme-corp"},
+	})
+	result, err := handler(context.TODO(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
 func TestHandleItemListMultiProject(t *testing.T) {
 	resetAllDB(t)
 
 	// Create two projects
 	projReq1 := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "project-a",
 	})
 	_, err := handleProject(db, bk)(context.TODO(), projReq1)
 	require.NoError(t, err)
 
 	projReq2 := makeRequest(map[string]interface{}{
+		"op":   "create",
 		"name": "project-b",
 	})
 	_, err = handleProject(db, bk)(context.TODO(), projReq2)
