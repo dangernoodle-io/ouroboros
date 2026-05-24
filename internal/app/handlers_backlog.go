@@ -41,36 +41,6 @@ func resolveProjects(d *sql.DB, names []string) ([]int64, error) {
 	return ids, nil
 }
 
-func derivePrefix(d *sql.DB, name string) (string, error) {
-	base := strings.ToUpper(name)
-	if len(base) < 2 {
-		base = base + "X"
-	}
-	prefix := base[:2]
-
-	projects, err := backlog.ListProjects(d)
-	if err != nil {
-		return "", err
-	}
-
-	existing := make(map[string]bool)
-	for _, p := range projects {
-		existing[p.Prefix] = true
-	}
-
-	if !existing[prefix] {
-		return prefix, nil
-	}
-
-	for i := 1; i <= 9; i++ {
-		candidate := fmt.Sprintf("%c%d", prefix[0], i)
-		if !existing[candidate] {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("cannot derive unique prefix for: %s", name)
-}
-
 func backupCommit(bk *backup.Backup, msg string) {
 	if bk == nil {
 		return
@@ -82,44 +52,81 @@ func backupCommit(bk *backup.Backup, msg string) {
 
 func handleProject(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		name, ok := req.GetArguments()["name"].(string)
-		newName, hasNewName := req.GetArguments()["new_name"].(string)
+		op, _ := req.GetArguments()["op"].(string)
+		if op == "" {
+			return mcp.NewToolResultError("op is required: get|create|list|rename|delete"), nil
+		}
 
-		// Check for rename mode (both name and new_name present)
-		if ok && name != "" && hasNewName && newName != "" {
+		switch op {
+		case "get":
+			name, _ := req.GetArguments()["name"].(string)
+			if name == "" {
+				return mcp.NewToolResultError("name is required for get"), nil
+			}
+			project, err := backlog.GetProjectByName(d, name)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return jsonResult(project)
+
+		case "create":
+			name, _ := req.GetArguments()["name"].(string)
+			if name == "" {
+				return mcp.NewToolResultError("name is required for create"), nil
+			}
+			prefix, err := backlog.DerivePrefix(d, name)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			proj, err := backlog.CreateProject(d, name, prefix)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			backupCommit(bk, fmt.Sprintf("project: %s (%s)", name, prefix))
+			return jsonResult(proj)
+
+		case "list":
+			projects, err := backlog.ListProjects(d)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if projects == nil {
+				projects = []backlog.Project{}
+			}
+			return jsonResult(projects)
+
+		case "rename":
+			name, _ := req.GetArguments()["name"].(string)
+			newName, _ := req.GetArguments()["new_name"].(string)
+			if name == "" {
+				return mcp.NewToolResultError("name is required for rename"), nil
+			}
+			if newName == "" {
+				return mcp.NewToolResultError("new_name is required for rename"), nil
+			}
 			proj, err := backlog.RenameProject(d, name, newName)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			backupCommit(bk, fmt.Sprintf("project: rename %s → %s", name, newName))
 			return jsonResult(proj)
-		}
 
-		// Check for create mode (name only, no new_name)
-		if ok && name != "" {
-			prefix, err := derivePrefix(d, name)
-			if err != nil {
+		case "delete":
+			name, _ := req.GetArguments()["name"].(string)
+			if name == "" {
+				return mcp.NewToolResultError("name is required for delete"), nil
+			}
+			force, _ := req.GetArguments()["force"].(bool)
+			reassignTo, _ := req.GetArguments()["reassign_to"].(string)
+			if err := backlog.DeleteProject(d, name, force, reassignTo); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
+			backupCommit(bk, fmt.Sprintf("project: delete %s", name))
+			return mcp.NewToolResultText(fmt.Sprintf("deleted project %q", name)), nil
 
-			proj, err := backlog.CreateProject(d, name, prefix)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			backupCommit(bk, fmt.Sprintf("project: %s (%s)", name, prefix))
-			return jsonResult(proj)
+		default:
+			return mcp.NewToolResultError("unknown op: " + op + " (allowed: get|create|list|rename|delete)"), nil
 		}
-
-		// List mode (no args)
-		projects, err := backlog.ListProjects(d)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		if projects == nil {
-			projects = []backlog.Project{}
-		}
-		return jsonResult(projects)
 	}
 }
 
