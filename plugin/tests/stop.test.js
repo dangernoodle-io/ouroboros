@@ -124,7 +124,7 @@ test('stop: kb block with malformed JSON → logs parse error, does NOT fall thr
   assert(!result.stderr.includes('persisted'));
 });
 
-test('stop: no kb block + tier-2 self-claim → exit 0, no stdout/stderr beyond logs', () => {
+test('stop: no kb block + tier-2 self-claim → exit 2, decision:block on stdout', () => {
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-tier2-clean-'));
   try {
     const transcript = writeTranscript([{
@@ -138,18 +138,20 @@ test('stop: no kb block + tier-2 self-claim → exit 0, no stdout/stderr beyond 
       env: envVars,
       cwd: path.join(__dirname, '..'),
     });
-    assert.strictEqual(result.status, 0);
-    assert.strictEqual(result.stdout.trim(), '');
+    assert.strictEqual(result.status, 2);
+    const decision = JSON.parse(result.stdout.trim());
+    assert.strictEqual(decision.decision, 'block');
+    assert.match(decision.reason, /tier-2 self-claim/);
   } finally {
     fs.rmSync(testHomeDir, { recursive: true });
   }
 });
 
-test('stop: no kb block + tier-1 decision language → exit 0, no stdout/stderr beyond logs', () => {
+test('stop: no kb block + tier-1 decision language → exit 2, decision:block on stdout', () => {
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-tier1-clean-'));
   try {
     const transcript = writeTranscript([{
-      text: 'This is a long main-context message with enough content where we decided to adopt a new architecture for the system based on rationale',
+      text: 'This is a long main-context message with enough content where we decided to adopt a new approach: for the system based on rationale',
     }]);
     const input = JSON.stringify({ session_id: 'sesst1abc123', transcript_path: transcript });
     const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
@@ -159,8 +161,10 @@ test('stop: no kb block + tier-1 decision language → exit 0, no stdout/stderr 
       env: envVars,
       cwd: path.join(__dirname, '..'),
     });
-    assert.strictEqual(result.status, 0);
-    assert.strictEqual(result.stdout.trim(), '');
+    assert.strictEqual(result.status, 2);
+    const decision = JSON.parse(result.stdout.trim());
+    assert.strictEqual(decision.decision, 'block');
+    assert.match(decision.reason, /tier-1 nudge fired/);
   } finally {
     fs.rmSync(testHomeDir, { recursive: true });
   }

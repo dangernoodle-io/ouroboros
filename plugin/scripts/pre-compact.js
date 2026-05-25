@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-const { execSync } = require('child_process');
-const { readStdin, projectFromPath, logHookEvent, extractAllKbBlocks, getBinaryPath } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, logHookEvent, extractAllKbBlocks, queryKb } = require(__dirname + '/lib');
 
 async function main() {
   try {
@@ -148,20 +147,9 @@ async function main() {
 // queryPersistedCount returns the number of documents persisted for the given
 // project and session_id, or null if the query fails (fail-open).
 function queryPersistedCount(project, sessionId) {
-  const binary = getBinaryPath();
-  if (!binary) {
-    return null;
-  }
-
-  try {
-    const cmd = `"${binary}" query --project "${project}" --session-id "${sessionId}" --limit 500`;
-    const output = execSync(cmd, { timeout: 3000, encoding: 'utf-8' });
-    const parsed = JSON.parse(output.trim());
-    if (!Array.isArray(parsed)) return null;
-    return parsed.length;
-  } catch (e) {
-    return null;
-  }
+  const rows = queryKb(project, { sessionId, limit: 500 });
+  if (rows === null) return null;
+  return rows.length;
 }
 
 main();

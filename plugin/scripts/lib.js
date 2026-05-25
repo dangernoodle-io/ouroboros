@@ -132,6 +132,52 @@ function matchesAnyPattern(message, patterns) {
   return patterns.some(p => p.test(message));
 }
 
+// Tier-2: patterns indicating the context already persisted via tool/MCP
+const ALREADY_PERSISTED_PATTERNS = [
+  /\bouroboros\b/i,
+  /\bknowledge base\b/i,
+  /\bput MCP\b/i,
+  /\bpersisted?\b/i,
+  /\bmcp__.*__put\b/i,
+];
+
+// Tier-1: decision language patterns that warrant a nudge
+const DECISION_PATTERNS = [
+  /\bdecided to\b/i,
+  /\bchose .+ over\b/i,
+  /\btrade-?off/i,
+  /\barchitect(ure|ural)\b/i,
+  /\bdesign decision/i,
+  /\bgoing with\b/i,
+  /\bapproach(?: is|:)/i,
+  /\bwe('|')ll use\b/i,
+  /\binstead of\b.{0,30}\bbecause\b/i,
+  /\brationale\b/i,
+];
+
+// checkNudgePatterns runs the tier-2 and tier-1 checks on a message and returns
+// a {decision, reason} object if either fires, or null if neither matches. The
+// caller is responsible for writing the result to stdout and exiting 2. Logs the
+// nudge event as a side effect when matched.
+function checkNudgePatterns(message, ctx) {
+  const { label, idShort, sessionId, project, hookName } = ctx;
+  if (matchesAnyPattern(message, ALREADY_PERSISTED_PATTERNS)) {
+    logHookEvent({ hook: hookName, kind: 'nudge', session_id: sessionId, project, reason: 'tier-2' });
+    return {
+      decision: 'block',
+      reason: `[ouroboros] ${label} ${idShort}: tier-2 self-claim detected (no kb block, but message references persistence)`,
+    };
+  }
+  if (matchesAnyPattern(message, DECISION_PATTERNS)) {
+    logHookEvent({ hook: hookName, kind: 'nudge', session_id: sessionId, project, reason: 'tier-1' });
+    return {
+      decision: 'block',
+      reason: `[ouroboros] ${label} ${idShort}: tier-1 nudge fired (decision language present, no kb block)`,
+    };
+  }
+  return null;
+}
+
 function formatContextLines(project, rows, options = {}) {
   if (!rows || rows.length === 0) {
     return [];
@@ -411,4 +457,119 @@ function isSkippedAgentType(agentType) {
   return SKIP_AGENT_TYPES.includes(tail);
 }
 
-module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType };
+// readLastMainAssistantText scans a Claude Code transcript JSONL backwards and
+// returns the concatenated text of the most recent main-context (non-sidechain)
+// assistant turn. Returns '' if not found.
+function readLastMainAssistantText(transcriptPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(transcriptPath, 'utf-8');
+  } catch (e) {
+    return '';
+  }
+  const lines = raw.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch (e) {
+      continue;
+    }
+    if (obj.type !== 'assistant') continue;
+    if (obj.isSidechain === true) continue;
+    const content = (obj.message && obj.message.content) || [];
+    const text = content
+      .filter(c => c && c.type === 'text' && typeof c.text === 'string')
+      .map(c => c.text)
+      .join('\n');
+    if (text) return text;
+  }
+  return '';
+}
+
+// persistKbBlock extracts a fenced kb block from message and, if found, persists
+// it to the KB via the ouroboros binary. Returns { handled: true, exitCode: 0 }
+// if a kb block was matched (whether persist succeeded or failed). Returns
+// { handled: false } if no kb block was found.
+// ctx: { label, idShort, hookName, sessionId, project, extraMeta }
+function persistKbBlock(message, ctx) {
+  const { label, idShort, hookName, sessionId, project, extraMeta } = ctx;
+  const { matched, json } = extractKbBlock(message);
+  if (!matched) {
+    return { handled: false };
+  }
+
+  try {
+    JSON.parse(json);
+  } catch (parseErr) {
+    console.error(`[ouroboros] ${label} ${idShort}: kb block JSON parse error: ${parseErr.message}`);
+    return { handled: true, exitCode: 0 };
+  }
+
+  if (!project) {
+    console.error(`[ouroboros] ${label} ${idShort}: kb block found but no project (run inside a git repo)`);
+    return { handled: true, exitCode: 0 };
+  }
+
+  const binary = getBinaryPath();
+  if (!binary) {
+    console.error(`[ouroboros] ${label} ${idShort}: kb block found but ouroboros binary not available`);
+    return { handled: true, exitCode: 0 };
+  }
+
+  try {
+    let entries = JSON.parse(json);
+    if (!Array.isArray(entries)) {
+      entries = [entries];
+    }
+    const source = {
+      source: `hook:${hookName}`,
+      session_id: sessionId || '',
+      ...extraMeta,
+    };
+    entries.forEach(e => {
+      e.metadata = { ...(e.metadata || {}), ...source };
+    });
+    const injectedJson = JSON.stringify(entries);
+
+    const cmd = `"${binary}" put --stdin --project "${project}"`;
+    const result = execSync(cmd, { input: injectedJson, timeout: 3000, encoding: 'utf-8' });
+    const parsed = JSON.parse(result);
+    const resultEntries = Array.isArray(parsed) ? parsed : [parsed];
+    const ids = resultEntries.map(e => e.id).filter(id => id !== undefined);
+    console.error(`[ouroboros] ${label} ${idShort}: persisted ${resultEntries.length} entries to ${project} [ids: ${ids.join(',')}]`);
+    logHookEvent({ hook: hookName, kind: 'persist', session_id: sessionId, project, entries: resultEntries.length, ids });
+  } catch (execErr) {
+    console.error(`[ouroboros] ${label} ${idShort}: put failed: ${execErr.message}`);
+    logHookEvent({ hook: hookName, kind: 'error', detail: execErr.message, session_id: sessionId, project });
+  }
+
+  return { handled: true, exitCode: 0 };
+}
+
+// queryKb queries the ouroboros KB via CLI for a given project.
+// opts: { search?, sessionId?, limit?, timeout? (default 3000) }
+// Returns rows array on success, null on any failure (fail-open).
+function queryKb(project, opts = {}) {
+  const binary = getBinaryPath();
+  if (!binary) return null;
+
+  const { search, sessionId, limit, timeout = 3000 } = opts;
+  let cmd = `"${binary}" query --project "${project}"`;
+  if (search !== undefined) cmd += ` --search '${search}'`;
+  if (sessionId !== undefined) cmd += ` --session-id "${sessionId}"`;
+  if (limit !== undefined) cmd += ` --limit ${limit}`;
+
+  try {
+    const output = execSync(cmd, { timeout, encoding: 'utf-8' });
+    const parsed = JSON.parse(output.trim());
+    if (!Array.isArray(parsed)) return null;
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, checkNudgePatterns, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, readLastMainAssistantText, persistKbBlock, queryKb };
