@@ -1,15 +1,16 @@
 package kb
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-// WriteBatch validates and writes a batch of KB entries. Validates all entries first;
-// first validation failure aborts the entire batch with an error. On write, returns
-// partial results if any write fails.
+// WriteBatch validates and writes a batch of KB entries atomically.
+// Validates all entries first; first validation failure aborts with an error.
+// All writes succeed or none persist (transaction rollback on any error).
 func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, error) {
 	// Validate all entries first
 	for i, entry := range entries {
@@ -34,7 +35,12 @@ func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, e
 		}
 	}
 
-	// Write all validated entries
+	// Write all validated entries atomically
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
 	results := make([]PutResult, 0, len(entries))
 	for _, entry := range entries {
 		project := entry.Project
@@ -53,10 +59,10 @@ func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, e
 			Metadata: entry.Metadata,
 		}
 
-		result, err := store.UpsertDocument(db, doc)
+		result, err := store.UpsertDocumentTx(tx, doc)
 		if err != nil {
-			// Return error but include partial results
-			return results, fmt.Errorf("upsert failed: %w", err)
+			_ = tx.Rollback()
+			return nil, fmt.Errorf("upsert failed: %w", err)
 		}
 
 		results = append(results, PutResult{
@@ -64,6 +70,15 @@ func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, e
 			Action: result.Action,
 			Title:  entry.Title,
 		})
+	}
+
+	if err := tx.Commit(); err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	if err := store.RebuildFTS(db); err != nil {
+		return nil, fmt.Errorf("failed to rebuild FTS: %w", err)
 	}
 
 	return results, nil

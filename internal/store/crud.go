@@ -120,12 +120,15 @@ func KeywordSearch(db *sql.DB, query string, projects []string, limit int) ([]Do
 	return results, rows.Err()
 }
 
-// UpsertDocument inserts or updates a document record using ON CONFLICT.
-// Returns UpsertResult with ID and action (created/updated).
-func UpsertDocument(db *sql.DB, doc Document) (*UpsertResult, error) {
-	dbMu.Lock()
-	defer dbMu.Unlock()
+// sqlExecutor is satisfied by both *sql.DB and *sql.Tx.
+type sqlExecutor interface {
+	QueryRow(query string, args ...any) *sql.Row
+	Exec(query string, args ...any) (sql.Result, error)
+}
 
+// upsertDocumentExec contains the core upsert logic operating on a sqlExecutor.
+// Callers are responsible for FTS rebuild and locking.
+func upsertDocumentExec(q sqlExecutor, doc Document) (*UpsertResult, error) {
 	metadataJSON, err := json.Marshal(doc.Metadata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
@@ -150,13 +153,13 @@ func UpsertDocument(db *sql.DB, doc Document) (*UpsertResult, error) {
 
 	// Check if document exists before insert
 	var existingID int64
-	err = db.QueryRow(
+	err = q.QueryRow(
 		"SELECT id FROM documents WHERE type = ? AND project = ? AND category = ? AND title = ?",
 		doc.Type, doc.Project, doc.Category, doc.Title,
 	).Scan(&existingID)
 	isUpdate := err == nil
 
-	_, err = db.Exec(`
+	_, err = q.Exec(`
 		INSERT INTO documents (type, project, category, title, content, notes, session_id, metadata, tags, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(type, project, category, title)
@@ -166,13 +169,9 @@ func UpsertDocument(db *sql.DB, doc Document) (*UpsertResult, error) {
 		return nil, fmt.Errorf("failed to upsert document: %w", err)
 	}
 
-	if err := RebuildFTS(db); err != nil {
-		return nil, fmt.Errorf("failed to rebuild FTS: %w", err)
-	}
-
 	// Get the ID of the inserted/updated row
 	var id int64
-	err = db.QueryRow(
+	err = q.QueryRow(
 		"SELECT id FROM documents WHERE type = ? AND project = ? AND category = ? AND title = ?",
 		doc.Type, doc.Project, doc.Category, doc.Title,
 	).Scan(&id)
@@ -186,6 +185,30 @@ func UpsertDocument(db *sql.DB, doc Document) (*UpsertResult, error) {
 	}
 
 	return &UpsertResult{ID: id, Action: action}, nil
+}
+
+// UpsertDocument inserts or updates a document record using ON CONFLICT.
+// Returns UpsertResult with ID and action (created/updated).
+func UpsertDocument(db *sql.DB, doc Document) (*UpsertResult, error) {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+
+	result, err := upsertDocumentExec(db, doc)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := RebuildFTS(db); err != nil {
+		return nil, fmt.Errorf("failed to rebuild FTS: %w", err)
+	}
+
+	return result, nil
+}
+
+// UpsertDocumentTx inserts or updates a document within an existing transaction.
+// The caller owns the transaction and is responsible for commit/rollback and FTS rebuild.
+func UpsertDocumentTx(tx *sql.Tx, doc Document) (*UpsertResult, error) {
+	return upsertDocumentExec(tx, doc)
 }
 
 // GetDocument returns a full Document by ID. Returns nil, nil if not found.
