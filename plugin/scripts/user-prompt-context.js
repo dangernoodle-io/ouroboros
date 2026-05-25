@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent, queryKb } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 1800000; // 30 minutes per project
 const RESUME_COOLDOWN_MS = 0; // no cooldown for resume prompts
@@ -98,21 +98,15 @@ async function main() {
       process.exit(0);
     }
 
-    // Build CLI command based on intent
-    let cmd;
+    // Query KB based on intent
+    let rows;
     if (intent === 'resume') {
-      cmd = `"${binary}" query --project "${project}" --limit ${MAX_ENTRIES}`;
+      rows = queryKb(project, { limit: MAX_ENTRIES });
     } else {
       const escaped = message.replace(/'/g, '').substring(0, 200);
-      cmd = `"${binary}" query --project "${project}" --search '${escaped}' --limit ${MAX_SEARCH}`;
+      rows = queryKb(project, { search: escaped, limit: MAX_SEARCH });
     }
-
-    // Query KB via CLI mode
-    let rows;
-    try {
-      const out = execSync(cmd, { timeout: 3000, encoding: 'utf-8' });
-      rows = JSON.parse(out);
-    } catch (e) {
+    if (rows === null) {
       process.exit(0);
     }
 

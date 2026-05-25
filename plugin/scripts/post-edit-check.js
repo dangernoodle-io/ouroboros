@@ -2,8 +2,7 @@
 
 const path = require('path');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
-const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, logHookEvent } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, isWithinCooldown, touchFile, logHookEvent, queryKb } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 600000; // 10 minutes per file
 
@@ -45,12 +44,6 @@ async function main() {
       process.exit(0);
     }
 
-    // Find the ouroboros binary
-    const binary = getBinaryPath();
-    if (!binary) {
-      process.exit(0);
-    }
-
     // Extract basename stem (e.g., "crud" from "crud.go")
     const basename = path.basename(filePath);
     const stem = basename.replace(/\.[^.]+$/, '');
@@ -61,15 +54,9 @@ async function main() {
     }
 
     // Search KB for entries mentioning this file
-    let rows;
-    try {
-      const escaped = stem.replace(/'/g, '');
-      const out = execSync(
-        `"${binary}" query --project "${project}" --search '${escaped}' --limit 5`,
-        { timeout: 3000, encoding: 'utf-8' }
-      );
-      rows = JSON.parse(out);
-    } catch (e) {
+    const escaped = stem.replace(/'/g, '');
+    const rows = queryKb(project, { search: escaped, limit: 5 });
+    if (rows === null) {
       logHookEvent({ hook: 'post_edit_check', kind: 'noop', session_id, project });
       process.exit(0);
     }
