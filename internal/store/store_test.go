@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"database/sql"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1185,4 +1186,100 @@ func TestBackfillSessionIDFromMetadata(t *testing.T) {
 	err = db.QueryRow("SELECT session_id FROM documents WHERE title = 'no-session-entry'").Scan(&sessionID)
 	require.NoError(t, err)
 	assert.Nil(t, sessionID)
+}
+
+func TestInitDBMaxOpenConns(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	t.Setenv("PROJECT_KB_PATH", dbPath)
+
+	db, err := store.InitDB()
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+
+	assert.Equal(t, 1, db.Stats().MaxOpenConnections)
+}
+
+func TestUpsertDocumentTx_Insert(t *testing.T) {
+	db := testDB(t)
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+
+	doc := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "tx-insert-test",
+		Content: "content via tx",
+	}
+
+	result, err := store.UpsertDocumentTx(tx, doc)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	require.NotNil(t, result)
+	assert.Greater(t, result.ID, int64(0))
+	assert.Equal(t, "created", result.Action)
+
+	retrieved, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, "tx-insert-test", retrieved.Title)
+	assert.Equal(t, "content via tx", retrieved.Content)
+}
+
+func TestUpsertDocumentTx_Update(t *testing.T) {
+	db := testDB(t)
+
+	// Pre-insert via UpsertDocument
+	doc := store.Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "tx-update-test",
+		Content: "original content",
+	}
+	first, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	assert.Equal(t, "created", first.Action)
+
+	// Update via transaction
+	tx, err := db.Begin()
+	require.NoError(t, err)
+
+	doc.Content = "updated content"
+	result, err := store.UpsertDocumentTx(tx, doc)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	assert.Equal(t, "updated", result.Action)
+	assert.Equal(t, first.ID, result.ID)
+
+	retrieved, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, "updated content", retrieved.Content)
+}
+
+func TestUpsertDocumentTx_RollbackUndoes(t *testing.T) {
+	db := testDB(t)
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "tx-rollback-test",
+		Content: "should not persist",
+	}
+
+	result, err := store.UpsertDocumentTx(tx, doc)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.NoError(t, tx.Rollback())
+
+	retrieved, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	assert.Nil(t, retrieved, "row must not exist after rollback")
 }

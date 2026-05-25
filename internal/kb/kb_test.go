@@ -396,6 +396,75 @@ func TestImportJSONWhitespace(t *testing.T) {
 	assert.Equal(t, "Test Decision", docs[0].Title)
 }
 
+func TestWriteBatch_HappyPath_ReturnsAllResults(t *testing.T) {
+	db := testDB(t)
+
+	entries := []kb.Entry{
+		{Type: "decision", Project: "acme-corp", Title: "batch-entry-1", Content: "first decision"},
+		{Type: "fact", Project: "acme-corp", Title: "batch-entry-2", Content: "second fact"},
+		{Type: "note", Project: "acme-corp", Title: "batch-entry-3", Content: "third note"},
+	}
+
+	results, err := kb.WriteBatch(db, entries, "")
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	for i, r := range results {
+		assert.Greater(t, r.ID, int64(0))
+		assert.Equal(t, "created", r.Action)
+		assert.Equal(t, entries[i].Title, r.Title)
+	}
+}
+
+func TestWriteBatch_Empty_NoResults(t *testing.T) {
+	db := testDB(t)
+
+	results, err := kb.WriteBatch(db, []kb.Entry{}, "")
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestWriteBatch_ValidationFailureAbortsAll(t *testing.T) {
+	db := testDB(t)
+
+	entries := []kb.Entry{
+		{Type: "decision", Project: "acme-corp", Title: "valid-entry", Content: "ok"},
+		// Missing type — should fail validation
+		{Type: "", Project: "acme-corp", Title: "invalid-entry", Content: "bad"},
+	}
+
+	results, err := kb.WriteBatch(db, entries, "")
+	require.Error(t, err)
+	assert.Nil(t, results)
+
+	// Neither entry should be in DB
+	docs, qerr := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	require.NoError(t, qerr)
+	assert.Empty(t, docs)
+}
+
+func TestWriteBatch_RebuildFTSCalledOnce(t *testing.T) {
+	db := testDB(t)
+
+	entries := []kb.Entry{
+		{Type: "decision", Project: "acme-corp", Title: "fts-entry-alpha", Content: "distincttoken001"},
+		{Type: "fact", Project: "acme-corp", Title: "fts-entry-beta", Content: "distincttoken002"},
+		{Type: "note", Project: "acme-corp", Title: "fts-entry-gamma", Content: "distincttoken003"},
+	}
+
+	_, err := kb.WriteBatch(db, entries, "")
+	require.NoError(t, err)
+
+	// FTS search for each distinct token must return the correct doc,
+	// proving RebuildFTS ran after commit (not mid-tx, where it would fail).
+	for _, e := range entries {
+		results, serr := store.SearchDocuments(db, e.Content, "", nil, 10)
+		require.NoError(t, serr)
+		require.Len(t, results, 1, "FTS should find exactly one doc for %q", e.Content)
+		assert.Equal(t, e.Title, results[0].Title)
+	}
+}
+
 func TestImportMultipleProjects(t *testing.T) {
 	testdb := testDB(t)
 
