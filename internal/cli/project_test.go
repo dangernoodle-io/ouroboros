@@ -93,7 +93,7 @@ func TestRunProjectRename(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runProjectRename(&buf, db, "old-name", "new-name")
+	err = runProjectRename(&buf, db, "old-name", "new-name", "")
 	require.NoError(t, err)
 
 	var proj backlog.Project
@@ -108,7 +108,7 @@ func TestRunProjectRenameInvalidNewName(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runProjectRename(&buf, db, "acme-corp", "AB")
+	err = runProjectRename(&buf, db, "acme-corp", "AB", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid project name")
 }
@@ -204,7 +204,7 @@ func TestRunProjectRenameNotFound(t *testing.T) {
 	db := newTestDB(t)
 
 	var buf bytes.Buffer
-	err := runProjectRename(&buf, db, "nonexistent", "new-name")
+	err := runProjectRename(&buf, db, "nonexistent", "new-name", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "project rename")
 }
@@ -216,4 +216,40 @@ func TestRunProjectDeleteNotFound(t *testing.T) {
 	err := runProjectDelete(&buf, db, "nonexistent", false, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "project delete")
+}
+
+func TestRunProjectRenameNewPrefix(t *testing.T) {
+	db := newTestDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	proj, err := backlog.AddItem(db, 1, "AC", "P1", "task", "", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "AC-1", proj.ID)
+
+	var buf bytes.Buffer
+	err = runProjectRename(&buf, db, "acme-corp", "", "XX")
+	require.NoError(t, err)
+
+	var renamed backlog.Project
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &renamed))
+	assert.Equal(t, "acme-corp", renamed.Name)
+	assert.Equal(t, "XX", renamed.Prefix)
+
+	// Item should have new ID
+	item, err := backlog.GetItem(db, "XX-1")
+	require.NoError(t, err)
+	assert.Equal(t, "XX-1", item.ID)
+}
+
+func TestRunProjectRenameNoFlags(t *testing.T) {
+	db := newTestDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runProjectRename(&buf, db, "acme-corp", "", "")
+	require.Error(t, err)
 }

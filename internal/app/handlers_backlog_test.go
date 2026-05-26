@@ -998,7 +998,7 @@ func TestHandleProjectRenameMissingNewName(t *testing.T) {
 	assert.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
 	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "new_name is required")
+	assert.Contains(t, textContent.Text, "new_name or new_prefix is required")
 }
 
 func TestHandleProjectRenameError(t *testing.T) {
@@ -1681,4 +1681,76 @@ func TestHandleItemListMultiProject(t *testing.T) {
 	// IDs should be PR-1 and P1-1 but we just check that both projects appear
 	assert.Contains(t, text, "[open] Item in project-a")
 	assert.Contains(t, text, "[open] Item in project-b")
+}
+
+func TestHandleProjectRenameWithNewPrefix(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "test-project", "TP")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op":         "rename",
+		"name":       "test-project",
+		"new_prefix": "XX",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	var renamed backlog.Project
+	err = unmarshalResult(result, &renamed)
+	require.NoError(t, err)
+	assert.Equal(t, "test-project", renamed.Name)
+	assert.Equal(t, "XX", renamed.Prefix)
+
+	item, err := backlog.GetItem(db, "XX-1")
+	require.NoError(t, err)
+	assert.Equal(t, "XX-1", item.ID)
+}
+
+func TestHandleProjectRenameBothNameAndPrefix(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "old-project", "OP")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op":         "rename",
+		"name":       "old-project",
+		"new_name":   "new-project",
+		"new_prefix": "NP",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.False(t, result.IsError)
+
+	var renamed backlog.Project
+	err = unmarshalResult(result, &renamed)
+	require.NoError(t, err)
+	assert.Equal(t, "new-project", renamed.Name)
+	assert.Equal(t, "NP", renamed.Prefix)
+
+	item, err := backlog.GetItem(db, "NP-1")
+	require.NoError(t, err)
+	assert.Equal(t, "NP-1", item.ID)
+}
+
+func TestHandleProjectRenameBothEmpty(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "some-project", "SP")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op":   "rename",
+		"name": "some-project",
+	})
+	result, err := handleProject(db, bk)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
 }

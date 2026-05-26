@@ -119,10 +119,11 @@ func registerTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	), withRecover(handlePutWithProgress(db, bk, s)))
 
 	s.AddTool(mcp.NewTool("project",
-		mcp.WithDescription("Manage projects. op: get (name), create (name), list, rename (name+new_name), delete (name; force=true cascade, reassign_to=<name> move; mutex)."),
+		mcp.WithDescription("Manage projects. op: get (name), create (name), list, rename (name + new_name and/or new_prefix), delete (name; force=true cascade, reassign_to=<name> move; mutex)."),
 		mcp.WithString("op", mcp.Required(), mcp.Description("get|create|list|rename|delete")),
 		mcp.WithString("name", mcp.Description("Project name")),
-		mcp.WithString("new_name", mcp.Description("New project name (for rename)")),
+		mcp.WithString("new_name", mcp.Description("rename only: new project name")),
+		mcp.WithString("new_prefix", mcp.Description("rename only: new prefix (1-4 chars, letter-first, letters and digits only)")),
 		mcp.WithBoolean("force", mcp.Description("delete only: cascade-delete child items, plans, documents")),
 		mcp.WithString("reassign_to", mcp.Description("delete only: move children to this project before delete; mutually exclusive with force")),
 		toolAnnotation(nil, nil, nil),

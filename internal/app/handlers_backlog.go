@@ -98,17 +98,24 @@ func handleProject(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 		case "rename":
 			name, _ := req.GetArguments()["name"].(string)
 			newName, _ := req.GetArguments()["new_name"].(string)
+			newPrefix, _ := req.GetArguments()["new_prefix"].(string)
 			if name == "" {
 				return mcp.NewToolResultError("name is required for rename"), nil
 			}
-			if newName == "" {
-				return mcp.NewToolResultError("new_name is required for rename"), nil
-			}
-			proj, err := backlog.RenameProject(d, name, newName)
+			proj, err := backlog.RenameProject(d, name, newName, newPrefix)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			backupCommit(bk, fmt.Sprintf("project: rename %s → %s", name, newName))
+			var commitMsg string
+			switch {
+			case newName != "" && newPrefix != "":
+				commitMsg = fmt.Sprintf("project: rename %s → %s (prefix → %s)", name, newName, newPrefix)
+			case newPrefix != "":
+				commitMsg = fmt.Sprintf("project: rename prefix %s → %s", name, newPrefix)
+			default:
+				commitMsg = fmt.Sprintf("project: rename %s → %s", name, newName)
+			}
+			backupCommit(bk, commitMsg)
 			return jsonResult(proj)
 
 		case "delete":
