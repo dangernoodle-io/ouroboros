@@ -521,3 +521,93 @@ func TestImportMultipleProjects(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, facts2, 1)
 }
+
+// TestImportJSON_AtomicRollback verifies that a mid-import failure leaves no rows persisted.
+// A SQLite trigger is installed to abort on the second insert, simulating a partial failure.
+func TestImportJSON_AtomicRollback(t *testing.T) {
+	db := testDB(t)
+
+	// Trigger that aborts any insert when at least one document already exists in the tx.
+	_, err := db.Exec(`
+		CREATE TRIGGER test_fail_second_insert
+		BEFORE INSERT ON documents
+		WHEN (SELECT COUNT(*) FROM documents) >= 1
+		BEGIN SELECT RAISE(ABORT, 'test: intentional second-insert failure'); END
+	`)
+	require.NoError(t, err)
+
+	payload := kb.ImportData{
+		Documents: []kb.ImportDocument{
+			{Type: "decision", Project: "acme-corp", Title: "first-doc", Content: "ok"},
+			{Type: "fact", Project: "acme-corp", Title: "second-doc", Content: "triggers abort"},
+		},
+	}
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	err = kb.ImportJSON(db, "", data)
+	require.Error(t, err, "import must fail when second insert aborts")
+
+	// Drop the trigger so we can query cleanly.
+	_, dropErr := db.Exec("DROP TRIGGER test_fail_second_insert")
+	require.NoError(t, dropErr)
+
+	// No rows must have been committed — the transaction must have rolled back.
+	docs, qerr := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	require.NoError(t, qerr)
+	assert.Empty(t, docs, "no documents should persist after a rolled-back import")
+}
+
+// TestImportJSON_ValidationFailureAbortsBeforeTx verifies that pre-tx validation
+// (missing title) fails before any rows are written.
+func TestImportJSON_ValidationFailureAbortsBeforeTx(t *testing.T) {
+	db := testDB(t)
+
+	payload := kb.ImportData{
+		Documents: []kb.ImportDocument{
+			{Type: "decision", Project: "acme-corp", Title: "valid-doc", Content: "ok"},
+			// Missing title — triggers pre-tx validation error.
+			{Type: "fact", Project: "acme-corp", Title: "", Content: "no title"},
+		},
+	}
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	err = kb.ImportJSON(db, "", data)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing title")
+
+	docs, qerr := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	require.NoError(t, qerr)
+	assert.Empty(t, docs)
+}
+
+// TestImportJSON_InvalidJSON verifies that malformed JSON returns an unmarshal error.
+func TestImportJSON_InvalidJSON(t *testing.T) {
+	db := testDB(t)
+
+	err := kb.ImportJSON(db, "", []byte(`{not valid json`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to unmarshal JSON")
+}
+
+// TestImportJSON_MissingType verifies that a document with empty type fails validation.
+func TestImportJSON_MissingType(t *testing.T) {
+	db := testDB(t)
+
+	payload := kb.ImportData{
+		Documents: []kb.ImportDocument{
+			{Type: "", Project: "acme-corp", Title: "no-type-doc", Content: "content"},
+		},
+	}
+	data, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	err = kb.ImportJSON(db, "", data)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing type")
+
+	docs, qerr := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	require.NoError(t, qerr)
+	assert.Empty(t, docs)
+}

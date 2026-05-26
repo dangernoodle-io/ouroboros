@@ -1093,6 +1093,60 @@ func TestQueryDocumentsBySessionID(t *testing.T) {
 	assert.Equal(t, "in-session", summaries[0].Title)
 }
 
+// TestUpsertDocument_ActionLabels verifies the RETURNING-based action heuristic:
+// fresh insert returns "created"; subsequent upsert returns "updated".
+func TestUpsertDocument_ActionLabels(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "action-label-test",
+		Content: "initial content",
+	}
+
+	first, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	assert.Equal(t, "created", first.Action, "first insert must be 'created'")
+	assert.Greater(t, first.ID, int64(0))
+
+	doc.Content = "updated content"
+	second, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	assert.Equal(t, "updated", second.Action, "second upsert must be 'updated'")
+	assert.Equal(t, first.ID, second.ID, "ID must be stable across upsert")
+}
+
+// TestUpsertDocumentTx_ActionLabels verifies the same heuristic via the Tx variant.
+func TestUpsertDocumentTx_ActionLabels(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "tx-action-label-test",
+		Content: "initial",
+	}
+
+	// Insert via tx.
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	first, err := store.UpsertDocumentTx(tx, doc)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	assert.Equal(t, "created", first.Action)
+
+	// Update via tx.
+	tx2, err := db.Begin()
+	require.NoError(t, err)
+	doc.Content = "changed"
+	second, err := store.UpsertDocumentTx(tx2, doc)
+	require.NoError(t, err)
+	require.NoError(t, tx2.Commit())
+	assert.Equal(t, "updated", second.Action)
+	assert.Equal(t, first.ID, second.ID)
+}
+
 func TestQueryDocumentsNullSessionIDReturnsNone(t *testing.T) {
 	db := testDB(t)
 
@@ -1282,4 +1336,73 @@ func TestUpsertDocumentTx_RollbackUndoes(t *testing.T) {
 	retrieved, err := store.GetDocument(db, result.ID)
 	require.NoError(t, err)
 	assert.Nil(t, retrieved, "row must not exist after rollback")
+}
+
+// TestUpsertDocument_SessionIDFromMetadataFallback verifies that an empty SessionID field
+// falls back to Metadata["session_id"] and the value is persisted correctly.
+func TestUpsertDocument_SessionIDFromMetadataFallback(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:      "decision",
+		Project:   "acme-corp",
+		Title:     "session-meta-fallback",
+		Content:   "content",
+		SessionID: "", // explicitly empty — must fall back to metadata
+		Metadata:  map[string]string{"session_id": "sess-abc", "source": "hook:stop"},
+	}
+
+	result, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	retrieved, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Equal(t, "sess-abc", retrieved.SessionID)
+}
+
+// TestUpsertDocument_NoSessionID verifies that a document with no session_id anywhere
+// stores NULL and is not returned by a session-filtered query.
+func TestUpsertDocument_NoSessionID(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "no-session-at-all",
+		Content: "content",
+	}
+
+	result, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	retrieved, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrieved)
+	assert.Empty(t, retrieved.SessionID)
+
+	// Must not appear in a session-filtered query.
+	summaries, err := store.QueryDocuments(db, "", nil, "", "", nil, 50, "some-session")
+	require.NoError(t, err)
+	assert.Empty(t, summaries)
+}
+
+// TestUpsertDocument_ExecError exercises the error path in UpsertDocument
+// when the underlying exec fails (closed DB).
+func TestUpsertDocument_ExecError(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	require.NoError(t, store.ApplySchema(db))
+	db.Close() // intentionally close to force errors
+
+	doc := store.Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "exec-error-test",
+		Content: "content",
+	}
+
+	_, err = store.UpsertDocument(db, doc)
+	require.Error(t, err)
 }

@@ -2,7 +2,7 @@
 name: triage
 description: Review and manage backlog items — reprioritize, update status, clean up stale items
 context: fork
-model: haiku
+model: sonnet
 ---
 
 1. **Project.** `git rev-parse --show-toplevel | xargs basename`. If not in a git repo, ask which project to triage.

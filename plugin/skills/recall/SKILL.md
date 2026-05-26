@@ -2,7 +2,7 @@
 name: recall
 description: Query ouroboros for project context — searches KB entries, backlog items, and plans in one shot
 context: fork
-model: haiku
+model: sonnet
 ---
 
 1. **Project.** `git rev-parse --show-toplevel | xargs basename`.

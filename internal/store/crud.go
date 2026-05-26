@@ -128,6 +128,9 @@ type sqlExecutor interface {
 
 // upsertDocumentExec contains the core upsert logic operating on a sqlExecutor.
 // Callers are responsible for FTS rebuild and locking.
+//
+// Action is determined atomically via RETURNING: on a fresh insert created_at == updated_at;
+// on a conflict update only updated_at changes, so created_at < updated_at signals "updated".
 func upsertDocumentExec(q sqlExecutor, doc Document) (*UpsertResult, error) {
 	metadataJSON, err := json.Marshal(doc.Metadata)
 	if err != nil {
@@ -139,7 +142,7 @@ func upsertDocumentExec(q sqlExecutor, doc Document) (*UpsertResult, error) {
 		return nil, fmt.Errorf("failed to marshal tags: %w", err)
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	// Extract session_id: prefer top-level field, fall back to metadata key.
 	sessionID := doc.SessionID
@@ -151,36 +154,26 @@ func upsertDocumentExec(q sqlExecutor, doc Document) (*UpsertResult, error) {
 		sessionIDArg = sessionID
 	}
 
-	// Check if document exists before insert
-	var existingID int64
-	err = q.QueryRow(
-		"SELECT id FROM documents WHERE type = ? AND project = ? AND category = ? AND title = ?",
-		doc.Type, doc.Project, doc.Category, doc.Title,
-	).Scan(&existingID)
-	isUpdate := err == nil
-
-	_, err = q.Exec(`
+	// Single atomic statement: insert or update, returning id and timestamps.
+	// On a fresh insert created_at == updated_at == now.
+	// On conflict update, only updated_at changes to now; created_at keeps its
+	// original value, so created_at != updated_at → "updated".
+	// RFC3339Nano resolution makes same-nanosecond collision negligible.
+	var id int64
+	var createdAt, updatedAt string
+	err = q.QueryRow(`
 		INSERT INTO documents (type, project, category, title, content, notes, session_id, metadata, tags, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(type, project, category, title)
 		DO UPDATE SET content = excluded.content, notes = excluded.notes, session_id = excluded.session_id, metadata = excluded.metadata, tags = excluded.tags, updated_at = excluded.updated_at
-	`, doc.Type, doc.Project, doc.Category, doc.Title, doc.Content, doc.Notes, sessionIDArg, string(metadataJSON), string(tagsJSON), now, now)
+		RETURNING id, created_at, updated_at
+	`, doc.Type, doc.Project, doc.Category, doc.Title, doc.Content, doc.Notes, sessionIDArg, string(metadataJSON), string(tagsJSON), now, now).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert document: %w", err)
 	}
 
-	// Get the ID of the inserted/updated row
-	var id int64
-	err = q.QueryRow(
-		"SELECT id FROM documents WHERE type = ? AND project = ? AND category = ? AND title = ?",
-		doc.Type, doc.Project, doc.Category, doc.Title,
-	).Scan(&id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get document ID: %w", err)
-	}
-
 	action := "created"
-	if isUpdate {
+	if createdAt != updatedAt {
 		action = "updated"
 	}
 
