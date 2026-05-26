@@ -11,6 +11,17 @@ import (
 
 var projectNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{2,}$`)
 var prefixShapedRE = regexp.MustCompile(`^[A-Z]{1,4}$`)
+var validPrefixRE = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,3}$`)
+
+func ValidatePrefix(prefix string) error {
+	if prefix == "" {
+		return errors.New("prefix is required")
+	}
+	if !validPrefixRE.MatchString(prefix) {
+		return fmt.Errorf("invalid prefix %q: must be 1-4 chars, start with a letter, contain only letters and digits", prefix)
+	}
+	return nil
+}
 
 func ValidateProjectName(name string) error {
 	if name == "" {
@@ -220,53 +231,141 @@ func DerivePrefix(db *sql.DB, name string) (string, error) {
 	return "", fmt.Errorf("cannot derive unique prefix for: %s", name)
 }
 
-func RenameProject(db *sql.DB, oldName, newName string) (*Project, error) {
-	if err := ValidateProjectName(newName); err != nil {
-		return nil, err
+func RenameProject(db *sql.DB, oldName, newName, newPrefix string) (*Project, error) {
+	if newName == "" && newPrefix == "" {
+		return nil, errors.New("at least one of new_name or new_prefix is required")
 	}
+
+	project, err := GetProjectByName(db, oldName)
+	if err != nil {
+		return nil, fmt.Errorf("project not found: %s", oldName)
+	}
+
+	if newName != "" {
+		if err := ValidateProjectName(newName); err != nil {
+			return nil, err
+		}
+	}
+	if newPrefix != "" {
+		if err := ValidatePrefix(newPrefix); err != nil {
+			return nil, err
+		}
+	}
+
 	tx, err := db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("rename project: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Validate oldName exists
-	var projectID int64
-	err = tx.QueryRow("SELECT id FROM projects WHERE name = ?", oldName).Scan(&projectID)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("project not found: %s", oldName)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("rename project: %w", err)
+	if newName != "" {
+		// Case-insensitive collision check, excluding self
+		var collision int
+		err = tx.QueryRow("SELECT 1 FROM projects WHERE LOWER(name) = LOWER(?) AND id != ?", newName, project.ID).Scan(&collision)
+		if err == nil {
+			return nil, fmt.Errorf("project already exists: %s", newName)
+		}
+		if err != sql.ErrNoRows {
+			return nil, fmt.Errorf("rename project: %w", err)
+		}
+
+		if _, err = tx.Exec("UPDATE projects SET name = ? WHERE id = ?", newName, project.ID); err != nil {
+			return nil, fmt.Errorf("rename project: %w", err)
+		}
+		// Case-insensitive doc cascade
+		if _, err = tx.Exec("UPDATE documents SET project = ? WHERE LOWER(project) = LOWER(?)", newName, oldName); err != nil {
+			return nil, fmt.Errorf("rename project: %w", err)
+		}
 	}
 
-	// Validate newName does NOT exist (case-insensitive, exclude self)
-	var existing int
-	err = tx.QueryRow("SELECT 1 FROM projects WHERE LOWER(name) = LOWER(?) AND id != ?", newName, projectID).Scan(&existing)
-	if err == nil {
-		return nil, fmt.Errorf("project already exists: %s", newName)
-	}
-	if err != sql.ErrNoRows {
-		return nil, fmt.Errorf("rename project: %w", err)
+	if newPrefix != "" {
+		nowRFC3339 := time.Now().UTC().Format(time.RFC3339)
+		if err := renamePrefixInTx(tx, project.ID, newPrefix, nowRFC3339); err != nil {
+			return nil, err
+		}
 	}
 
-	// Update projects table
-	_, err = tx.Exec("UPDATE projects SET name = ? WHERE id = ?", newName, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("rename project: %w", err)
-	}
-
-	// Update documents table (cascade)
-	_, err = tx.Exec("UPDATE documents SET project = ? WHERE project = ?", newName, oldName)
-	if err != nil {
-		return nil, fmt.Errorf("rename project: %w", err)
-	}
-
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("rename project: %w", err)
 	}
 
-	// Fetch and return refreshed project
-	return GetProjectByName(db, newName)
+	fetchName := newName
+	if fetchName == "" {
+		fetchName = oldName
+	}
+	return GetProjectByName(db, fetchName)
+}
+
+func renamePrefixInTx(tx *sql.Tx, projectID int64, newPrefix, renamedAt string) error {
+	// Defer FK enforcement to commit so we can rewrite items.id and plans.item_id
+	// in any order within this tx — both reference each other, so any sequential
+	// order would violate FK mid-tx. Resets automatically at commit.
+	if _, err := tx.Exec("PRAGMA defer_foreign_keys = ON"); err != nil {
+		return fmt.Errorf("rename prefix: %w", err)
+	}
+
+	// Collision check
+	var collision int
+	err := tx.QueryRow("SELECT 1 FROM projects WHERE prefix = ? AND id != ?", newPrefix, projectID).Scan(&collision)
+	if err == nil {
+		return fmt.Errorf("prefix already in use: %s", newPrefix)
+	}
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("rename prefix: %w", err)
+	}
+
+	// Collect all items for this project
+	rows, err := tx.Query("SELECT id, seq FROM items WHERE project_id = ? ORDER BY seq", projectID)
+	if err != nil {
+		return fmt.Errorf("rename prefix: %w", err)
+	}
+	type itemRef struct {
+		oldID string
+		seq   int64
+	}
+	var items []itemRef
+	for rows.Next() {
+		var ref itemRef
+		if err := rows.Scan(&ref.oldID, &ref.seq); err != nil {
+			rows.Close()
+			return fmt.Errorf("rename prefix: %w", err)
+		}
+		items = append(items, ref)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("rename prefix: %w", err)
+	}
+
+	// Per-row order matters under FK enforcement:
+	//   1. UPDATE plans (both old & new IDs absent from items briefly is OK; plans points at oldID still valid)
+	//   2. UPDATE items (triggers ON UPDATE CASCADE on item_id_aliases.new_id — any prior alias pointing at oldID auto-follows)
+	//   3. INSERT new alias (oldID → newID) — newID now exists in items so FK satisfied
+	for _, ref := range items {
+		newID := fmt.Sprintf("%s-%d", newPrefix, ref.seq)
+
+		if _, err = tx.Exec("UPDATE plans SET item_id = ? WHERE item_id = ?", newID, ref.oldID); err != nil {
+			return fmt.Errorf("rename prefix plans %s: %w", ref.oldID, err)
+		}
+
+		if _, err = tx.Exec("UPDATE items SET id = ? WHERE id = ?", newID, ref.oldID); err != nil {
+			return fmt.Errorf("rename prefix item %s: %w", ref.oldID, err)
+		}
+
+		_, err = tx.Exec(
+			`INSERT INTO item_id_aliases (old_id, new_id, renamed_at) VALUES (?, ?, ?)
+             ON CONFLICT(old_id) DO UPDATE SET new_id=excluded.new_id, renamed_at=excluded.renamed_at`,
+			ref.oldID, newID, renamedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("rename prefix alias %s: %w", ref.oldID, err)
+		}
+	}
+
+	// Update project prefix
+	if _, err = tx.Exec("UPDATE projects SET prefix = ? WHERE id = ?", newPrefix, projectID); err != nil {
+		return fmt.Errorf("rename prefix: %w", err)
+	}
+
+	return nil
 }

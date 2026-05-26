@@ -404,3 +404,47 @@ func TestCountItemsByPriorityEmpty(t *testing.T) {
 
 	assert.Empty(t, counts)
 }
+
+func TestGetItemViaAlias(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "task", "", "", "")
+	require.NoError(t, err)
+
+	// Manually insert alias row
+	_, err = d.Exec("INSERT INTO item_id_aliases (old_id, new_id, renamed_at) VALUES (?, ?, ?)",
+		"OLD-1", item.ID, "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	got, err := backlog.GetItem(d, "OLD-1")
+	require.NoError(t, err)
+	assert.Equal(t, item.ID, got.ID)
+	assert.Equal(t, "task", got.Title)
+}
+
+func TestGetItemNotFoundNoAlias(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.GetItem(d, "NONEXISTENT-99")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "item not found")
+}
+
+func TestGetItemViaAliasAfterPrefixRename(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	originalItem, err := backlog.AddItem(d, p.ID, p.Prefix, "P1", "task", "", "", "")
+	require.NoError(t, err)
+	originalID := originalItem.ID
+
+	_, err = backlog.RenameProject(d, p.Name, "", "ZZ")
+	require.NoError(t, err)
+
+	// GetItem with original ID should resolve to renamed item
+	got, err := backlog.GetItem(d, originalID)
+	require.NoError(t, err)
+	assert.Equal(t, "ZZ-1", got.ID)
+	assert.Equal(t, "task", got.Title)
+}

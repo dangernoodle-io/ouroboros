@@ -178,6 +178,14 @@ UPDATE documents SET session_id = json_extract(metadata, '$.session_id') WHERE s
 		version: 8,
 		sql:     `CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_ci ON projects(LOWER(name));`,
 	},
+	{
+		version: 9,
+		sql: `CREATE TABLE IF NOT EXISTS item_id_aliases (
+    old_id TEXT PRIMARY KEY,
+    new_id TEXT NOT NULL REFERENCES items(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    renamed_at TEXT NOT NULL
+);`,
+	},
 }
 
 // ApplySchema applies all pending migrations to the database.

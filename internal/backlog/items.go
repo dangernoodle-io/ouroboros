@@ -55,7 +55,7 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 	}, nil
 }
 
-func GetItem(d *sql.DB, id string) (*Item, error) {
+func getItemDirect(d *sql.DB, id string) (*Item, error) {
 	var item Item
 	err := d.QueryRow(
 		"SELECT id, project_id, priority, title, component, description, notes, status, created, updated FROM items WHERE id = ?", id,
@@ -67,6 +67,23 @@ func GetItem(d *sql.DB, id string) (*Item, error) {
 		return nil, err
 	}
 	return &item, nil
+}
+
+func GetItem(d *sql.DB, id string) (*Item, error) {
+	item, err := getItemDirect(d, id)
+	if err == nil {
+		return item, nil
+	}
+	// Only attempt alias resolution on not-found; propagate all other errors immediately.
+	if !strings.HasPrefix(err.Error(), "item not found:") {
+		return nil, err
+	}
+	// ON UPDATE CASCADE keeps alias rows pointing at current IDs, so one level of indirection is sufficient.
+	var resolved string
+	if aerr := d.QueryRow("SELECT new_id FROM item_id_aliases WHERE old_id = ?", id).Scan(&resolved); aerr != nil {
+		return nil, err // return original not-found
+	}
+	return getItemDirect(d, resolved)
 }
 
 func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {

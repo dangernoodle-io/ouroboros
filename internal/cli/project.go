@@ -3,6 +3,7 @@ package cli
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -63,8 +64,8 @@ func runProjectList(w io.Writer, db *sql.DB) error {
 	return nil
 }
 
-func runProjectRename(w io.Writer, db *sql.DB, name, newName string) error {
-	proj, err := backlog.RenameProject(db, name, newName)
+func runProjectRename(w io.Writer, db *sql.DB, name, newName, newPrefix string) error {
+	proj, err := backlog.RenameProject(db, name, newName, newPrefix)
 	if err != nil {
 		return fmt.Errorf("project rename: %w", err)
 	}
@@ -129,17 +130,25 @@ var projectListCmd = &cobra.Command{
 	},
 }
 
+var (
+	renameNewName   string
+	renameNewPrefix string
+)
+
 var projectRenameCmd = &cobra.Command{
-	Use:   "rename <name> <new_name>",
-	Short: "Rename a project",
-	Args:  cobra.ExactArgs(2),
+	Use:   "rename <name>",
+	Short: "Rename a project (name and/or prefix)",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if renameNewName == "" && renameNewPrefix == "" {
+			return errors.New("at least one of --new-name or --new-prefix is required")
+		}
 		db, err := store.InitDB()
 		if err != nil {
 			return fmt.Errorf("project rename: open database: %w", err)
 		}
 		defer db.Close() //nolint:errcheck
-		return runProjectRename(cmd.OutOrStdout(), db, args[0], args[1])
+		return runProjectRename(cmd.OutOrStdout(), db, args[0], renameNewName, renameNewPrefix)
 	},
 }
 
@@ -163,6 +172,9 @@ var projectDeleteCmd = &cobra.Command{
 }
 
 func init() {
+	projectRenameCmd.Flags().StringVar(&renameNewName, "new-name", "", "New project name")
+	projectRenameCmd.Flags().StringVar(&renameNewPrefix, "new-prefix", "", "New project prefix (1-4 chars, letter-first)")
+
 	projectDeleteCmd.Flags().BoolVar(&projectDeleteForce, "force", false, "Cascade-delete all children (items, plans, documents)")
 	projectDeleteCmd.Flags().StringVar(&projectDeleteReassignTo, "reassign-to", "", "Move children to this project before deletion")
 

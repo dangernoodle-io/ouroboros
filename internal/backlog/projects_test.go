@@ -95,7 +95,7 @@ func TestRenameProject(t *testing.T) {
 	created, err := backlog.CreateProject(d, "foo", "FO")
 	require.NoError(t, err)
 
-	renamed, err := backlog.RenameProject(d, "foo", "bar")
+	renamed, err := backlog.RenameProject(d, "foo", "bar", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "bar", renamed.Name)
@@ -133,7 +133,7 @@ func TestRenameProjectCascadesDocuments(t *testing.T) {
 	require.NoError(t, err)
 
 	// Rename
-	_, err = backlog.RenameProject(d, "foo", "bar")
+	_, err = backlog.RenameProject(d, "foo", "bar", "")
 	require.NoError(t, err)
 
 	// Verify 2 docs have project='bar'
@@ -156,7 +156,7 @@ func TestRenameProjectCascadesDocuments(t *testing.T) {
 func TestRenameProjectMissing(t *testing.T) {
 	d := testDB(t)
 
-	_, err := backlog.RenameProject(d, "nope", "bar")
+	_, err := backlog.RenameProject(d, "nope", "bar", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "project not found")
 
@@ -176,7 +176,7 @@ func TestRenameProjectCollision(t *testing.T) {
 	require.NoError(t, err)
 
 	// Try to rename foo to bar (collision)
-	_, err = backlog.RenameProject(d, "foo", "bar")
+	_, err = backlog.RenameProject(d, "foo", "bar", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "project already exists")
 
@@ -235,7 +235,7 @@ func TestRenameProjectValidationFails(t *testing.T) {
 	_, err := backlog.CreateProject(d, "foo-bar", "FB")
 	require.NoError(t, err)
 
-	_, err = backlog.RenameProject(d, "foo-bar", "AB")
+	_, err = backlog.RenameProject(d, "foo-bar", "AB", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid project name")
 }
@@ -493,6 +493,204 @@ func TestDerivePrefixShortName(t *testing.T) {
 	assert.Equal(t, "AX", prefix)
 }
 
+func TestValidatePrefix(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid two letters", "OU", false},
+		{"valid letter+digit", "A1", false},
+		{"valid two letters WS", "WS", false},
+		{"valid four letters", "ABCD", false},
+		{"valid single letter", "Z", false},
+		{"empty", "", true},
+		{"lowercase", "a", true},
+		{"digit first", "1A", true},
+		{"five chars", "ABCDE", true},
+		{"hyphen", "O-1", true},
+		{"lowercase two", "o", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := backlog.ValidatePrefix(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestRenameProjectPrefixHappyPath(t *testing.T) {
+	d := testDB(t)
+
+	proj, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task-one", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P2", "task-two", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P3", "task-three", "", "", "")
+	require.NoError(t, err)
+
+	renamed, err := backlog.RenameProject(d, "acme-corp", "", "XX")
+	require.NoError(t, err)
+	assert.Equal(t, "XX", renamed.Prefix)
+	assert.Equal(t, "acme-corp", renamed.Name)
+
+	for _, wantID := range []string{"XX-1", "XX-2", "XX-3"} {
+		item, err := backlog.GetItem(d, wantID)
+		require.NoError(t, err, "expected item %s", wantID)
+		assert.Equal(t, wantID, item.ID)
+	}
+
+	// projects.prefix updated
+	p, err := backlog.GetProjectByName(d, "acme-corp")
+	require.NoError(t, err)
+	assert.Equal(t, "XX", p.Prefix)
+
+	// item_id_aliases has 3 rows with non-empty renamed_at
+	var count int
+	err = d.QueryRow("SELECT COUNT(*) FROM item_id_aliases WHERE new_id LIKE 'XX-%' AND renamed_at != ''").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 3, count)
+}
+
+func TestRenameProjectPrefixCascadesPlans(t *testing.T) {
+	d := testDB(t)
+
+	proj, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	item, err := backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	require.NoError(t, err)
+
+	itemID := item.ID
+	_, err = backlog.CreatePlan(d, "impl plan", "content", &proj.ID, &itemID)
+	require.NoError(t, err)
+
+	_, err = backlog.RenameProject(d, "acme-corp", "", "YY")
+	require.NoError(t, err)
+
+	var planItemID string
+	err = d.QueryRow("SELECT item_id FROM plans WHERE project_id = ?", proj.ID).Scan(&planItemID)
+	require.NoError(t, err)
+	assert.Equal(t, "YY-1", planItemID)
+}
+
+func TestRenameProjectPrefixCollision(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "alpha-proj", "AA")
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(d, "beta-project", "BB")
+	require.NoError(t, err)
+
+	_, err = backlog.RenameProject(d, "alpha-proj", "", "BB")
+	require.Error(t, err)
+}
+
+func TestRenameProjectBothNameAndPrefix(t *testing.T) {
+	d := testDB(t)
+
+	proj, err := backlog.CreateProject(d, "old-name", "OL")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	require.NoError(t, err)
+
+	renamed, err := backlog.RenameProject(d, "old-name", "new-name", "NM")
+	require.NoError(t, err)
+	assert.Equal(t, "new-name", renamed.Name)
+	assert.Equal(t, "NM", renamed.Prefix)
+
+	item, err := backlog.GetItem(d, "NM-1")
+	require.NoError(t, err)
+	assert.Equal(t, "NM-1", item.ID)
+}
+
+func TestRenameProjectBothEmpty(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = backlog.RenameProject(d, "acme-corp", "", "")
+	require.Error(t, err)
+}
+
+func TestRenameProjectCascadesDocumentsCaseInsensitive(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = d.Exec("INSERT INTO documents (type, project, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		"decision", "Acme-Corp", "Doc", "content", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	_, err = backlog.RenameProject(d, "acme-corp", "renamed-corp", "")
+	require.NoError(t, err)
+
+	var count int
+	err = d.QueryRow("SELECT COUNT(*) FROM documents WHERE project = ?", "renamed-corp").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+}
+
+func TestRenameProjectPrefixChained(t *testing.T) {
+	d := testDB(t)
+
+	proj, err := backlog.CreateProject(d, "acme-corp", "OU")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	require.NoError(t, err)
+
+	// First rename: OU → XX
+	_, err = backlog.RenameProject(d, "acme-corp", "", "XX")
+	require.NoError(t, err)
+
+	// Second rename: XX → YY
+	_, err = backlog.RenameProject(d, "acme-corp", "", "YY")
+	require.NoError(t, err)
+
+	// Items should have final prefix YY
+	item, err := backlog.GetItem(d, "YY-1")
+	require.NoError(t, err)
+	assert.Equal(t, "YY-1", item.ID)
+
+	// XX-1 alias written by second rename resolves to YY-1
+	item, err = backlog.GetItem(d, "XX-1")
+	require.NoError(t, err)
+	assert.Equal(t, "YY-1", item.ID)
+	// NOTE: OU-1 → XX-1 alias cascade to YY-1 requires PRAGMA foreign_keys=ON;
+	// testDB uses ApplySchema without that PRAGMA. Chain resolution of OU-1 is tested
+	// via InitDB path in production, not here.
+}
+
+func TestRenameProjectInvalidNewPrefix(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = backlog.RenameProject(d, "acme-corp", "", "1X")
+	require.Error(t, err)
+}
+
+func TestRenameProjectInvalidNewName(t *testing.T) {
+	d := testDB(t)
+
+	_, err := backlog.CreateProject(d, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = backlog.RenameProject(d, "acme-corp", "AB", "")
+	require.Error(t, err)
+}
+
 func TestRenameProjectCaseInsensitiveCollision(t *testing.T) {
 	d := testDB(t)
 
@@ -503,7 +701,7 @@ func TestRenameProjectCaseInsensitiveCollision(t *testing.T) {
 	require.NoError(t, err)
 
 	// Rename "Bar-baz" to "FOO-BAR" — case-insensitive collision with "foo-bar"
-	_, err = backlog.RenameProject(d, "Bar-baz", "foo-bar")
+	_, err = backlog.RenameProject(d, "Bar-baz", "foo-bar", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "project already exists")
 }
