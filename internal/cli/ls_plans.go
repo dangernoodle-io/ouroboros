@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var (
@@ -23,16 +22,12 @@ var lsPlansCmd = &cobra.Command{
 	Short: "List implementation plans",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("ls plans: open database: %w", err)
-		}
-		defer db.Close()
-
-		if len(args) == 1 {
-			return runLSPlanDetail(cmd.OutOrStdout(), db, args[0], lsPlanJSONFlag)
-		}
-		return runLSPlans(cmd.OutOrStdout(), db, lsPlanProjectFlag, lsPlanStatusFlag, lsPlanJSONFlag)
+		return withDB(func(db *sql.DB) error {
+			if len(args) == 1 {
+				return runLSPlanDetail(cmd.OutOrStdout(), db, args[0], lsPlanJSONFlag)
+			}
+			return runLSPlans(cmd.OutOrStdout(), db, lsPlanProjectFlag, lsPlanStatusFlag, lsPlanJSONFlag)
+		})
 	},
 }
 

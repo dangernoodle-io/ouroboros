@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/kb"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var importCmd = &cobra.Command{
@@ -18,18 +17,14 @@ var importCmd = &cobra.Command{
 	Long:  "Import documents from a JSON file or stdin. If no file is specified or file is '-', reads from stdin.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("import: open database: %w", err)
-		}
-		defer db.Close()
-
 		project, _ := cmd.Flags().GetString("project")
 		content, err := readImportSource(cmd.InOrStdin(), args)
 		if err != nil {
 			return err
 		}
-		return runImport(cmd.OutOrStdout(), db, project, content)
+		return withDB(func(db *sql.DB) error {
+			return runImport(cmd.OutOrStdout(), db, project, content)
+		})
 	},
 }
 

@@ -27,16 +27,12 @@ var lsKBCmd = &cobra.Command{
 	Short: "List knowledge base entries",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("ls kb: open database: %w", err)
-		}
-		defer db.Close()
-
-		if len(args) == 1 {
-			return runLSKBDetail(cmd.OutOrStdout(), db, args[0], lsKBJSONFlag)
-		}
-		return runLSKB(cmd.OutOrStdout(), db, lsKBProjectFlag, lsKBTypeFlag, lsKBCategoryFlag, lsKBTagsFlag, lsKBSearchFlag, lsKBLimitFlag, lsKBJSONFlag)
+		return withDB(func(db *sql.DB) error {
+			if len(args) == 1 {
+				return runLSKBDetail(cmd.OutOrStdout(), db, args[0], lsKBJSONFlag)
+			}
+			return runLSKB(cmd.OutOrStdout(), db, lsKBProjectFlag, lsKBTypeFlag, lsKBCategoryFlag, lsKBTagsFlag, lsKBSearchFlag, lsKBLimitFlag, lsKBJSONFlag)
+		})
 	},
 }
 

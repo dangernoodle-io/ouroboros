@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var lsProjectJSONFlag bool
@@ -18,13 +17,9 @@ var lsProjectsCmd = &cobra.Command{
 	Short: "List projects",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("ls projects: open database: %w", err)
-		}
-		defer db.Close()
-
-		return runLSProjects(cmd.OutOrStdout(), db, lsProjectJSONFlag)
+		return withDB(func(db *sql.DB) error {
+			return runLSProjects(cmd.OutOrStdout(), db, lsProjectJSONFlag)
+		})
 	},
 }
 

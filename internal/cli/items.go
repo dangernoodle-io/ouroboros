@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var (
@@ -22,12 +21,9 @@ var itemsCmd = &cobra.Command{
 	Use:   "items",
 	Short: "List backlog items (CLI for hook integration)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("items: open database: %w", err)
-		}
-		defer db.Close()
-		return runItems(cmd.OutOrStdout(), db, itemsProjectFlag, itemsStatusFlag)
+		return withDB(func(db *sql.DB) error {
+			return runItems(cmd.OutOrStdout(), db, itemsProjectFlag, itemsStatusFlag)
+		})
 	},
 }
 
