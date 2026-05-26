@@ -104,7 +104,6 @@ func TestToolsListFootprint(t *testing.T) {
 		"delete":  {"destructiveHint": true, "idempotentHint": true},
 		"put":     {"idempotentHint": true},
 		"config":  {"idempotentHint": true},
-		"import":  {},
 		"project": {},
 		"item":    {"destructiveHint": true},
 		"plan":    {},
@@ -227,11 +226,11 @@ func TestProgressiveRegistration(t *testing.T) {
 
 	// ---- Step 5: assert all tier-2 tools now registered ----
 	allTools = srv.ListTools()
-	t.Logf("after tier-1 call: %d total tools (expected 10)", len(allTools))
-	require.Equal(t, 10, len(allTools), "should have all 10 tools after tier-2 unlock")
+	t.Logf("after tier-1 call: %d total tools (expected 9)", len(allTools))
+	require.Equal(t, 9, len(allTools), "should have all 9 tools after tier-2 unlock")
 	assertToolsPresent(t, allTools, []string{
 		"get", "search", "put", "project", "item", "plan",
-		"delete", "import", "export", "config",
+		"delete", "export", "config",
 	})
 
 	// ---- Step 6: verify idempotency ----
@@ -250,8 +249,8 @@ func TestProgressiveRegistration(t *testing.T) {
 	require.NoError(t, err)
 
 	allTools = srv.ListTools()
-	t.Logf("after second tier-0 call: %d total tools (should be 10, not more)", len(allTools))
-	require.Equal(t, 10, len(allTools), "tools should not re-register (idempotency)")
+	t.Logf("after second tier-0 call: %d total tools (should be 9, not more)", len(allTools))
+	require.Equal(t, 9, len(allTools), "tools should not re-register (idempotency)")
 }
 
 // assertToolsPresent verifies that all named tools exist in the server tool map.
