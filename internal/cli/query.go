@@ -23,12 +23,9 @@ var queryCmd = &cobra.Command{
 	Use:   "query",
 	Short: "Query knowledge base documents (CLI for hook integration)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("query: open database: %w", err)
-		}
-		defer db.Close()
-		return runQuery(cmd.OutOrStdout(), db, queryProjectFlag, queryTypeFlag, querySearchFlag, querySessionIDFlag, queryLimitFlag)
+		return withDB(func(db *sql.DB) error {
+			return runQuery(cmd.OutOrStdout(), db, queryProjectFlag, queryTypeFlag, querySearchFlag, querySessionIDFlag, queryLimitFlag)
+		})
 	},
 }
 

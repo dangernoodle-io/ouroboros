@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/kb"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var (
@@ -27,12 +26,9 @@ var putCmd = &cobra.Command{
 	Use:   "put",
 	Short: "Create or update KB documents (CLI for hook integration)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("put: open database: %w", err)
-		}
-		defer db.Close()
-		return runPut(cmd.OutOrStdout(), cmd.InOrStdin(), db, putProjectFlag, putTypeFlag, putTitleFlag, putContentFlag, putNotesFlag, putCategoryFlag, putTagsFlag, putStdinFlag)
+		return withDB(func(db *sql.DB) error {
+			return runPut(cmd.OutOrStdout(), cmd.InOrStdin(), db, putProjectFlag, putTypeFlag, putTitleFlag, putContentFlag, putNotesFlag, putCategoryFlag, putTagsFlag, putStdinFlag)
+		})
 	},
 }
 

@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var configCmd = &cobra.Command{
@@ -21,12 +20,9 @@ var configGetCmd = &cobra.Command{
 	Short: "Get a config value",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("config get: open database: %w", err)
-		}
-		defer db.Close()
-		return runConfigGet(cmd.OutOrStdout(), db, args[0])
+		return withDB(func(db *sql.DB) error {
+			return runConfigGet(cmd.OutOrStdout(), db, args[0])
+		})
 	},
 }
 
@@ -35,12 +31,9 @@ var configSetCmd = &cobra.Command{
 	Short: "Set a config value",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("config set: open database: %w", err)
-		}
-		defer db.Close()
-		return runConfigSet(cmd.OutOrStdout(), db, args[0], args[1])
+		return withDB(func(db *sql.DB) error {
+			return runConfigSet(cmd.OutOrStdout(), db, args[0], args[1])
+		})
 	},
 }
 
@@ -49,12 +42,9 @@ var configListCmd = &cobra.Command{
 	Short: "List all config values",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("config list: open database: %w", err)
-		}
-		defer db.Close()
-		return runConfigList(cmd.OutOrStdout(), db)
+		return withDB(func(db *sql.DB) error {
+			return runConfigList(cmd.OutOrStdout(), db)
+		})
 	},
 }
 

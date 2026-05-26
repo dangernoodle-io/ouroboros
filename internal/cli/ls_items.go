@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var (
@@ -25,16 +24,12 @@ var lsItemsCmd = &cobra.Command{
 	Short: "List backlog items",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("ls items: open database: %w", err)
-		}
-		defer db.Close()
-
-		if len(args) == 1 {
-			return runLSItemDetail(cmd.OutOrStdout(), db, args[0], lsItemsJSONFlag)
-		}
-		return runLSItems(cmd.OutOrStdout(), db, lsItemsProjectFlag, lsItemsStatusFlag, lsItemsPriorityFlag, lsItemsComponentFlag, lsItemsJSONFlag)
+		return withDB(func(db *sql.DB) error {
+			if len(args) == 1 {
+				return runLSItemDetail(cmd.OutOrStdout(), db, args[0], lsItemsJSONFlag)
+			}
+			return runLSItems(cmd.OutOrStdout(), db, lsItemsProjectFlag, lsItemsStatusFlag, lsItemsPriorityFlag, lsItemsComponentFlag, lsItemsJSONFlag)
+		})
 	},
 }
 

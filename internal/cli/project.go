@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var projectCmd = &cobra.Command{
@@ -93,12 +92,9 @@ var projectCreateCmd = &cobra.Command{
 	Short: "Create a new project",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("project create: open database: %w", err)
-		}
-		defer db.Close() //nolint:errcheck
-		return runProjectCreate(cmd.OutOrStdout(), db, args[0])
+		return withDB(func(db *sql.DB) error {
+			return runProjectCreate(cmd.OutOrStdout(), db, args[0])
+		})
 	},
 }
 
@@ -107,12 +103,9 @@ var projectGetCmd = &cobra.Command{
 	Short: "Get a project by name",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("project get: open database: %w", err)
-		}
-		defer db.Close() //nolint:errcheck
-		return runProjectGet(cmd.OutOrStdout(), db, args[0])
+		return withDB(func(db *sql.DB) error {
+			return runProjectGet(cmd.OutOrStdout(), db, args[0])
+		})
 	},
 }
 
@@ -121,12 +114,9 @@ var projectListCmd = &cobra.Command{
 	Short: "List all projects",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("project list: open database: %w", err)
-		}
-		defer db.Close() //nolint:errcheck
-		return runProjectList(cmd.OutOrStdout(), db)
+		return withDB(func(db *sql.DB) error {
+			return runProjectList(cmd.OutOrStdout(), db)
+		})
 	},
 }
 
@@ -143,12 +133,9 @@ var projectRenameCmd = &cobra.Command{
 		if renameNewName == "" && renameNewPrefix == "" {
 			return errors.New("at least one of --new-name or --new-prefix is required")
 		}
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("project rename: open database: %w", err)
-		}
-		defer db.Close() //nolint:errcheck
-		return runProjectRename(cmd.OutOrStdout(), db, args[0], renameNewName, renameNewPrefix)
+		return withDB(func(db *sql.DB) error {
+			return runProjectRename(cmd.OutOrStdout(), db, args[0], renameNewName, renameNewPrefix)
+		})
 	},
 }
 
@@ -162,12 +149,9 @@ var projectDeleteCmd = &cobra.Command{
 	Short: "Delete a project",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("project delete: open database: %w", err)
-		}
-		defer db.Close() //nolint:errcheck
-		return runProjectDelete(cmd.OutOrStdout(), db, args[0], projectDeleteForce, projectDeleteReassignTo)
+		return withDB(func(db *sql.DB) error {
+			return runProjectDelete(cmd.OutOrStdout(), db, args[0], projectDeleteForce, projectDeleteReassignTo)
+		})
 	},
 }
 

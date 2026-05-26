@@ -24,12 +24,9 @@ var statuslineCmd = &cobra.Command{
 	Use:   "statusline",
 	Short: "Output formatted status line showing KB and backlog counts",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := store.InitDB()
-		if err != nil {
-			return fmt.Errorf("statusline: open database: %w", err)
-		}
-		defer db.Close()
-		return runStatusline(cmd.OutOrStdout(), db, statuslineProjectFlag, statuslineJSONFlag)
+		return withDB(func(db *sql.DB) error {
+			return runStatusline(cmd.OutOrStdout(), db, statuslineProjectFlag, statuslineJSONFlag)
+		})
 	},
 }
 
