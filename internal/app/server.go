@@ -161,12 +161,9 @@ func registerTier2(s *server.MCPServer, db *sql.DB) {
 		toolAnnotation(nil, mcp.ToBoolPtr(true), mcp.ToBoolPtr(true)),
 	), withRecover(handleDelete(db)))
 
-	s.AddTool(mcp.NewTool("import",
-		mcp.WithDescription("Import is CLI-only (ouroboros import). This tool returns an error."),
-		mcp.WithString("content", mcp.Description("(ignored — import is CLI-only)")),
-		mcp.WithString("project", mcp.Description("(ignored — import is CLI-only)")),
-		toolAnnotation(nil, nil, nil),
-	), withRecover(handleImport(db)))
+	// import is intentionally not registered as an MCP tool — it is CLI-only
+	// (`ouroboros import`). The handler in handlers_kb.go is kept as a defensive
+	// shim in case the tool is added by accident in the future.
 
 	s.AddTool(mcp.NewTool("export",
 		mcp.WithDescription("Export KB to markdown."),
