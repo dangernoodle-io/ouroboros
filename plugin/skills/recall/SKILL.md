@@ -1,6 +1,6 @@
 ---
 name: recall
-description: Query ouroboros for project context — searches KB entries, backlog items, and plans in one shot
+description: Query ouroboros for project context — searches KB entries and backlog items in one shot
 context: fork
 model: sonnet
 ---
@@ -9,15 +9,13 @@ model: sonnet
 
 2. **Query.** Use args as the search query (e.g. `/recall auth middleware`). If no args, do a broad project dump.
 
-3. **Query all three sources:**
+3. **Query both sources:**
    - KB: `search` with query + `projects: ["<project>"]`; if no query, `get` with `projects: ["<project>"]` for summaries
    - Backlog: `item` with `projects: ["<project>"]` (add `status: "open"` for broad queries)
-   - Plans: `plan` with `projects: ["<project>"]`
 
 4. **Present** grouped by source:
    - **Knowledge Base** — decisions, facts, notes, relations (summaries only)
    - **Open Items** — backlog grouped by priority
-   - **Plans** — active + draft with status
 
    Targeted queries: highlight best matches. Broad queries: summaries only; fetch full content only on request.
 

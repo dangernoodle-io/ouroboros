@@ -27,18 +27,16 @@ make lint     # golangci-lint run
 
 ## Tools
 
+MCP surface is intentionally narrow (4 tools); operator-style ops are CLI-only.
+
 | Tool | Domain | Description |
 |------|--------|-------------|
 | put | KB | Create or update a knowledge entry (upserts by type+project+category+title) |
 | get | KB | Get entries — by id for full content, or summaries with filters |
-| delete | KB | Delete a knowledge entry by ID |
 | search | KB | Full-text search across knowledge entries |
-| export | KB | Export knowledge base to markdown |
-| import | KB | Import knowledge entries from JSON |
-| project | Backlog | Manage projects: get/create/list/rename/delete (op-dispatched) |
-| item | Backlog | Create, get, update, or list backlog items (mode by inputs) |
-| plan | Backlog | Create, get, update, or list implementation plans |
-| config | Backlog | Get or set key-value configuration |
+| item | Backlog | Create, get, update, list, or delete backlog items (mode by inputs) |
+
+CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`.
 
 ## Configuration
 

@@ -15,8 +15,10 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 
 | Namespace | Tools | Docs |
 |-----------|-------|------|
-| KB | `put`, `get`, `delete`, `search`, `export`, `import` | [Wiki](../../wiki/Knowledge-Base) |
-| Backlog | `project`, `item`, `plan`, `config` | [Wiki](../../wiki/Backlog) |
+| KB | `put`, `get`, `search` | [Wiki](../../wiki/Knowledge-Base) |
+| Backlog | `item` | [Wiki](../../wiki/Backlog) |
+
+Operator-style ops (`project`, `plan`, `config`, `kb delete`, `export`, `import`) are CLI-only — see `ouroboros --help`.
 
 ## Use with Claude Code
 

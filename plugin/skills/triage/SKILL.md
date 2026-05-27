@@ -8,11 +8,9 @@ model: sonnet
 1. **Project.** `git rev-parse --show-toplevel | xargs basename`. If not in a git repo, ask which project to triage.
 
 2. **Load state:**
-   - `project` (no args) — list all projects
    - `item` with `projects: ["<project>"]` + `status: "open"` — open items
-   - `plan` with `projects: ["<project>"]` — active plans
 
-3. **Summarize.** Show open items grouped by priority (P0 first) with counts per level. Show active plans separately. Priority scale: P0 (critical/blocking) through P6 (someday/maybe).
+3. **Summarize.** Show open items grouped by priority (P0 first) with counts per level. Priority scale: P0 (critical/blocking) through P6 (someday/maybe).
 
 4. **Suggest actions.** If args were supplied (e.g. `/triage reprioritize`), act on them. Otherwise suggest:
    - Items that may be stale (old, no recent updates)
