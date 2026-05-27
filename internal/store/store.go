@@ -43,8 +43,13 @@ type DocumentSummary struct {
 }
 
 // InitDB initializes the database connection and applies schema.
-func InitDB() (*sql.DB, error) {
-	dbPath := os.Getenv("PROJECT_KB_PATH")
+// If path is non-empty it is used directly; otherwise the fallback reads
+// PROJECT_KB_PATH and defaults to ~/.local/share/ouroboros/kb.db.
+func InitDB(path string) (*sql.DB, error) {
+	dbPath := path
+	if dbPath == "" {
+		dbPath = os.Getenv("PROJECT_KB_PATH")
+	}
 	if dbPath == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {

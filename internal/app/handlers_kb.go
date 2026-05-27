@@ -96,6 +96,7 @@ func handleGet(db *sql.DB) server.ToolHandlerFunc {
 				if !verbose {
 					doc.Notes = ""
 				}
+				doc.SessionID = ""
 
 				docs = append(docs, doc)
 			}

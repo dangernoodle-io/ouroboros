@@ -9,39 +9,11 @@ import (
 	"dangernoodle.io/ouroboros/internal/backup"
 )
 
-const serverInstructions = `Project knowledge base and backlog management — persist decisions across conversations and track work items.
-
-Project/plan/config/delete/export/import management requires the CLI (ouroboros command); use these tools for KB queries and backlog item operations.
-
-KNOWLEDGE BASE (put, get, search):
-
-Store immediately (put):
-- Architectural decisions with rationale
-- Non-obvious facts (config values, environment details, constraints)
-- Established procedures or workarounds
-- Always search first to avoid duplicates; upsert by type+project+category+title
-- Update existing entries when decisions change — do not duplicate
-- Batch mode: entries=[{type, project, title, content, ...}, ...]
-
-Query (get/search):
-- Before decisions with prior context; get/search return summaries by default
-- verbose=true for detailed context; verbose=false (default) for routine lookups
-- Prefer search for broad queries, get with filters for known types/projects
-- Batch fetch: get ids=[1,2,3]; batch search: queries=["q1","q2"]
-- Filter multiple projects: projects=["proj-a","proj-b"]
-
-Checkpoints: After multi-step tasks or before reporting completion — persist non-obvious decisions.
-
-Staleness: Verify KB entries match current work; update if stale.
-
-BACKLOG (item):
-
-Items:
-- Batch mode: ids=[] fetch, entries=[{...}] create/update, delete_ids=[] remove, filters list
-- id present = update; id absent = create (needs project+priority+title)
-- Priority: P0 (critical) through P6 (someday). IDs: prefix+seq (e.g., AC-1)
-- Component: optional tag for subproject scope (e.g., "plugin")
-- Filter by projects=[], priority range, status, component`
+const serverInstructions = `Persist decisions and track work items across conversations.
+- Search before put/create — avoid duplicates; upsert by type+project+category+title.
+- Default response is summary; verbose=true only when full content/notes are needed.
+- Checkpoint after multi-step tasks; persist non-obvious decisions.
+- Update or delete stale entries.`
 
 // buildServer creates a new MCP server with all tools registered at startup.
 func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServer {

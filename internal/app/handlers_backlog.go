@@ -84,6 +84,8 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 				if !verbose {
 					item.Notes = ""
 				}
+				// MCP callers don't need internal project_id; project name is implicit in the ID prefix
+				item.ProjectID = 0
 
 				items = append(items, item)
 			}

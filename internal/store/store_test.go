@@ -1247,11 +1247,160 @@ func TestInitDBMaxOpenConns(t *testing.T) {
 	dbPath := filepath.Join(dir, "test.db")
 	t.Setenv("PROJECT_KB_PATH", dbPath)
 
-	db, err := store.InitDB()
+	db, err := store.InitDB("")
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
 	assert.Equal(t, 1, db.Stats().MaxOpenConnections)
+}
+
+func TestInitDB_ExplicitPath(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "init-test-explicit.db")
+
+	db, err := store.InitDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+
+	// Verify file was created at the explicit path
+	_, statErr := filepath.Abs(dbPath)
+	require.NoError(t, statErr)
+
+	var n int
+	require.NoError(t, db.QueryRow("SELECT 1").Scan(&n))
+	assert.Equal(t, 1, n)
+}
+
+func TestInitDB_EmptyPathFallsBackToEnv(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "init-test-env.db")
+	t.Setenv("PROJECT_KB_PATH", dbPath)
+
+	db, err := store.InitDB("")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+
+	var n int
+	require.NoError(t, db.QueryRow("SELECT 1").Scan(&n))
+	assert.Equal(t, 1, n)
+}
+
+func TestQueryDocuments_UpdatedAtDateFormat(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "date-format-test",
+		Content: "content",
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	summaries, err := store.QueryDocuments(db, "note", nil, "", "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+
+	// updated_at must be truncated to YYYY-MM-DD form
+	assert.Len(t, summaries[0].UpdatedAt, 10, "updated_at must be 10-char date form YYYY-MM-DD")
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, summaries[0].UpdatedAt)
+}
+
+func TestQueryDocuments_ShortUpdatedAtFallback(t *testing.T) {
+	db := testDB(t)
+
+	// Insert a row with a short updated_at via raw SQL to cover the len < 10 branch
+	_, err := db.Exec(`INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+		VALUES ('note', 'acme-corp', '', 'short-date-doc', 'content', '', '{}', '[]', '2024-01', '2024-01')`)
+	require.NoError(t, err)
+
+	summaries, err := store.QueryDocuments(db, "note", nil, "", "", nil, 50)
+	require.NoError(t, err)
+
+	// Find the short-date-doc
+	var found *store.DocumentSummary
+	for i := range summaries {
+		if summaries[i].Title == "short-date-doc" {
+			found = &summaries[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "short-date-doc must appear in results")
+	// Short string falls through the len>=10 guard; value must remain as-is
+	assert.Equal(t, "2024-01", found.UpdatedAt)
+}
+
+func TestSearchDocuments_UpdatedAtDateFormat(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "search-date-format",
+		Content: "PostgreSQL date format test",
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+
+	assert.Len(t, summaries[0].UpdatedAt, 10, "updated_at must be 10-char date form YYYY-MM-DD")
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, summaries[0].UpdatedAt)
+}
+
+func TestSearchDocuments_ShortUpdatedAtFallback(t *testing.T) {
+	db := testDB(t)
+
+	// Insert row with short updated_at; use a unique word so FTS finds it
+	_, err := db.Exec(`INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+		VALUES ('note', 'acme-corp', '', 'short-search-doc', 'xyzunique987 content', '', '{}', '[]', '2024-01', '2024-01')`)
+	require.NoError(t, err)
+	// Rebuild FTS so the new row is indexed
+	_, err = db.Exec("INSERT INTO documents_fts(documents_fts) VALUES('rebuild')")
+	require.NoError(t, err)
+
+	summaries, err := store.SearchDocuments(db, "xyzunique987", "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "2024-01", summaries[0].UpdatedAt)
+}
+
+func TestKeywordSearch_UpdatedAtDateFormat(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "keyword-date-format",
+		Content: "SQLite keyword date format test",
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	summaries, err := store.KeywordSearch(db, "SQLite", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+
+	assert.Len(t, summaries[0].UpdatedAt, 10, "updated_at must be 10-char date form YYYY-MM-DD")
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, summaries[0].UpdatedAt)
+}
+
+func TestKeywordSearch_ShortUpdatedAtFallback(t *testing.T) {
+	db := testDB(t)
+
+	// Insert row with short updated_at; use unique word for FTS
+	_, err := db.Exec(`INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+		VALUES ('fact', 'acme-corp', '', 'short-keyword-doc', 'xyzunique456 keyword content', '', '{}', '[]', '2024-03', '2024-03')`)
+	require.NoError(t, err)
+	_, err = db.Exec("INSERT INTO documents_fts(documents_fts) VALUES('rebuild')")
+	require.NoError(t, err)
+
+	summaries, err := store.KeywordSearch(db, "xyzunique456", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "2024-03", summaries[0].UpdatedAt)
 }
 
 func TestUpsertDocumentTx_Insert(t *testing.T) {

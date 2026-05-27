@@ -776,6 +776,51 @@ func TestHandleSearch_SingleQuery_WithLimit(t *testing.T) {
 	assert.LessOrEqual(t, len(summaries), 1)
 }
 
+// TestHandleGet_IdsNoSessionID tests that ids-fetch response omits session_id.
+func TestHandleGet_IdsNoSessionID(t *testing.T) {
+	resetDB(t)
+
+	// Insert a document with a session_id
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "session-strip-test",
+				"content": "Content",
+				"metadata": map[string]interface{}{
+					"session_id": "sess-test-999",
+				},
+			},
+		},
+	})
+	putResult, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	var putResp []map[string]interface{}
+	require.NoError(t, unmarshalResult(putResult, &putResp))
+	id, ok := putResp[0]["id"].(float64)
+	require.True(t, ok)
+
+	// Fetch by id
+	getReq := makeRequest(map[string]interface{}{
+		"ids": []interface{}{id},
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var docs []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &docs))
+	require.Len(t, docs, 1)
+
+	// session_id must be absent (omitempty) or empty string — never the real value
+	sessionID, hasKey := docs[0]["session_id"]
+	if hasKey {
+		assert.Empty(t, sessionID, "session_id must be empty/absent in MCP response")
+	}
+}
+
 // TestHandleSearch_Batch_WithLimit tests batch mode with limit.
 func TestHandleSearch_Batch_WithLimit(t *testing.T) {
 	resetDB(t)
