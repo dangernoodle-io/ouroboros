@@ -17,7 +17,7 @@
       }],
       "description": "Nudge to /persist after git commits"
     }, {
-      "matcher": "tool == \"Edit\" || tool == \"Write\"",
+      "matcher": "tool == \"Edit\" || tool == \"Write\" || tool == \"MultiEdit\" || tool == \"NotebookEdit\"",
       "hooks": [{
         "type": "command",
         "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/post-edit-check.js",

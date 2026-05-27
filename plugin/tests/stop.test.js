@@ -128,7 +128,7 @@ test('stop: no kb block + tier-2 self-claim → exit 2, decision:block on stdout
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-tier2-clean-'));
   try {
     const transcript = writeTranscript([{
-      text: 'This is a long main-context message that mentions the knowledge base which is a tier-2 pattern and should be logged as a self-claim',
+      text: 'This is a long main-context message. [ouroboros] stop main: persisted 2 entries to my-project [ids: 1,2] — a tier-2 confirmation that should be detected',
     }]);
     const input = JSON.stringify({ session_id: 'sesst2abc123', transcript_path: transcript });
     const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
@@ -358,6 +358,42 @@ test('stop: cwd hint resolves project for git repo', () => {
     fs.rmSync(testHomeDir, { recursive: true });
     fs.rmSync(gitRepoDir, { recursive: true });
   }
+});
+
+test('stop: kb block with _persisted_by sentinel → no put fired (skipped)', () => {
+  const captureFile = path.join(tempDir, `capture-sentinel-${Date.now()}.json`);
+  const sentinelBlock = JSON.stringify([{
+    type: 'decision',
+    title: 'adopt cobra',
+    project: 'ouroboros',
+    _persisted_by: 'persist-skill',
+  }]);
+  const transcript = writeTranscript([{
+    text: `This is a long main-context message with enough content to pass the minimum length check:\n\`\`\`kb\n${sentinelBlock}\n\`\`\``,
+  }]);
+  const input = JSON.stringify({ session_id: 'sess-sentinel-test', transcript_path: transcript, cwd: projectDir });
+  const result = runScript(input, { OUROBOROS_PUT_CAPTURE_FILE: captureFile });
+  assert.strictEqual(result.status, 0);
+  // put should NOT have been called — capture file should not exist
+  assert(!fs.existsSync(captureFile), 'capture file should not exist: put was not called for sentinel block');
+  assert(!result.stderr.includes('persisted'), 'persisted log should not appear for sentinel block');
+});
+
+test('stop: kb block without sentinel → put fires normally', () => {
+  const captureFile = path.join(tempDir, `capture-no-sentinel-${Date.now()}.json`);
+  const noSentinelBlock = JSON.stringify([{
+    type: 'decision',
+    title: 'adopt cobra',
+    project: 'ouroboros',
+  }]);
+  const transcript = writeTranscript([{
+    text: `This is a long main-context message with enough content to pass the minimum length check:\n\`\`\`kb\n${noSentinelBlock}\n\`\`\``,
+  }]);
+  const input = JSON.stringify({ session_id: 'sess-no-sentinel-test', transcript_path: transcript, cwd: projectDir });
+  const result = runScript(input, { OUROBOROS_PUT_CAPTURE_FILE: captureFile });
+  assert.strictEqual(result.status, 0);
+  assert(fs.existsSync(captureFile), 'capture file should exist: put was called for block without sentinel');
+  assert.match(result.stderr, /persisted 1 entries/);
 });
 
 test('cleanup: remove temp stub dir and HOME', () => {
