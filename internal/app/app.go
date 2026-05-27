@@ -9,6 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"dangernoodle.io/ouroboros/internal/backup"
+	"dangernoodle.io/ouroboros/internal/config"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
@@ -16,7 +17,13 @@ import (
 // It blocks until the server exits or a fatal error occurs.
 // version is the build-injected version string used in MCP server metadata.
 func Serve(version string) error {
-	db, err := store.InitDB()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("config load error: %v", err)
+		return err
+	}
+
+	db, err := store.InitDB(cfg.DBPath)
 	if err != nil {
 		return err
 	}

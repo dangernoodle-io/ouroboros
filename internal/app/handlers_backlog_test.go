@@ -591,3 +591,31 @@ func TestHandleItemGetMiss(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, result.IsError, "fetching nonexistent item should return error result")
 }
+
+// TestHandleItemBatchFetch_NoProjectID tests that ids-fetch response does not expose project_id.
+func TestHandleItemBatchFetch_NoProjectID(t *testing.T) {
+	resetBacklogDBBatch(t)
+
+	proj, err := backlog.CreateProject(db, "test-project", "TP")
+	require.NoError(t, err)
+
+	item, err := backlog.AddItem(db, proj.ID, "TP", "P1", "No-ProjID Task", "desc", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"ids": []interface{}{item.ID},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var items []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &items))
+	require.Len(t, items, 1)
+
+	// project_id must be 0 (zeroed) — not the real internal FK
+	projectID, hasKey := items[0]["project_id"]
+	if hasKey {
+		assert.Equal(t, float64(0), projectID, "project_id must be zeroed in MCP response")
+	}
+}

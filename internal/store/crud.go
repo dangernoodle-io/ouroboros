@@ -115,6 +115,9 @@ func KeywordSearch(db *sql.DB, query string, projects []string, limit int) ([]Do
 				s.Tags = []string{}
 			}
 		}
+		if len(s.UpdatedAt) >= 10 {
+			s.UpdatedAt = s.UpdatedAt[:10]
+		}
 		results = append(results, s)
 	}
 	return results, rows.Err()
@@ -357,6 +360,10 @@ func QueryDocuments(db *sql.DB, docType string, projects []string, category, fts
 			}
 		}
 
+		if len(summary.UpdatedAt) >= 10 {
+			summary.UpdatedAt = summary.UpdatedAt[:10]
+		}
+
 		// Filter by requested tags (all must match)
 		if len(tags) > 0 {
 			tagSet := make(map[string]bool)
@@ -462,6 +469,10 @@ func SearchDocuments(db *sql.DB, query, docType string, projects []string, limit
 			if err := json.Unmarshal([]byte(tagsJSON.String), &summary.Tags); err != nil {
 				summary.Tags = []string{}
 			}
+		}
+
+		if len(summary.UpdatedAt) >= 10 {
+			summary.UpdatedAt = summary.UpdatedAt[:10]
 		}
 
 		summaries = append(summaries, summary)
