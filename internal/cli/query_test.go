@@ -84,6 +84,11 @@ func TestRunQuerySearch(t *testing.T) {
 	var summaries []store.DocumentSummary
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &summaries))
 	assert.GreaterOrEqual(t, len(summaries), 1)
+	// KeywordSearch exposes BM25 score; verify populated and negative
+	for _, s := range summaries {
+		assert.NotZero(t, s.Score, "BM25 score should be non-zero for FTS matches")
+		assert.Less(t, s.Score, 0.0, "BM25 score should be negative")
+	}
 }
 
 func TestRunQueryLimit(t *testing.T) {

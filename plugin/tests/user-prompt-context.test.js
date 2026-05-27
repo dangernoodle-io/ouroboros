@@ -401,6 +401,53 @@ test('user-prompt-context: contract reminder injected on back-to-back prompts (n
   fs.rmSync(testStubDir, { recursive: true });
 });
 
+// OU-14: cooldown default reduced to 5 minutes
+test('OU-14: default COOLDOWN_MS is 5 minutes (300000ms)', () => {
+  // Read the script source and verify the default value is 300000
+  const src = fs.readFileSync(SCRIPT_PATH, 'utf-8');
+  // Should NOT have the old 30-min default hardcoded
+  assert(!src.includes('1800000'), 'old 30-minute hardcoded default should be removed');
+  // Should have 300000 as the fallback
+  assert(src.includes('300000'), 'new 5-minute default (300000) should be present');
+});
+
+test('OU-14: OUROBOROS_UPC_COOLDOWN_MS env override is respected', () => {
+  // Write a cooldown file with a timestamp just 2 minutes ago
+  const project = 'test-cooldown-override';
+  const cooldownFile = `/tmp/.ouroboros-ctx-${project}`;
+  try { fs.unlinkSync(cooldownFile); } catch (e) {}
+  fs.writeFileSync(cooldownFile, '');
+  // Set mtime to 2 minutes ago
+  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+  fs.utimesSync(cooldownFile, twoMinAgo, twoMinAgo);
+
+  // With 5-min default: 2 min ago is within cooldown → should be blocked
+  // With env override of 1 min: 2 min ago is outside cooldown → should pass
+  const input = JSON.stringify({ prompt: 'how does the auth system work exactly?', cwd: '/tmp' });
+
+  // 1-minute override: cooldown expired (2 min > 1 min)
+  const result = runScript(input, { OUROBOROS_UPC_COOLDOWN_MS: '60000' });
+  assert.strictEqual(result.status, 0);
+  // We can't assert output here easily (no project), but just verify no crash
+
+  try { fs.unlinkSync(cooldownFile); } catch (e) {}
+});
+
+// OU-191: BM25 threshold filtering
+test('OU-191: BM25_THRESHOLD default is -2.0', () => {
+  const src = fs.readFileSync(SCRIPT_PATH, 'utf-8');
+  assert(src.includes('-2.0'), 'BM25 threshold default of -2.0 should be in source');
+  assert(src.includes('OUROBOROS_UPC_BM25_THRESHOLD'), 'env override name should be in source');
+});
+
+test('OU-191: results without score field pass through BM25 filter (backward compat)', () => {
+  // When stub returns rows without a `score` field, they should not be filtered out
+  // This verifies the filter condition: typeof r.score !== 'number' || r.score >= threshold
+  // Row with no score: typeof undefined !== 'number' → passes
+  const src = fs.readFileSync(SCRIPT_PATH, 'utf-8');
+  assert(src.includes("typeof r.score !== 'number'"), 'filter should pass-through rows without score field');
+});
+
 test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true });

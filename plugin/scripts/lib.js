@@ -53,6 +53,10 @@ function extractKbBlock(message) {
   return { matched: false, json: null };
 }
 
+// MAX_TAIL_BYTES caps how much of the transcript file is read into memory.
+// Avoids loading full multi-MB files; reads only the tail where recent turns live.
+const MAX_TAIL_BYTES = 2 * 1024 * 1024; // 2 MB
+
 function extractAllKbBlocks(transcriptPath, opts = { maxLines: 2000 }) {
   const maxLines = opts.maxLines || 2000;
   const blocks = [];
@@ -74,7 +78,22 @@ function extractAllKbBlocks(transcriptPath, opts = { maxLines: 2000 }) {
 
   let raw;
   try {
-    raw = fs.readFileSync(transcriptPath, 'utf-8');
+    const stat = fs.statSync(transcriptPath);
+    const fileSize = stat.size;
+    if (fileSize > MAX_TAIL_BYTES) {
+      // Read only the tail to avoid loading the full file into memory.
+      // Skip forward past the first (possibly partial) line so every line we parse is complete.
+      const fd = fs.openSync(transcriptPath, 'r');
+      const buf = Buffer.allocUnsafe(MAX_TAIL_BYTES);
+      const bytesRead = fs.readSync(fd, buf, 0, MAX_TAIL_BYTES, fileSize - MAX_TAIL_BYTES);
+      fs.closeSync(fd);
+      const tail = buf.slice(0, bytesRead).toString('utf-8');
+      // Drop the first (potentially partial) line
+      const firstNewline = tail.indexOf('\n');
+      raw = firstNewline >= 0 ? tail.slice(firstNewline + 1) : tail;
+    } else {
+      raw = fs.readFileSync(transcriptPath, 'utf-8');
+    }
   } catch (e) {
     return { blocks: [], turns: [] };
   }
@@ -574,4 +593,4 @@ function queryKb(project, opts = {}) {
   }
 }
 
-module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, checkNudgePatterns, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, readLastMainAssistantText, persistKbBlock, queryKb };
+module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, checkNudgePatterns, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, readLastMainAssistantText, persistKbBlock, queryKb };

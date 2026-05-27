@@ -39,6 +39,7 @@ type DocumentSummary struct {
 	Title     string   `json:"title"`
 	Tags      []string `json:"tags,omitempty"`
 	UpdatedAt string   `json:"updated_at"`
+	Score     float64  `json:"score,omitempty"`
 }
 
 // InitDB initializes the database connection and applies schema.

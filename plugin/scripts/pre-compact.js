@@ -6,6 +6,10 @@ async function main() {
   try {
     const input = await readStdin();
 
+    // Log fire event at entry, before any early-exit logic.
+    // Enables grepping hooks.log for fire/block/allow/error sequences.
+    logHookEvent({ hook: 'pre_compact', kind: 'fire' });
+
     let data;
     try {
       data = JSON.parse(input);

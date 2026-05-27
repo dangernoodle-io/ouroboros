@@ -94,7 +94,7 @@ func KeywordSearch(db *sql.DB, query string, projects []string, limit int) ([]Do
 
 	limit = ClampLimit(limit, 10, 500)
 
-	sqlQuery := `SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at
+	sqlQuery := `SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at, bm25(documents_fts) AS score
 		FROM documents d
 		JOIN documents_fts fts ON d.id = fts.rowid
 		WHERE fts.documents_fts MATCH ?`
@@ -115,7 +115,7 @@ func KeywordSearch(db *sql.DB, query string, projects []string, limit int) ([]Do
 	for rows.Next() {
 		var s DocumentSummary
 		var tagsJSON sql.NullString
-		if err := rows.Scan(&s.ID, &s.Type, &s.Project, &s.Category, &s.Title, &tagsJSON, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Type, &s.Project, &s.Category, &s.Title, &tagsJSON, &s.UpdatedAt, &s.Score); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		if tagsJSON.Valid && tagsJSON.String != "" {
@@ -323,11 +323,12 @@ func QueryDocuments(db *sql.DB, types []string, projects []string, categories []
 
 	var query string
 	var args []interface{}
+	isFTS := ftsQuery != ""
 
-	if ftsQuery != "" {
+	if isFTS {
 		// FTS5 query
 		query = `
-			SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at
+			SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at, bm25(documents_fts) AS score
 			FROM documents d
 			JOIN documents_fts fts ON d.id = fts.rowid
 			WHERE fts.documents_fts MATCH ?
@@ -427,8 +428,14 @@ func QueryDocuments(db *sql.DB, types []string, projects []string, categories []
 		var summary DocumentSummary
 		var tagsJSON sql.NullString
 
-		if err := rows.Scan(&summary.ID, &summary.Type, &summary.Project, &summary.Category, &summary.Title, &tagsJSON, &summary.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan document summary: %w", err)
+		if isFTS {
+			if err := rows.Scan(&summary.ID, &summary.Type, &summary.Project, &summary.Category, &summary.Title, &tagsJSON, &summary.UpdatedAt, &summary.Score); err != nil {
+				return nil, fmt.Errorf("failed to scan document summary: %w", err)
+			}
+		} else {
+			if err := rows.Scan(&summary.ID, &summary.Type, &summary.Project, &summary.Category, &summary.Title, &tagsJSON, &summary.UpdatedAt); err != nil {
+				return nil, fmt.Errorf("failed to scan document summary: %w", err)
+			}
 		}
 
 		if tagsJSON.Valid {
