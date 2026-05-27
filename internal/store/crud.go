@@ -9,10 +9,18 @@ import (
 	"unicode"
 )
 
+// Size caps for document fields.
+const (
+	MaxDocContentBytes = 32 * 1024
+	MaxDocNotesBytes   = 32 * 1024
+)
+
 // UpsertResult indicates whether a document was created or updated.
 type UpsertResult struct {
-	ID     int64  `json:"id"`
-	Action string `json:"action"` // "created" or "updated"
+	ID              int64  `json:"id"`
+	Action          string `json:"action"` // "created" or "updated"
+	Conflict        bool   `json:"conflict,omitempty"`
+	PreviousContent string `json:"previous_content,omitempty"`
 }
 
 // stopWords are filtered from keyword search queries to reduce noise from natural-language prompts.
@@ -135,6 +143,26 @@ type sqlExecutor interface {
 // Action is determined atomically via RETURNING: on a fresh insert created_at == updated_at;
 // on a conflict update only updated_at changes, so created_at < updated_at signals "updated".
 func upsertDocumentExec(q sqlExecutor, doc Document) (*UpsertResult, error) {
+	if len(doc.Content) > MaxDocContentBytes {
+		return nil, fmt.Errorf("content exceeds %d byte cap (got %d)", MaxDocContentBytes, len(doc.Content))
+	}
+	if len(doc.Notes) > MaxDocNotesBytes {
+		return nil, fmt.Errorf("notes exceeds %d byte cap (got %d)", MaxDocNotesBytes, len(doc.Notes))
+	}
+
+	// Conflict detection: check for existing content drift before upsert.
+	var prevContent string
+	var conflict bool
+	var existing sql.NullString
+	err := q.QueryRow(
+		`SELECT content FROM documents WHERE type=? AND project=? AND category=? AND title=? LIMIT 1`,
+		doc.Type, doc.Project, doc.Category, doc.Title,
+	).Scan(&existing)
+	if err == nil && existing.Valid && existing.String != doc.Content {
+		conflict = true
+		prevContent = existing.String
+	}
+
 	metadataJSON, err := json.Marshal(doc.Metadata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
@@ -180,7 +208,7 @@ func upsertDocumentExec(q sqlExecutor, doc Document) (*UpsertResult, error) {
 		action = "updated"
 	}
 
-	return &UpsertResult{ID: id, Action: action}, nil
+	return &UpsertResult{ID: id, Action: action, Conflict: conflict, PreviousContent: prevContent}, nil
 }
 
 // UpsertDocument inserts or updates a document record using ON CONFLICT.

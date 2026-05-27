@@ -923,6 +923,74 @@ func TestHandleGet_MultiCategories(t *testing.T) {
 	assert.False(t, cats["ops"])
 }
 
+// TestHandlePutBatch_ConflictDetected verifies that overwriting with different content
+// returns conflict=true on the affected entry.
+func TestHandlePutBatch_ConflictDetected(t *testing.T) {
+	resetDB(t)
+
+	putFirst := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "conflict-entry",
+				"content": "original content",
+			},
+		},
+	})
+	_, err := handlePut(db)(context.TODO(), putFirst)
+	require.NoError(t, err)
+
+	putSecond := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "conflict-entry",
+				"content": "changed content",
+			},
+		},
+	})
+	result, err := handlePut(db)(context.TODO(), putSecond)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resp []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	require.Len(t, resp, 1)
+	assert.Equal(t, true, resp[0]["conflict"])
+	assert.NotEmpty(t, resp[0]["previous_excerpt"])
+}
+
+// TestHandlePutBatch_NoConflictSameContent verifies conflict is absent when content unchanged.
+func TestHandlePutBatch_NoConflictSameContent(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "stable-entry",
+				"content": "stable content",
+			},
+		},
+	})
+
+	_, err := handlePut(db)(context.TODO(), req)
+	require.NoError(t, err)
+
+	result, err := handlePut(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resp []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	require.Len(t, resp, 1)
+	_, hasConflict := resp[0]["conflict"]
+	assert.False(t, hasConflict, "conflict key must be absent (omitempty) when no conflict")
+}
+
 // TestHandleSearch_CategoriesFilter tests search with categories[] filter.
 func TestHandleSearch_CategoriesFilter(t *testing.T) {
 	resetDB(t)

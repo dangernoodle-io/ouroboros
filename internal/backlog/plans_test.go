@@ -69,13 +69,13 @@ func TestUpdatePlan(t *testing.T) {
 
 	updated, err := backlog.UpdatePlan(d, created.ID, map[string]string{
 		"title":  "new-title",
-		"status": "published",
+		"status": "active",
 	})
 	require.NoError(t, err)
 
 	assert.Equal(t, "new-title", updated.Title)
 	assert.Equal(t, "old-content", updated.Content)
-	assert.Equal(t, "published", updated.Status)
+	assert.Equal(t, "active", updated.Status)
 }
 
 func TestListPlans(t *testing.T) {
@@ -102,10 +102,10 @@ func TestListPlansFilterStatus(t *testing.T) {
 	plan2, err := backlog.CreatePlan(d, "published-plan", "content", nil, nil)
 	require.NoError(t, err)
 
-	_, err = backlog.UpdatePlan(d, plan2.ID, map[string]string{"status": "published"})
+	_, err = backlog.UpdatePlan(d, plan2.ID, map[string]string{"status": "active"})
 	require.NoError(t, err)
 
-	status := "published"
+	status := "active"
 	plans, err := backlog.ListPlans(d, backlog.PlanFilter{Status: &status})
 	require.NoError(t, err)
 
@@ -148,4 +148,50 @@ func TestListPlansFilterMultiProject(t *testing.T) {
 	plans, err := backlog.ListPlans(d, backlog.PlanFilter{ProjectIDs: []int64{p1.ID, p2.ID}})
 	require.NoError(t, err)
 	assert.Len(t, plans, 2)
+}
+
+func TestUpdatePlanInvalidStatus(t *testing.T) {
+	d := testDB(t)
+
+	plan, err := backlog.CreatePlan(d, "test-plan", "content", nil, nil)
+	require.NoError(t, err)
+
+	_, err = backlog.UpdatePlan(d, plan.ID, map[string]string{"status": "published"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid status")
+	assert.Contains(t, err.Error(), "draft, active, done")
+}
+
+func TestUpdatePlanValidStatuses(t *testing.T) {
+	d := testDB(t)
+
+	for _, status := range []string{"draft", "active", "done"} {
+		plan, err := backlog.CreatePlan(d, "plan-"+status, "content", nil, nil)
+		require.NoError(t, err)
+
+		updated, err := backlog.UpdatePlan(d, plan.ID, map[string]string{"status": status})
+		require.NoError(t, err)
+		assert.Equal(t, status, updated.Status)
+	}
+}
+
+func TestCreatePlanContentTooBig(t *testing.T) {
+	d := testDB(t)
+
+	bigContent := string(make([]byte, backlog.MaxPlanContentBytes+1))
+	_, err := backlog.CreatePlan(d, "big-plan", bigContent, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "content exceeds")
+}
+
+func TestUpdatePlanContentTooBig(t *testing.T) {
+	d := testDB(t)
+
+	plan, err := backlog.CreatePlan(d, "test-plan", "content", nil, nil)
+	require.NoError(t, err)
+
+	bigContent := string(make([]byte, backlog.MaxPlanContentBytes+1))
+	_, err = backlog.UpdatePlan(d, plan.ID, map[string]string{"content": bigContent})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "content exceeds")
 }

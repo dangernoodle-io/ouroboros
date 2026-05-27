@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// Size caps for item fields.
+const (
+	MaxItemDescBytes  = 8 * 1024
+	MaxItemNotesBytes = 8 * 1024
+)
+
+// validItemStatuses is the allowed set for item status updates.
+var validItemStatuses = map[string]bool{"open": true, "done": true}
+
 type Item struct {
 	ID          string `json:"id"`
 	ProjectID   int64  `json:"project_id,omitempty"`
@@ -20,6 +29,13 @@ type Item struct {
 }
 
 func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, notes, component string) (*Item, error) {
+	if len(description) > MaxItemDescBytes {
+		return nil, fmt.Errorf("description exceeds %d byte cap (got %d)", MaxItemDescBytes, len(description))
+	}
+	if len(notes) > MaxItemNotesBytes {
+		return nil, fmt.Errorf("notes exceeds %d byte cap (got %d)", MaxItemNotesBytes, len(notes))
+	}
+
 	tx, err := d.Begin()
 	if err != nil {
 		return nil, err
@@ -93,6 +109,15 @@ func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
 	for k, v := range fields {
 		if !allowed[k] {
 			return nil, fmt.Errorf("invalid field: %s", k)
+		}
+		if k == "status" && !validItemStatuses[v] {
+			return nil, fmt.Errorf("invalid status %q: must be one of open, done", v)
+		}
+		if k == "description" && len(v) > MaxItemDescBytes {
+			return nil, fmt.Errorf("description exceeds %d byte cap (got %d)", MaxItemDescBytes, len(v))
+		}
+		if k == "notes" && len(v) > MaxItemNotesBytes {
+			return nil, fmt.Errorf("notes exceeds %d byte cap (got %d)", MaxItemNotesBytes, len(v))
 		}
 		sets = append(sets, k+" = ?")
 		args = append(args, v)

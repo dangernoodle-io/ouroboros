@@ -464,3 +464,82 @@ func TestGetItemViaAliasAfterPrefixRename(t *testing.T) {
 	assert.Equal(t, "ZZ-1", got.ID)
 	assert.Equal(t, "task", got.Title)
 }
+
+func TestUpdateItemInvalidStatus(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.UpdateItem(d, "AC-1", map[string]string{"status": "invalid-status"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid status")
+	assert.Contains(t, err.Error(), "open, done")
+}
+
+func TestUpdateItemValidStatuses(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	for _, status := range []string{"open", "done"} {
+		_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item-"+status, "", "", "")
+		require.NoError(t, err)
+
+		item, err := backlog.GetItem(d, "AC-1")
+		require.NoError(t, err)
+
+		updated, err := backlog.UpdateItem(d, item.ID, map[string]string{"status": status})
+		require.NoError(t, err)
+		assert.Equal(t, status, updated.Status)
+
+		_, err = backlog.DeleteItems(d, []string{item.ID})
+		require.NoError(t, err)
+	}
+}
+
+func TestAddItemDescriptionTooBig(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	bigDesc := string(make([]byte, backlog.MaxItemDescBytes+1))
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", bigDesc, "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "description exceeds")
+}
+
+func TestAddItemNotesTooBig(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	bigNotes := string(make([]byte, backlog.MaxItemNotesBytes+1))
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", bigNotes, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notes exceeds")
+}
+
+func TestUpdateItemDescriptionTooBig(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "")
+	require.NoError(t, err)
+
+	bigDesc := string(make([]byte, backlog.MaxItemDescBytes+1))
+	_, err = backlog.UpdateItem(d, "AC-1", map[string]string{"description": bigDesc})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "description exceeds")
+}
+
+func TestUpdateItemNotesTooBig(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "")
+	require.NoError(t, err)
+
+	bigNotes := string(make([]byte, backlog.MaxItemNotesBytes+1))
+	_, err = backlog.UpdateItem(d, "AC-1", map[string]string{"notes": bigNotes})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notes exceeds")
+}

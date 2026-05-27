@@ -647,3 +647,71 @@ func TestWriteBatchIntraBatchDedup(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "last version wins", full.Content)
 }
+
+// TestWriteBatch_ConflictDetected verifies that overwriting with different content
+// sets Conflict=true and PreviousExcerpt on the affected result.
+func TestWriteBatch_ConflictDetected(t *testing.T) {
+	db := testDB(t)
+
+	// First write
+	_, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "decision", Project: "acme-corp", Title: "stable-entry", Content: "first content"},
+	}, "")
+	require.NoError(t, err)
+
+	// Second write with different content — should signal conflict
+	results, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "decision", Project: "acme-corp", Title: "stable-entry", Content: "second content"},
+	}, "")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.True(t, results[0].Conflict)
+	assert.NotEmpty(t, results[0].PreviousExcerpt)
+	assert.Contains(t, results[0].PreviousExcerpt, "first content")
+}
+
+// TestWriteBatch_NoConflictSameContent verifies no conflict when same content is re-put.
+func TestWriteBatch_NoConflictSameContent(t *testing.T) {
+	db := testDB(t)
+
+	entry := kb.Entry{Type: "fact", Project: "acme-corp", Title: "idempotent-entry", Content: "stable content"}
+
+	_, err := kb.WriteBatch(db, []kb.Entry{entry}, "")
+	require.NoError(t, err)
+
+	results, err := kb.WriteBatch(db, []kb.Entry{entry}, "")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.False(t, results[0].Conflict)
+	assert.Empty(t, results[0].PreviousExcerpt)
+}
+
+// TestWriteBatch_ConflictExcerptTruncated verifies long previous content is truncated to 100 chars.
+func TestWriteBatch_ConflictExcerptTruncated(t *testing.T) {
+	db := testDB(t)
+
+	longContent := string(make([]byte, 200))
+	for i := range longContent {
+		_ = i
+	}
+	longContent = "abcdefghij" // will build a 200-char string below
+	for len(longContent) < 200 {
+		longContent += "x"
+	}
+
+	_, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "note", Project: "acme-corp", Title: "trunc-test", Content: longContent},
+	}, "")
+	require.NoError(t, err)
+
+	results, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "note", Project: "acme-corp", Title: "trunc-test", Content: "different content"},
+	}, "")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.True(t, results[0].Conflict)
+	assert.LessOrEqual(t, len(results[0].PreviousExcerpt), 100)
+}

@@ -95,11 +95,20 @@ func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, e
 			return nil, fmt.Errorf("upsert failed: %w", err)
 		}
 
-		results = append(results, PutResult{
+		pr := PutResult{
 			ID:     result.ID,
 			Action: result.Action,
 			Title:  entry.Title,
-		})
+		}
+		if result.Conflict {
+			pr.Conflict = true
+			if len(result.PreviousContent) > 100 {
+				pr.PreviousExcerpt = result.PreviousContent[:100]
+			} else {
+				pr.PreviousExcerpt = result.PreviousContent
+			}
+		}
+		results = append(results, pr)
 	}
 
 	if err := tx.Commit(); err != nil {
