@@ -2,14 +2,12 @@ package app
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -155,65 +153,20 @@ func TestBatchRoundTripSavings(t *testing.T) {
 	require.Equal(t, 1, newCalls)
 }
 
-// TestProgressiveRegistration verifies three-tier lazy registration: tier-0
-// tools are registered at startup; tier-1 registers on first tier-0 invocation;
-// tier-2 registers on first tier-1 invocation.
-func TestProgressiveRegistration(t *testing.T) {
+// TestAllToolsRegisteredAtStartup verifies all 4 tools are available immediately
+// after server build, without requiring any prior tool invocations.
+func TestAllToolsRegisteredAtStartup(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
 	defer db.Close()
 	require.NoError(t, store.ApplySchema(db))
 
-	// Reset gates for test isolation
-	tier1Once = sync.Once{}
-
 	srv := buildServer(db, nil, "test")
 
-	// ---- Step 1: assert only tier-0 tools registered ----
 	allTools := srv.ListTools()
-	t.Logf("startup: %d total tools (expected 2)", len(allTools))
-	require.Equal(t, 2, len(allTools), "should have exactly 2 tools at startup")
-	assertToolsPresent(t, allTools, []string{"get", "search"})
-
-	// ---- Step 2: invoke tier-0 handler to unlock tier-1 ----
-	toolGet := allTools["get"]
-	require.NotNil(t, toolGet, "get tool should exist")
-
-	result, err := toolGet.Handler(context.Background(), mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Name: "get",
-			Arguments: map[string]interface{}{
-				"limit": 10.0,
-			},
-		},
-	})
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	// ---- Step 3: assert tier-1 tools now registered ----
-	allTools = srv.ListTools()
-	t.Logf("after tier-0 call: %d total tools (expected 4)", len(allTools))
-	require.Equal(t, 4, len(allTools), "should have 4 tools after tier-1 unlock")
+	t.Logf("startup: %d total tools (expected 4)", len(allTools))
+	require.Equal(t, 4, len(allTools), "should have exactly 4 tools at startup")
 	assertToolsPresent(t, allTools, []string{"get", "search", "put", "item"})
-
-	// ---- Step 4: verify idempotency ----
-	// Call tier-0 again; tier-1 should not re-register (no duplicate tools)
-	toolGet = allTools["get"]
-	require.NotNil(t, toolGet)
-
-	_, err = toolGet.Handler(context.Background(), mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Name: "get",
-			Arguments: map[string]interface{}{
-				"limit": 10.0,
-			},
-		},
-	})
-	require.NoError(t, err)
-
-	allTools = srv.ListTools()
-	t.Logf("after second tier-0 call: %d total tools (should be 4, not more)", len(allTools))
-	require.Equal(t, 4, len(allTools), "tools should not re-register (idempotency)")
 }
 
 // assertToolsPresent verifies that all named tools exist in the server tool map.

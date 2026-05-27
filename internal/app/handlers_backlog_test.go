@@ -142,13 +142,13 @@ func TestHandleItemBatchCreateAndUpdate(t *testing.T) {
 	assert.Equal(t, "P2", updated.Priority)
 }
 
-func TestHandleItemWithProgressCallsHandler(t *testing.T) {
+func TestHandleItemListReturnsNoItems(t *testing.T) {
 	resetAllDB(t)
 
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	handler := handleItemWithProgress(db, bk)
+	handler := handleItem(db, bk)
 
 	// Call with list mode — should succeed and return "no items"
 	req := makeRequest(map[string]interface{}{

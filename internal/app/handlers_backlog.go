@@ -243,8 +243,3 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 		return mcp.NewToolResultText(strings.Join(lines, "\n")), nil
 	}
 }
-
-// handleItemWithProgress wraps handleItem.
-func handleItemWithProgress(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
-	return handleItem(d, bk)
-}
