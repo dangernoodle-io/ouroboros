@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -230,7 +229,7 @@ func ApplySchema(db *sql.DB) error {
 		}
 
 		if _, err := tx.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-			m.version, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			m.version, nowRFC3339()); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("failed to record migration %d: %w", m.version, err)
 		}

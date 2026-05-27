@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -34,6 +35,35 @@ func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, e
 			return nil, fmt.Errorf("entry %d validation failed: %w", i, err)
 		}
 	}
+
+	// Intra-batch dedup: last-wins by (type, project, category, title).
+	seen := make(map[string]int)
+	for i, entry := range entries {
+		project := entry.Project
+		if project == "" {
+			project = projectFlag
+		}
+		key := fmt.Sprintf("%s|%s|%s|%s", entry.Type, project, entry.Category, entry.Title)
+		if prior, ok := seen[key]; ok {
+			fmt.Fprintf(os.Stderr, "[ouroboros] put: dropped intra-batch duplicate at index %d (key: %s)\n", prior, key)
+		}
+		seen[key] = i
+	}
+	deduped := make([]Entry, 0, len(seen))
+	added := make(map[string]bool)
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		project := entry.Project
+		if project == "" {
+			project = projectFlag
+		}
+		key := fmt.Sprintf("%s|%s|%s|%s", entry.Type, project, entry.Category, entry.Title)
+		if !added[key] && seen[key] == i {
+			deduped = append([]Entry{entry}, deduped...)
+			added[key] = true
+		}
+	}
+	entries = deduped
 
 	// Write all validated entries atomically
 	tx, err := db.BeginTx(context.Background(), nil)

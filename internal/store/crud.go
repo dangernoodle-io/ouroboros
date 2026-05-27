@@ -372,6 +372,13 @@ func QueryDocuments(db *sql.DB, types []string, projects []string, categories []
 			whereClause += "session_id = ?"
 			args = append(args, sid)
 		}
+		for _, tag := range tags {
+			if whereClause != "" {
+				whereClause += " AND "
+			}
+			whereClause += "EXISTS (SELECT 1 FROM json_each(documents.tags) WHERE value = ?)"
+			args = append(args, tag)
+		}
 
 		if whereClause != "" {
 			query += " WHERE " + whereClause
@@ -404,24 +411,6 @@ func QueryDocuments(db *sql.DB, types []string, projects []string, categories []
 
 		if len(summary.UpdatedAt) >= 10 {
 			summary.UpdatedAt = summary.UpdatedAt[:10]
-		}
-
-		// Filter by requested tags (all must match)
-		if len(tags) > 0 {
-			tagSet := make(map[string]bool)
-			for _, t := range summary.Tags {
-				tagSet[t] = true
-			}
-			match := true
-			for _, t := range tags {
-				if !tagSet[t] {
-					match = false
-					break
-				}
-			}
-			if !match {
-				continue
-			}
 		}
 
 		summaries = append(summaries, summary)

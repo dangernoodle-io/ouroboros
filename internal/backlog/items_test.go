@@ -2,6 +2,7 @@ package backlog_test
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -124,6 +125,21 @@ func TestListItems(t *testing.T) {
 	require.NoError(t, err)
 
 	items, err := backlog.ListItems(d, backlog.ItemFilter{})
+	require.NoError(t, err)
+
+	assert.Len(t, items, 2)
+}
+
+func TestListItemsWithLimit(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	for i := 1; i <= 5; i++ {
+		_, err := backlog.AddItem(d, p.ID, "AC", "P3", fmt.Sprintf("item%d", i), "", "", "")
+		require.NoError(t, err)
+	}
+
+	items, err := backlog.ListItems(d, backlog.ItemFilter{Limit: 2})
 	require.NoError(t, err)
 
 	assert.Len(t, items, 2)

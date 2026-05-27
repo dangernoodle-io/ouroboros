@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 )
 
 type Plan struct {
@@ -19,7 +18,7 @@ type Plan struct {
 }
 
 func CreatePlan(d *sql.DB, title, content string, projectID *int64, itemID *string) (*Plan, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := nowRFC3339()
 	result, err := d.Exec(
 		"INSERT INTO plans (project_id, item_id, title, content, status, created, updated) VALUES (?, ?, ?, ?, 'draft', ?, ?)",
 		projectID, itemID, title, content, now, now,
@@ -65,7 +64,7 @@ func UpdatePlan(d *sql.DB, id int64, fields map[string]string) (*Plan, error) {
 		return GetPlan(d, id)
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := nowRFC3339()
 	sets = append(sets, "updated = ?")
 	args = append(args, now)
 	args = append(args, id)
