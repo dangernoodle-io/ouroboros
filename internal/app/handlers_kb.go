@@ -105,9 +105,9 @@ func handleGet(db *sql.DB) server.ToolHandlerFunc {
 		}
 
 		// Filter/list mode
-		docType, _ := req.GetArguments()["type"].(string)
+		types := parseStringSlice(req.GetArguments(), "types")
 		projects := parseStringSlice(req.GetArguments(), "projects")
-		category, _ := req.GetArguments()["category"].(string)
+		categories := parseStringSlice(req.GetArguments(), "categories")
 		query, _ := req.GetArguments()["query"].(string)
 
 		tags := parseStringSlice(req.GetArguments(), "tags")
@@ -117,7 +117,7 @@ func handleGet(db *sql.DB) server.ToolHandlerFunc {
 			limit = int(v)
 		}
 
-		summaries, err := store.QueryDocuments(db, docType, projects, category, query, tags, limit)
+		summaries, err := store.QueryDocuments(db, types, projects, categories, query, tags, limit)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -131,8 +131,9 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 		// Batch mode: if queries[] is provided, loop over all queries with shared filters
 		queries := parseStringSlice(req.GetArguments(), "queries")
 		if len(queries) > 0 {
-			docType, _ := req.GetArguments()["type"].(string)
+			types := parseStringSlice(req.GetArguments(), "types")
 			projects := parseStringSlice(req.GetArguments(), "projects")
+			categories := parseStringSlice(req.GetArguments(), "categories")
 
 			limit := 0
 			if v, ok := req.GetArguments()["limit"].(float64); ok {
@@ -141,7 +142,7 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 
 			resultSets := make([][]store.DocumentSummary, 0, len(queries))
 			for _, q := range queries {
-				rs, err := store.SearchDocuments(db, q, docType, projects, limit)
+				rs, err := store.SearchDocuments(db, q, types, projects, categories, limit)
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
@@ -153,21 +154,22 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 			return jsonResult(resultSets)
 		}
 
-		// Single-query mode: unchanged for backwards compat
+		// Single-query mode
 		query, _ := req.GetArguments()["query"].(string)
 		if query == "" {
 			return mcp.NewToolResultError("query or queries is required"), nil //nolint:nilerr
 		}
 
-		docType, _ := req.GetArguments()["type"].(string)
+		types := parseStringSlice(req.GetArguments(), "types")
 		projects := parseStringSlice(req.GetArguments(), "projects")
+		categories := parseStringSlice(req.GetArguments(), "categories")
 
 		limit := 0
 		if v, ok := req.GetArguments()["limit"].(float64); ok {
 			limit = int(v)
 		}
 
-		summaries, err := store.SearchDocuments(db, query, docType, projects, limit)
+		summaries, err := store.SearchDocuments(db, query, types, projects, categories, limit)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

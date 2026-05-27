@@ -226,7 +226,7 @@ def run_bench(db_path):
     shapes = [
         # (label, tool_name, arguments)
         ("get filter v=false 5 decisions",
-         "get", {"projects": ["alpha-proj"], "type": "decision"}),
+         "get", {"projects": ["alpha-proj"], "types": ["decision"]}),
         ("get filter all 10 docs",
          "get", {"projects": ["alpha-proj"]}),
         ("get ids=[1] single",

@@ -9,6 +9,14 @@ import (
 	"dangernoodle.io/ouroboros/internal/backup"
 )
 
+const (
+	descFilterProjects = "Filter by project names"
+	descFilterTypes    = "Filter by types"
+	descFilterCats     = "Filter by categories"
+	descLimit          = "Limit, default 10, max 500"
+	descVerbose        = "Include notes (default: false)"
+)
+
 const serverInstructions = `Persist decisions and track work items across conversations.
 - Search before put/create — avoid duplicates; upsert by type+project+category+title.
 - Default response is summary; verbose=true only when full content/notes are needed.
@@ -25,13 +33,13 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 	s.AddTool(mcp.NewTool("get",
 		mcp.WithDescription("Get documents: ids array for fetch, or filters for list."),
 		mcp.WithArray("ids", mcp.Description("Document IDs (batch fetch)")),
-		mcp.WithString("type", mcp.Description("Filter by type")),
-		mcp.WithArray("projects", mcp.Description("Filter by project names")),
-		mcp.WithString("category", mcp.Description("Filter by category")),
+		mcp.WithArray("types", mcp.Description(descFilterTypes), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithArray("projects", mcp.Description(descFilterProjects)),
+		mcp.WithArray("categories", mcp.Description(descFilterCats), mcp.Items(map[string]any{"type": "string"})),
 		mcp.WithString("query", mcp.Description("Full-text search")),
 		mcp.WithArray("tags", mcp.Description("Filter by tags (all match)")),
-		mcp.WithNumber("limit", mcp.Description("Limit, default 10, max 500")),
-		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
+		mcp.WithNumber("limit", mcp.Description(descLimit)),
+		mcp.WithBoolean("verbose", mcp.Description(descVerbose)),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleGet(db)))
 
@@ -39,9 +47,10 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 		mcp.WithDescription("Keyword search (FTS5). Single query or queries[] batch. Multi-word = AND."),
 		mcp.WithString("query", mcp.Description("Single query")),
 		mcp.WithArray("queries", mcp.Description("Batch queries sharing filters; response is positional [[...], [...]]")),
-		mcp.WithString("type", mcp.Description("Filter by type")),
-		mcp.WithArray("projects", mcp.Description("Filter by project names")),
-		mcp.WithNumber("limit", mcp.Description("Limit per query, default 10, max 500")),
+		mcp.WithArray("types", mcp.Description(descFilterTypes), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithArray("projects", mcp.Description(descFilterProjects)),
+		mcp.WithArray("categories", mcp.Description(descFilterCats), mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithNumber("limit", mcp.Description(descLimit)),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleSearch(db)))
 

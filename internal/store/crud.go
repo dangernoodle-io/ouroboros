@@ -250,9 +250,43 @@ func GetDocument(db *sql.DB, id int64) (*Document, error) {
 	return &doc, nil
 }
 
-// QueryDocuments queries documents with optional filters (type, project, category, FTS, tags, sessionID).
+// typeFilter appends a type filter clause and args for the given type names.
+func typeFilter(prefix string, types []string, args *[]interface{}) string {
+	if len(types) == 0 {
+		return ""
+	}
+	if len(types) == 1 {
+		*args = append(*args, types[0])
+		return " AND " + prefix + "type = ?"
+	}
+	placeholders := make([]string, len(types))
+	for i, tp := range types {
+		placeholders[i] = "?"
+		*args = append(*args, tp)
+	}
+	return " AND " + prefix + "type IN (" + strings.Join(placeholders, ",") + ")"
+}
+
+// categoryFilter appends a category filter clause and args for the given category names.
+func categoryFilter(prefix string, categories []string, args *[]interface{}) string {
+	if len(categories) == 0 {
+		return ""
+	}
+	if len(categories) == 1 {
+		*args = append(*args, categories[0])
+		return " AND " + prefix + "category = ?"
+	}
+	placeholders := make([]string, len(categories))
+	for i, c := range categories {
+		placeholders[i] = "?"
+		*args = append(*args, c)
+	}
+	return " AND " + prefix + "category IN (" + strings.Join(placeholders, ",") + ")"
+}
+
+// QueryDocuments queries documents with optional filters (types, project, categories, FTS, tags, sessionID).
 // Returns DocumentSummary (no content, no metadata) to conserve tokens.
-func QueryDocuments(db *sql.DB, docType string, projects []string, category, ftsQuery string, tags []string, limit int, sessionID ...string) ([]DocumentSummary, error) {
+func QueryDocuments(db *sql.DB, types []string, projects []string, categories []string, ftsQuery string, tags []string, limit int, sessionID ...string) ([]DocumentSummary, error) {
 	sid := ""
 	if len(sessionID) > 0 {
 		sid = sessionID[0]
@@ -272,15 +306,9 @@ func QueryDocuments(db *sql.DB, docType string, projects []string, category, fts
 		`
 		args = append(args, FtsEscape(ftsQuery))
 
-		if docType != "" {
-			query += " AND d.type = ?"
-			args = append(args, docType)
-		}
+		query += typeFilter("d.", types, &args)
 		query += projectFilter("d.", projects, &args)
-		if category != "" {
-			query += " AND d.category = ?"
-			args = append(args, category)
-		}
+		query += categoryFilter("d.", categories, &args)
 		if sid != "" {
 			query += " AND d.session_id = ?"
 			args = append(args, sid)
@@ -293,12 +321,16 @@ func QueryDocuments(db *sql.DB, docType string, projects []string, category, fts
 		query = "SELECT id, type, project, category, title, tags, updated_at FROM documents"
 
 		whereClause := ""
-		if docType != "" {
-			if whereClause != "" {
-				whereClause += " AND "
-			}
+		if len(types) == 1 {
 			whereClause += "type = ?"
-			args = append(args, docType)
+			args = append(args, types[0])
+		} else if len(types) > 1 {
+			placeholders := make([]string, len(types))
+			for i, tp := range types {
+				placeholders[i] = "?"
+				args = append(args, tp)
+			}
+			whereClause += "type IN (" + strings.Join(placeholders, ",") + ")"
 		}
 		if len(projects) > 0 {
 			if whereClause != "" {
@@ -316,12 +348,22 @@ func QueryDocuments(db *sql.DB, docType string, projects []string, category, fts
 				whereClause += "project IN (" + strings.Join(placeholders, ",") + ")"
 			}
 		}
-		if category != "" {
+		if len(categories) == 1 {
 			if whereClause != "" {
 				whereClause += " AND "
 			}
 			whereClause += "category = ?"
-			args = append(args, category)
+			args = append(args, categories[0])
+		} else if len(categories) > 1 {
+			if whereClause != "" {
+				whereClause += " AND "
+			}
+			placeholders := make([]string, len(categories))
+			for i, c := range categories {
+				placeholders[i] = "?"
+				args = append(args, c)
+			}
+			whereClause += "category IN (" + strings.Join(placeholders, ",") + ")"
 		}
 		if sid != "" {
 			if whereClause != "" {
@@ -422,12 +464,12 @@ func hasSearchableTokens(q string) bool {
 
 // SearchDocuments performs a full-text search across all documents.
 // Returns DocumentSummary (no content, no metadata).
-func SearchDocuments(db *sql.DB, query, docType string, projects []string, limit int) ([]DocumentSummary, error) {
+func SearchDocuments(db *sql.DB, query string, types []string, projects []string, categories []string, limit int) ([]DocumentSummary, error) {
 	limit = ClampLimit(limit, 10, 500)
 
 	// If query has no searchable tokens (only punctuation/wildcards), fall back to list mode
 	if !hasSearchableTokens(query) {
-		return QueryDocuments(db, docType, projects, "", "", nil, limit)
+		return QueryDocuments(db, types, projects, categories, "", nil, limit)
 	}
 
 	escapedQuery := FtsEscape(query)
@@ -440,12 +482,9 @@ func SearchDocuments(db *sql.DB, query, docType string, projects []string, limit
 	`
 	args := []interface{}{escapedQuery}
 
-	if docType != "" {
-		ftQuery += " AND d.type = ?"
-		args = append(args, docType)
-	}
-
+	ftQuery += typeFilter("d.", types, &args)
 	ftQuery += projectFilter("d.", projects, &args)
+	ftQuery += categoryFilter("d.", categories, &args)
 
 	ftQuery += " LIMIT ?"
 	args = append(args, limit)
