@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+// Size caps for plan fields.
+const (
+	MaxPlanContentBytes = 32 * 1024
+)
+
+// validPlanStatuses is the allowed set for plan status updates.
+var validPlanStatuses = map[string]bool{"draft": true, "active": true, "done": true}
+
 type Plan struct {
 	ID        int64   `json:"id"`
 	ProjectID *int64  `json:"project_id,omitempty"`
@@ -18,6 +26,10 @@ type Plan struct {
 }
 
 func CreatePlan(d *sql.DB, title, content string, projectID *int64, itemID *string) (*Plan, error) {
+	if len(content) > MaxPlanContentBytes {
+		return nil, fmt.Errorf("content exceeds %d byte cap (got %d)", MaxPlanContentBytes, len(content))
+	}
+
 	now := nowRFC3339()
 	result, err := d.Exec(
 		"INSERT INTO plans (project_id, item_id, title, content, status, created, updated) VALUES (?, ?, ?, ?, 'draft', ?, ?)",
@@ -56,6 +68,12 @@ func UpdatePlan(d *sql.DB, id int64, fields map[string]string) (*Plan, error) {
 	for k, v := range fields {
 		if !allowed[k] {
 			return nil, fmt.Errorf("invalid field: %s", k)
+		}
+		if k == "status" && !validPlanStatuses[v] {
+			return nil, fmt.Errorf("invalid status %q: must be one of draft, active, done", v)
+		}
+		if k == "content" && len(v) > MaxPlanContentBytes {
+			return nil, fmt.Errorf("content exceeds %d byte cap (got %d)", MaxPlanContentBytes, len(v))
 		}
 		sets = append(sets, k+" = ?")
 		args = append(args, v)

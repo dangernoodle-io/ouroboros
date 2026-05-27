@@ -164,12 +164,12 @@ func TestRunPlanUpdateStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runPlanUpdate(&buf, db, "1", map[string]string{"status": "complete"})
+	err = runPlanUpdate(&buf, db, "1", map[string]string{"status": "done"})
 	require.NoError(t, err)
 
 	var plan backlog.Plan
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &plan))
-	assert.Equal(t, "complete", plan.Status)
+	assert.Equal(t, "done", plan.Status)
 }
 
 func TestRunPlanUpdateNoFields(t *testing.T) {
@@ -257,11 +257,11 @@ func TestRunPlanListStatusFilter(t *testing.T) {
 	require.NoError(t, err)
 	p2, err := backlog.CreatePlan(db, "Done Plan", "Content", &proj.ID, nil)
 	require.NoError(t, err)
-	_, err = backlog.UpdatePlan(db, p2.ID, map[string]string{"status": "complete"})
+	_, err = backlog.UpdatePlan(db, p2.ID, map[string]string{"status": "done"})
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runPlanList(&buf, db, "", "complete")
+	err = runPlanList(&buf, db, "", "done")
 	require.NoError(t, err)
 
 	var plans []backlog.Plan

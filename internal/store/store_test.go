@@ -1663,3 +1663,76 @@ func TestSearchDocuments_MultiCategories(t *testing.T) {
 	assert.True(t, catSet["ops"])
 	assert.False(t, catSet["security"])
 }
+
+// TestUpsertDocument_ContentCapExceeded verifies the 32 KB content cap.
+func TestUpsertDocument_ContentCapExceeded(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "big-content",
+		Content: string(make([]byte, store.MaxDocContentBytes+1)),
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "content exceeds")
+}
+
+// TestUpsertDocument_NotesCapExceeded verifies the 32 KB notes cap.
+func TestUpsertDocument_NotesCapExceeded(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "big-notes",
+		Content: "ok",
+		Notes:   string(make([]byte, store.MaxDocNotesBytes+1)),
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notes exceeds")
+}
+
+// TestUpsertDocument_ConflictDetected verifies drift detection when content changes.
+func TestUpsertDocument_ConflictDetected(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "conflict-test",
+		Content: "original content",
+	}
+	first, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	assert.False(t, first.Conflict)
+	assert.Empty(t, first.PreviousContent)
+
+	doc.Content = "changed content"
+	second, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	assert.True(t, second.Conflict)
+	assert.Equal(t, "original content", second.PreviousContent)
+}
+
+// TestUpsertDocument_NoConflictSameContent verifies no conflict when content is identical.
+func TestUpsertDocument_NoConflictSameContent(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "no-conflict-test",
+		Content: "stable content",
+	}
+	first, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	assert.False(t, first.Conflict)
+
+	second, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	assert.False(t, second.Conflict)
+	assert.Empty(t, second.PreviousContent)
+}

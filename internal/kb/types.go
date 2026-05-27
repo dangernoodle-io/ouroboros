@@ -14,7 +14,9 @@ type Entry struct {
 
 // PutResult represents the result of a put operation.
 type PutResult struct {
-	ID     int64  `json:"id"`
-	Action string `json:"action"`
-	Title  string `json:"title"`
+	ID              int64  `json:"id"`
+	Action          string `json:"action"`
+	Title           string `json:"title"`
+	Conflict        bool   `json:"conflict,omitempty"`
+	PreviousExcerpt string `json:"previous_excerpt,omitempty"`
 }

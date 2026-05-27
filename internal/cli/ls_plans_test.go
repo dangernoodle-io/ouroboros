@@ -84,11 +84,11 @@ func TestLSPlansStatusFilter(t *testing.T) {
 	plan2, err := backlog.CreatePlan(db, "Plan 2", "Content", &proj.ID, nil)
 	require.NoError(t, err)
 
-	_, err = backlog.UpdatePlan(db, plan2.ID, map[string]string{"status": "complete"})
+	_, err = backlog.UpdatePlan(db, plan2.ID, map[string]string{"status": "done"})
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSPlans(&buf, db, "", "complete", false)
+	err = runLSPlans(&buf, db, "", "done", false)
 	require.NoError(t, err)
 
 	output := buf.String()
