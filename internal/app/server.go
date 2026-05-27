@@ -12,15 +12,14 @@ import (
 
 const serverInstructions = `Project knowledge base and backlog management — persist decisions across conversations and track work items.
 
-All tools below are MCP tools — call them directly, not via CLI. The ouroboros binary only supports "query" and "items" subcommands for hook integration; it has no CLI for project/item/plan/config management.
+Project/plan/config/delete/export/import management requires the CLI (ouroboros command); use these tools for KB queries and backlog item operations.
 
-KNOWLEDGE BASE (put, get, delete, search, export, import):
+KNOWLEDGE BASE (put, get, search):
 
 Store immediately (put):
 - Architectural decisions with rationale
 - Non-obvious facts (config values, environment details, constraints)
 - Established procedures or workarounds
-- Project relationships or dependencies
 - Always search first to avoid duplicates; upsert by type+project+category+title
 - Update existing entries when decisions change — do not duplicate
 - Batch mode: entries=[{type, project, title, content, ...}, ...]
@@ -32,29 +31,18 @@ Query (get/search):
 - Batch fetch: get ids=[1,2,3]; batch search: queries=["q1","q2"]
 - Filter multiple projects: projects=["proj-a","proj-b"]
 
-Checkpoints: After multi-step tasks, finalized plans, or before reporting completion — persist non-obvious decisions.
+Checkpoints: After multi-step tasks or before reporting completion — persist non-obvious decisions.
 
-Staleness: Verify KB entries match current work; update or delete if stale.
+Staleness: Verify KB entries match current work; update if stale.
 
-Do not store: trivial details, derivable information, or temporary state.
-
-BACKLOG (project, item, plan, config):
-
-Projects: Create with name; auto-derived prefix (e.g., acme-corp → AC).
+BACKLOG (item):
 
 Items:
 - Batch mode: ids=[] fetch, entries=[{...}] create/update, delete_ids=[] remove, filters list
 - id present = update; id absent = create (needs project+priority+title)
 - Priority: P0 (critical) through P6 (someday). IDs: prefix+seq (e.g., AC-1)
 - Component: optional tag for subproject scope (e.g., "plugin")
-- Filter by projects=[], priority range, status, component
-
-Plans:
-- Batch mode: ids=[] fetch, entries=[{...}] create/update, filters list
-- id present = update; id absent = create (needs title)
-- Status: draft → active → complete
-
-Config: No args = list all; key = get; key+value = set.`
+- Filter by projects=[], priority range, status, component`
 
 // buildServer creates a new MCP server with progressive tool registration.
 func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServer {
@@ -80,9 +68,6 @@ func toolAnnotation(readOnly, destructive, idempotent *bool) mcp.ToolOption {
 
 // tier1Once gates lazy registration of tier-1 tools.
 var tier1Once sync.Once
-
-// tier2Once gates lazy registration of tier-2 tools.
-var tier2Once sync.Once
 
 // registerTier0 registers the entry-point tools: get and search.
 func registerTier0(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
@@ -116,18 +101,7 @@ func registerTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithDescription("Create/update KB documents (batch). Each: type, project, title, content, notes?, category?, tags?, metadata?"),
 		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to upsert")),
 		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
-	), withRecover(handlePutWithProgress(db, bk, s)))
-
-	s.AddTool(mcp.NewTool("project",
-		mcp.WithDescription("Manage projects. op: get (name), create (name), list, rename (name + new_name and/or new_prefix), delete (name; force=true cascade, reassign_to=<name> move; mutex)."),
-		mcp.WithString("op", mcp.Required(), mcp.Description("get|create|list|rename|delete")),
-		mcp.WithString("name", mcp.Description("Project name")),
-		mcp.WithString("new_name", mcp.Description("rename only: new project name")),
-		mcp.WithString("new_prefix", mcp.Description("rename only: new prefix (1-4 chars, letter-first, letters and digits only)")),
-		mcp.WithBoolean("force", mcp.Description("delete only: cascade-delete child items, plans, documents")),
-		mcp.WithString("reassign_to", mcp.Description("delete only: move children to this project before delete; mutually exclusive with force")),
-		toolAnnotation(nil, nil, nil),
-	), withRecover(handleProject(db, bk)))
+	), withRecover(handlePut(db)))
 
 	s.AddTool(mcp.NewTool("item",
 		mcp.WithDescription("Manage backlog items: ids fetch, entries create/update, or filters list."),
@@ -141,58 +115,13 @@ func registerTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithString("component", mcp.Description("Component tag (subproject/plugin); filter or set")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
 		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
-	), withRecover(handleItemWithProgress(db, bk, s)))
-
-	s.AddTool(mcp.NewTool("plan",
-		mcp.WithDescription("Manage plans: ids fetch, entries create/update, or filters list."),
-		mcp.WithArray("ids", mcp.Description("Plan IDs to fetch")),
-		mcp.WithArray("entries", mcp.Description("Plans to create/update: {id?}, title, content?, status?, project?, item_id?")),
-		mcp.WithArray("projects", mcp.Description("Filter by project names")),
-		mcp.WithString("status", mcp.Description("draft, active, or complete")),
-		toolAnnotation(nil, nil, nil),
-	), withRecover(handlePlanWithProgress(db, bk, s)))
-}
-
-// registerTier2 registers advanced tools: delete, import, export, config.
-func registerTier2(s *server.MCPServer, db *sql.DB) {
-	s.AddTool(mcp.NewTool("delete",
-		mcp.WithDescription("Delete a document."),
-		mcp.WithNumber("id", mcp.Required(), mcp.Description("Document ID")),
-		toolAnnotation(nil, mcp.ToBoolPtr(true), mcp.ToBoolPtr(true)),
-	), withRecover(handleDelete(db)))
-
-	// import is intentionally not registered as an MCP tool — it is CLI-only
-	// (`ouroboros import`). The handler in handlers_kb.go is kept as a defensive
-	// shim in case the tool is added by accident in the future.
-
-	s.AddTool(mcp.NewTool("export",
-		mcp.WithDescription("Export KB to markdown."),
-		mcp.WithArray("projects", mcp.Description("Filter by project names")),
-		mcp.WithString("type", mcp.Description("Filter by type")),
-		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
-	), withRecover(handleExport(db)))
-
-	s.AddTool(mcp.NewTool("config",
-		mcp.WithDescription("Get config: no args=list, key=get. Mutations are CLI-only (ouroboros config set)."),
-		mcp.WithString("key", mcp.Description("Config key")),
-		mcp.WithString("value", mcp.Description("(ignored — set is CLI-only)")),
-		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
-	), withRecover(handleConfig(db)))
+	), withRecover(handleItemWithProgress(db, bk)))
 }
 
 // unlockTier1 registers tier-1 tools once and notifies clients.
 func unlockTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	tier1Once.Do(func() {
 		registerTier1(s, db, bk)
-		s.SendNotificationToAllClients("tools/list_changed", nil)
-	})
-}
-
-// unlockTier2 registers tier-2 tools once and notifies clients.
-// bk is accepted for symmetry with tier1 handlers; tier-2 tools don't need it.
-func unlockTier2(s *server.MCPServer, db *sql.DB, bk *backup.Backup) { //nolint:unparam
-	tier2Once.Do(func() {
-		registerTier2(s, db)
 		s.SendNotificationToAllClients("tools/list_changed", nil)
 	})
 }

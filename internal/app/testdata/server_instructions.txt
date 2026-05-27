@@ -1,14 +1,13 @@
 Project knowledge base and backlog management — persist decisions across conversations and track work items.
 
-All tools below are MCP tools — call them directly, not via CLI. The ouroboros binary only supports "query" and "items" subcommands for hook integration; it has no CLI for project/item/plan/config management.
+Project/plan/config/delete/export/import management requires the CLI (ouroboros command); use these tools for KB queries and backlog item operations.
 
-KNOWLEDGE BASE (put, get, delete, search, export, import):
+KNOWLEDGE BASE (put, get, search):
 
 Store immediately (put):
 - Architectural decisions with rationale
 - Non-obvious facts (config values, environment details, constraints)
 - Established procedures or workarounds
-- Project relationships or dependencies
 - Always search first to avoid duplicates; upsert by type+project+category+title
 - Update existing entries when decisions change — do not duplicate
 - Batch mode: entries=[{type, project, title, content, ...}, ...]
@@ -20,15 +19,11 @@ Query (get/search):
 - Batch fetch: get ids=[1,2,3]; batch search: queries=["q1","q2"]
 - Filter multiple projects: projects=["proj-a","proj-b"]
 
-Checkpoints: After multi-step tasks, finalized plans, or before reporting completion — persist non-obvious decisions.
+Checkpoints: After multi-step tasks or before reporting completion — persist non-obvious decisions.
 
-Staleness: Verify KB entries match current work; update or delete if stale.
+Staleness: Verify KB entries match current work; update if stale.
 
-Do not store: trivial details, derivable information, or temporary state.
-
-BACKLOG (project, item, plan, config):
-
-Projects: Create with name; auto-derived prefix (e.g., acme-corp → AC).
+BACKLOG (item):
 
 Items:
 - Batch mode: ids=[] fetch, entries=[{...}] create/update, delete_ids=[] remove, filters list
@@ -36,10 +31,3 @@ Items:
 - Priority: P0 (critical) through P6 (someday). IDs: prefix+seq (e.g., AC-1)
 - Component: optional tag for subproject scope (e.g., "plugin")
 - Filter by projects=[], priority range, status, component
-
-Plans:
-- Batch mode: ids=[] fetch, entries=[{...}] create/update, filters list
-- id present = update; id absent = create (needs title)
-- Status: draft → active → complete
-
-Config: No args = list all; key = get; key+value = set.

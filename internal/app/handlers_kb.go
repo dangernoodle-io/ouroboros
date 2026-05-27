@@ -126,22 +126,6 @@ func handleGet(db *sql.DB) server.ToolHandlerFunc {
 	}
 }
 
-func handleDelete(db *sql.DB) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		idFloat, ok := req.GetArguments()["id"].(float64)
-		if !ok {
-			return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
-		}
-
-		err := store.DeleteDocument(db, int64(idFloat))
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		return jsonResult(map[string]bool{"ok": true})
-	}
-}
-
 func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Batch mode: if queries[] is provided, loop over all queries with shared filters
@@ -192,26 +176,6 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 	}
 }
 
-func handleExport(db *sql.DB) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		projects := parseStringSlice(req.GetArguments(), "projects")
-		docType, _ := req.GetArguments()["type"].(string)
-
-		markdown, err := kb.ExportMarkdown(db, projects, docType)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		return mcp.NewToolResultText(markdown), nil
-	}
-}
-
-func handleImport(db *sql.DB) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return mcp.NewToolResultError("import is CLI-only; use: ouroboros import <file|->"), nil //nolint:nilerr
-	}
-}
-
 // handleGetWithProgress wraps handleGet to trigger tier-1 progression.
 func handleGetWithProgress(db *sql.DB, bk *backup.Backup, s *server.MCPServer) server.ToolHandlerFunc {
 	handler := handleGet(db)
@@ -226,15 +190,6 @@ func handleSearchWithProgress(db *sql.DB, bk *backup.Backup, s *server.MCPServer
 	handler := handleSearch(db)
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		unlockTier1(s, db, bk)
-		return handler(ctx, req)
-	}
-}
-
-// handlePutWithProgress wraps handlePut to trigger tier-2 progression.
-func handlePutWithProgress(db *sql.DB, bk *backup.Backup, s *server.MCPServer) server.ToolHandlerFunc {
-	handler := handlePut(db)
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		unlockTier2(s, db, bk)
 		return handler(ctx, req)
 	}
 }
