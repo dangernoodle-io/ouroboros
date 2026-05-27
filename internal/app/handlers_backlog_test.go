@@ -592,7 +592,7 @@ func TestHandleItemGetMiss(t *testing.T) {
 	assert.True(t, result.IsError, "fetching nonexistent item should return error result")
 }
 
-// TestHandleItemBatchFetch_NoProjectID tests that ids-fetch response does not expose project_id.
+// TestHandleItemBatchFetch_NoProjectID tests that ids-fetch response omits project_id (omitempty).
 func TestHandleItemBatchFetch_NoProjectID(t *testing.T) {
 	resetBacklogDBBatch(t)
 
@@ -613,9 +613,9 @@ func TestHandleItemBatchFetch_NoProjectID(t *testing.T) {
 	require.NoError(t, unmarshalResult(result, &items))
 	require.Len(t, items, 1)
 
-	// project_id must be 0 (zeroed) — not the real internal FK
-	projectID, hasKey := items[0]["project_id"]
-	if hasKey {
-		assert.Equal(t, float64(0), projectID, "project_id must be zeroed in MCP response")
-	}
+	// project_id must be omitted from MCP response (omitempty on zero value)
+	_, hasKey := items[0]["project_id"]
+	assert.False(t, hasKey, "project_id must be omitted from MCP response")
+	_, hasComponent := items[0]["component"]
+	assert.False(t, hasComponent, "component must be omitted when empty")
 }
