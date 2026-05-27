@@ -561,9 +561,8 @@ func TestHandleSearch_BothProvided_QueriesWins(t *testing.T) {
 	assert.Equal(t, "about alpha", resultSets[1][0].Title)
 }
 
-// TestHandleSearchWithProgress_CallsHandler verifies the wrapper invokes the
-// underlying search and returns results (exercises the inner function body at line 191).
-func TestHandleSearchWithProgress_CallsHandler(t *testing.T) {
+// TestHandleSearch_ReturnsResults verifies handleSearch returns matching documents.
+func TestHandleSearch_ReturnsResults(t *testing.T) {
 	resetDB(t)
 
 	// Seed a document
@@ -580,10 +579,7 @@ func TestHandleSearchWithProgress_CallsHandler(t *testing.T) {
 	_, err := handlePut(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
-	// Build a real MCPServer so unlockTier1 has a valid receiver
-	srv := buildServer(db, nil, "test-progress")
-
-	handler := handleSearchWithProgress(db, nil, srv)
+	handler := handleSearch(db)
 	searchReq := makeRequest(map[string]interface{}{
 		"query": "SQLite",
 	})
@@ -652,4 +648,158 @@ func TestHandleSearch_MultiProject(t *testing.T) {
 	assert.True(t, projects["project-a"])
 	assert.True(t, projects["project-b"])
 	assert.False(t, projects["project-c"])
+}
+
+// TestHandlePutBatch_CategoryNotesMetadata tests that category, notes, and metadata fields are stored.
+func TestHandlePutBatch_CategoryNotesMetadata(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":     "decision",
+				"project":  "acme-corp",
+				"title":    "Entry with extras",
+				"content":  "Content",
+				"category": "architecture",
+				"notes":    "Some notes here",
+				"metadata": map[string]interface{}{
+					"source": "meeting",
+					"owner":  "team-a",
+				},
+			},
+		},
+	})
+
+	result, err := handlePut(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var resp []map[string]interface{}
+	err = unmarshalResult(result, &resp)
+	require.NoError(t, err)
+	require.Len(t, resp, 1)
+	assert.Equal(t, "created", resp[0]["action"])
+}
+
+// TestHandleGet_Limit tests that the limit parameter is respected in filter/list mode.
+func TestHandleGet_Limit(t *testing.T) {
+	resetDB(t)
+
+	// Insert three documents
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "Doc 1", "content": "c1"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "Doc 2", "content": "c2"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "Doc 3", "content": "c3"},
+		},
+	})
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	// Request with limit=2
+	req := makeRequest(map[string]interface{}{
+		"type":  "fact",
+		"limit": float64(2),
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var docs []map[string]interface{}
+	err = unmarshalResult(result, &docs)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(docs), 2)
+}
+
+// TestHandleGet_BatchVerbose tests verbose mode strips notes.
+func TestHandleGet_BatchVerbose(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "Verbose test",
+				"content": "Content",
+				"notes":   "Private notes",
+			},
+		},
+	})
+	putResult, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	var putResp []map[string]interface{}
+	err = unmarshalResult(putResult, &putResp)
+	require.NoError(t, err)
+	id, ok := putResp[0]["id"].(float64)
+	require.True(t, ok)
+
+	// Non-verbose: notes should be empty
+	req := makeRequest(map[string]interface{}{
+		"ids":     []interface{}{id},
+		"verbose": false,
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+}
+
+// TestHandleSearch_SingleQuery_WithLimit tests single-query mode with limit.
+func TestHandleSearch_SingleQuery_WithLimit(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "alpha one", "content": "alpha content one"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "alpha two", "content": "alpha content two"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "alpha three", "content": "alpha content three"},
+		},
+	})
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"query": "alpha",
+		"limit": float64(1),
+	})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var summaries []store.DocumentSummary
+	err = unmarshalResult(result, &summaries)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(summaries), 1)
+}
+
+// TestHandleSearch_Batch_WithLimit tests batch mode with limit.
+func TestHandleSearch_Batch_WithLimit(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "beta one", "content": "beta content one"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "beta two", "content": "beta content two"},
+		},
+	})
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"queries": []interface{}{"beta"},
+		"limit":   float64(1),
+	})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resultSets [][]store.DocumentSummary
+	err = unmarshalResult(result, &resultSets)
+	require.NoError(t, err)
+	require.Len(t, resultSets, 1)
+	assert.LessOrEqual(t, len(resultSets[0]), 1)
 }

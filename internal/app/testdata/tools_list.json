@@ -47,6 +47,74 @@
     },
     {
       "annotations": {
+        "destructiveHint": true
+      },
+      "description": "Manage backlog items: ids fetch, entries create/update, or filters list.",
+      "inputSchema": {
+        "properties": {
+          "component": {
+            "description": "Component tag (subproject/plugin); filter or set",
+            "type": "string"
+          },
+          "delete_ids": {
+            "description": "Item IDs to delete",
+            "type": "array"
+          },
+          "entries": {
+            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, status?",
+            "type": "array"
+          },
+          "ids": {
+            "description": "Item IDs to fetch",
+            "type": "array"
+          },
+          "priority_max": {
+            "description": "Max priority (P0–P6)",
+            "type": "string"
+          },
+          "priority_min": {
+            "description": "Min priority (P0–P6)",
+            "type": "string"
+          },
+          "projects": {
+            "description": "Filter by project names",
+            "type": "array"
+          },
+          "status": {
+            "description": "open or done",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Include notes (default: false)",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "item"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true
+      },
+      "description": "Create/update KB documents (batch). Each: type, project, title, content, notes?, category?, tags?, metadata?",
+      "inputSchema": {
+        "properties": {
+          "entries": {
+            "description": "Documents to upsert",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "type": "object"
+      },
+      "name": "put"
+    },
+    {
+      "annotations": {
         "readOnlyHint": true
       },
       "description": "Keyword search (FTS5). Single query or queries[] batch. Multi-word = AND.",

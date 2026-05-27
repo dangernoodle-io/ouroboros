@@ -2,7 +2,6 @@ package app
 
 import (
 	"database/sql"
-	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -44,33 +43,13 @@ Items:
 - Component: optional tag for subproject scope (e.g., "plugin")
 - Filter by projects=[], priority range, status, component`
 
-// buildServer creates a new MCP server with progressive tool registration.
+// buildServer creates a new MCP server with all tools registered at startup.
 func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServer {
 	s := server.NewMCPServer("ouroboros", version,
 		server.WithToolCapabilities(true),
 		server.WithInstructions(serverInstructions),
 	)
 
-	registerTier0(s, db, bk)
-	return s
-}
-
-// toolAnnotation constructs a mcp.WithToolAnnotation option with only the
-// specified hint fields set (others remain nil to drop from JSON via omitempty).
-func toolAnnotation(readOnly, destructive, idempotent *bool) mcp.ToolOption {
-	return mcp.WithToolAnnotation(mcp.ToolAnnotation{
-		ReadOnlyHint:    readOnly,
-		DestructiveHint: destructive,
-		IdempotentHint:  idempotent,
-		OpenWorldHint:   nil, // always nil: local SQLite, no external calls
-	})
-}
-
-// tier1Once gates lazy registration of tier-1 tools.
-var tier1Once sync.Once
-
-// registerTier0 registers the entry-point tools: get and search.
-func registerTier0(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	s.AddTool(mcp.NewTool("get",
 		mcp.WithDescription("Get documents: ids array for fetch, or filters for list."),
 		mcp.WithArray("ids", mcp.Description("Document IDs (batch fetch)")),
@@ -82,7 +61,7 @@ func registerTier0(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithNumber("limit", mcp.Description("Limit, default 10, max 500")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
-	), withRecover(handleGetWithProgress(db, bk, s)))
+	), withRecover(handleGet(db)))
 
 	s.AddTool(mcp.NewTool("search",
 		mcp.WithDescription("Keyword search (FTS5). Single query or queries[] batch. Multi-word = AND."),
@@ -92,11 +71,8 @@ func registerTier0(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithArray("projects", mcp.Description("Filter by project names")),
 		mcp.WithNumber("limit", mcp.Description("Limit per query, default 10, max 500")),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
-	), withRecover(handleSearchWithProgress(db, bk, s)))
-}
+	), withRecover(handleSearch(db)))
 
-// registerTier1 registers tools for document creation and backlog management.
-func registerTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 	s.AddTool(mcp.NewTool("put",
 		mcp.WithDescription("Create/update KB documents (batch). Each: type, project, title, content, notes?, category?, tags?, metadata?"),
 		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to upsert")),
@@ -115,13 +91,18 @@ func registerTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
 		mcp.WithString("component", mcp.Description("Component tag (subproject/plugin); filter or set")),
 		mcp.WithBoolean("verbose", mcp.Description("Include notes (default: false)")),
 		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
-	), withRecover(handleItemWithProgress(db, bk)))
+	), withRecover(handleItem(db, bk)))
+
+	return s
 }
 
-// unlockTier1 registers tier-1 tools once and notifies clients.
-func unlockTier1(s *server.MCPServer, db *sql.DB, bk *backup.Backup) {
-	tier1Once.Do(func() {
-		registerTier1(s, db, bk)
-		s.SendNotificationToAllClients("tools/list_changed", nil)
+// toolAnnotation constructs a mcp.WithToolAnnotation option with only the
+// specified hint fields set (others remain nil to drop from JSON via omitempty).
+func toolAnnotation(readOnly, destructive, idempotent *bool) mcp.ToolOption {
+	return mcp.WithToolAnnotation(mcp.ToolAnnotation{
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: destructive,
+		IdempotentHint:  idempotent,
+		OpenWorldHint:   nil, // always nil: local SQLite, no external calls
 	})
 }
