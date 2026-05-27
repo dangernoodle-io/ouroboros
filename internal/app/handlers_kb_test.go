@@ -255,7 +255,7 @@ func TestHandlePutValidationAbortsEntireBatch(t *testing.T) {
 
 	// Verify no entries were written
 	getListReq := makeRequest(map[string]interface{}{
-		"type": "decision",
+		"types": []interface{}{"decision"},
 	})
 	getResult, err := handleGet(db)(context.TODO(), getListReq)
 	require.NoError(t, err)
@@ -700,7 +700,7 @@ func TestHandleGet_Limit(t *testing.T) {
 
 	// Request with limit=2
 	req := makeRequest(map[string]interface{}{
-		"type":  "fact",
+		"types": []interface{}{"fact"},
 		"limit": float64(2),
 	})
 	result, err := handleGet(db)(context.TODO(), req)
@@ -847,4 +847,106 @@ func TestHandleSearch_Batch_WithLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resultSets, 1)
 	assert.LessOrEqual(t, len(resultSets[0]), 1)
+}
+
+// TestHandleGet_MultiTypes tests types[] array returns docs of all listed types.
+func TestHandleGet_MultiTypes(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"type": "decision", "project": "acme-corp", "title": "A decision", "content": "c1"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "A fact", "content": "c2"},
+			map[string]interface{}{"type": "note", "project": "acme-corp", "title": "A note", "content": "c3"},
+		},
+	})
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"types": []interface{}{"decision", "fact"},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var docs []map[string]interface{}
+	err = unmarshalResult(result, &docs)
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+
+	types := make(map[string]bool)
+	for _, d := range docs {
+		tp, ok := d["type"].(string)
+		require.True(t, ok)
+		types[tp] = true
+	}
+	assert.True(t, types["decision"])
+	assert.True(t, types["fact"])
+	assert.False(t, types["note"])
+}
+
+// TestHandleGet_MultiCategories tests categories[] array returns docs from all listed categories.
+func TestHandleGet_MultiCategories(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "category": "architecture", "title": "Arch fact", "content": "c1"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "category": "config", "title": "Config fact", "content": "c2"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "category": "ops", "title": "Ops fact", "content": "c3"},
+		},
+	})
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"categories": []interface{}{"architecture", "config"},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var docs []map[string]interface{}
+	err = unmarshalResult(result, &docs)
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+
+	cats := make(map[string]bool)
+	for _, d := range docs {
+		cat, ok := d["category"].(string)
+		require.True(t, ok)
+		cats[cat] = true
+	}
+	assert.True(t, cats["architecture"])
+	assert.True(t, cats["config"])
+	assert.False(t, cats["ops"])
+}
+
+// TestHandleSearch_CategoriesFilter tests search with categories[] filter.
+func TestHandleSearch_CategoriesFilter(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "category": "arch", "title": "arch fact", "content": "postgres storage"},
+			map[string]interface{}{"type": "fact", "project": "acme-corp", "category": "ops", "title": "ops fact", "content": "postgres deployment"},
+		},
+	})
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"query":      "postgres",
+		"categories": []interface{}{"arch"},
+	})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var summaries []store.DocumentSummary
+	err = unmarshalResult(result, &summaries)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "arch", summaries[0].Category)
 }

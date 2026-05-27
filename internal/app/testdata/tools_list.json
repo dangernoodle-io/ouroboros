@@ -7,9 +7,12 @@
       "description": "Get documents: ids array for fetch, or filters for list.",
       "inputSchema": {
         "properties": {
-          "category": {
-            "description": "Filter by category",
-            "type": "string"
+          "categories": {
+            "description": "Filter by categories",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "ids": {
             "description": "Document IDs (batch fetch)",
@@ -31,9 +34,12 @@
             "description": "Filter by tags (all match)",
             "type": "array"
           },
-          "type": {
-            "description": "Filter by type",
-            "type": "string"
+          "types": {
+            "description": "Filter by types",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "verbose": {
             "description": "Include notes (default: false)",
@@ -120,8 +126,15 @@
       "description": "Keyword search (FTS5). Single query or queries[] batch. Multi-word = AND.",
       "inputSchema": {
         "properties": {
+          "categories": {
+            "description": "Filter by categories",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "limit": {
-            "description": "Limit per query, default 10, max 500",
+            "description": "Limit, default 10, max 500",
             "type": "number"
           },
           "projects": {
@@ -136,9 +149,12 @@
             "description": "Single query",
             "type": "string"
           },
-          "type": {
-            "description": "Filter by type",
-            "type": "string"
+          "types": {
+            "description": "Filter by types",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [],

@@ -120,7 +120,7 @@ func TestQueryDocumentsByType(t *testing.T) {
 	require.NoError(t, err)
 
 	// Query by type
-	summaries, err := store.QueryDocuments(db, "note", nil, "", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, []string{"note"}, nil, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "note", summaries[0].Type)
@@ -138,7 +138,7 @@ func TestQueryDocumentsByProject(t *testing.T) {
 	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "acme-corp", summaries[0].Project)
@@ -155,7 +155,7 @@ func TestQueryDocumentsByCategory(t *testing.T) {
 	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := store.QueryDocuments(db, "", nil, "config", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, nil, nil, []string{"config"}, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "config", summaries[0].Category)
@@ -182,7 +182,7 @@ func TestQueryDocumentsFTS(t *testing.T) {
 	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := store.QueryDocuments(db, "", nil, "", "goreleaser", nil, 50)
+	summaries, err := store.QueryDocuments(db, nil, nil, nil, "goreleaser", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "release-process", summaries[0].Title)
@@ -203,7 +203,7 @@ func TestQueryDocumentsTagFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Query for documents with both ci AND release tags
-	summaries, err := store.QueryDocuments(db, "", nil, "", "", []string{"ci", "release"}, 50)
+	summaries, err := store.QueryDocuments(db, nil, nil, nil, "", []string{"ci", "release"}, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "Release", summaries[0].Title)
@@ -223,7 +223,7 @@ func TestQueryDocumentsReturnsNoContent(t *testing.T) {
 	_, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
 
-	summaries, err := store.QueryDocuments(db, "", nil, "", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, nil, nil, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 
@@ -293,7 +293,7 @@ func TestSearchDocuments(t *testing.T) {
 	_, err = store.UpsertDocument(db, doc3)
 	require.NoError(t, err)
 
-	summaries, err := store.SearchDocuments(db, "PostgreSQL", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "Database Choice", summaries[0].Title)
@@ -310,7 +310,7 @@ func TestSearchDocumentsWithTypeFilter(t *testing.T) {
 	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := store.SearchDocuments(db, "PostgreSQL", "decision", nil, 50)
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", []string{"decision"}, nil, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "decision", summaries[0].Type)
@@ -327,7 +327,7 @@ func TestSearchDocumentsWithProjectFilter(t *testing.T) {
 	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := store.SearchDocuments(db, "PostgreSQL", "", []string{"acme-corp"}, 50)
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", nil, []string{"acme-corp"}, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "acme-corp", summaries[0].Project)
@@ -708,7 +708,7 @@ func TestSearchDocumentsWildcardFallback(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test wildcard query falls back to list mode
-	summaries, err := store.SearchDocuments(db, "*", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "*", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.NotNil(t, summaries)
 	require.Len(t, summaries, 1)
@@ -730,7 +730,7 @@ func TestSearchDocumentsPunctuationOnlyFallback(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test punctuation-only query falls back to list mode
-	summaries, err := store.SearchDocuments(db, "!!!", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "!!!", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.NotNil(t, summaries)
 	require.Len(t, summaries, 1)
@@ -752,7 +752,7 @@ func TestSearchDocumentsEmptyStringReturnsEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	// Empty query should fall back and return results
-	summaries, err := store.SearchDocuments(db, "", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.NotNil(t, summaries)
 	require.Len(t, summaries, 1)
@@ -781,7 +781,7 @@ func TestSearchDocumentsValidQueryStillWorks(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test valid FTS query still works
-	summaries, err := store.SearchDocuments(db, "Golang", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "Golang", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.NotNil(t, summaries)
 	require.Len(t, summaries, 1)
@@ -792,7 +792,7 @@ func TestSearchDocumentsReturnsEmptySliceNotNil(t *testing.T) {
 	db := testDB(t)
 
 	// Search in empty database
-	summaries, err := store.SearchDocuments(db, "nonexistent", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "nonexistent", nil, nil, nil, 50)
 	require.NoError(t, err)
 	// Verify it's an empty slice, not nil
 	require.NotNil(t, summaries)
@@ -822,7 +822,7 @@ func TestSearchDocumentsMultiWordAND(t *testing.T) {
 	require.NoError(t, err)
 
 	// Query for "alpha beta" should only match doc1 (implicit AND)
-	summaries, err := store.SearchDocuments(db, "alpha beta", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "alpha beta", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "Alpha and Beta", summaries[0].Title)
@@ -843,7 +843,7 @@ func TestSearchDocumentsMultiWordPartialMiss(t *testing.T) {
 	require.NoError(t, err)
 
 	// Query for "alpha zzznothere" should return empty (implicit AND)
-	summaries, err := store.SearchDocuments(db, "alpha zzznothere", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "alpha zzznothere", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 0)
 }
@@ -889,7 +889,7 @@ func TestSearchDocumentsMultiProject(t *testing.T) {
 	require.NoError(t, err)
 
 	// Search for "architecture" in acme-corp and other-corp
-	results, err := store.SearchDocuments(db, "architecture", "", []string{"acme-corp", "other-corp"}, 50)
+	results, err := store.SearchDocuments(db, "architecture", nil, []string{"acme-corp", "other-corp"}, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 
@@ -914,7 +914,7 @@ func TestQueryDocumentsMultiProject(t *testing.T) {
 	require.NoError(t, err)
 
 	// Query for facts in acme-corp and other-corp
-	results, err := store.QueryDocuments(db, "fact", []string{"acme-corp", "other-corp"}, "", "", nil, 50)
+	results, err := store.QueryDocuments(db, []string{"fact"}, []string{"acme-corp", "other-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 
@@ -1087,7 +1087,7 @@ func TestQueryDocumentsBySessionID(t *testing.T) {
 	_, err = store.UpsertDocument(db, doc2)
 	require.NoError(t, err)
 
-	summaries, err := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50, "sess-xyz")
+	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50, "sess-xyz")
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "in-session", summaries[0].Title)
@@ -1159,7 +1159,7 @@ func TestQueryDocumentsNullSessionIDReturnsNone(t *testing.T) {
 	_, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
 
-	summaries, err := store.QueryDocuments(db, "", nil, "", "", nil, 50, "sess-nonexistent")
+	summaries, err := store.QueryDocuments(db, nil, nil, nil, "", nil, 50, "sess-nonexistent")
 	require.NoError(t, err)
 	assert.Empty(t, summaries)
 }
@@ -1297,7 +1297,7 @@ func TestQueryDocuments_UpdatedAtDateFormat(t *testing.T) {
 	_, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
 
-	summaries, err := store.QueryDocuments(db, "note", nil, "", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, []string{"note"}, nil, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 
@@ -1314,7 +1314,7 @@ func TestQueryDocuments_ShortUpdatedAtFallback(t *testing.T) {
 		VALUES ('note', 'acme-corp', '', 'short-date-doc', 'content', '', '{}', '[]', '2024-01', '2024-01')`)
 	require.NoError(t, err)
 
-	summaries, err := store.QueryDocuments(db, "note", nil, "", "", nil, 50)
+	summaries, err := store.QueryDocuments(db, []string{"note"}, nil, nil, "", nil, 50)
 	require.NoError(t, err)
 
 	// Find the short-date-doc
@@ -1342,7 +1342,7 @@ func TestSearchDocuments_UpdatedAtDateFormat(t *testing.T) {
 	_, err := store.UpsertDocument(db, doc)
 	require.NoError(t, err)
 
-	summaries, err := store.SearchDocuments(db, "PostgreSQL", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 
@@ -1361,7 +1361,7 @@ func TestSearchDocuments_ShortUpdatedAtFallback(t *testing.T) {
 	_, err = db.Exec("INSERT INTO documents_fts(documents_fts) VALUES('rebuild')")
 	require.NoError(t, err)
 
-	summaries, err := store.SearchDocuments(db, "xyzunique987", "", nil, 50)
+	summaries, err := store.SearchDocuments(db, "xyzunique987", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "2024-01", summaries[0].UpdatedAt)
@@ -1532,7 +1532,7 @@ func TestUpsertDocument_NoSessionID(t *testing.T) {
 	assert.Empty(t, retrieved.SessionID)
 
 	// Must not appear in a session-filtered query.
-	summaries, err := store.QueryDocuments(db, "", nil, "", "", nil, 50, "some-session")
+	summaries, err := store.QueryDocuments(db, nil, nil, nil, "", nil, 50, "some-session")
 	require.NoError(t, err)
 	assert.Empty(t, summaries)
 }
@@ -1554,4 +1554,112 @@ func TestUpsertDocument_ExecError(t *testing.T) {
 
 	_, err = store.UpsertDocument(db, doc)
 	require.Error(t, err)
+}
+
+// TestQueryDocuments_MultiTypes verifies types[] IN filter returns all matching types.
+func TestQueryDocuments_MultiTypes(t *testing.T) {
+	db := testDB(t)
+
+	docs := []store.Document{
+		{Type: "decision", Project: "acme-corp", Title: "dec1", Content: "c"},
+		{Type: "fact", Project: "acme-corp", Title: "fact1", Content: "c"},
+		{Type: "note", Project: "acme-corp", Title: "note1", Content: "c"},
+	}
+	for _, d := range docs {
+		_, err := store.UpsertDocument(db, d)
+		require.NoError(t, err)
+	}
+
+	results, err := store.QueryDocuments(db, []string{"decision", "fact"}, nil, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	typeSet := make(map[string]bool)
+	for _, r := range results {
+		typeSet[r.Type] = true
+	}
+	assert.True(t, typeSet["decision"])
+	assert.True(t, typeSet["fact"])
+	assert.False(t, typeSet["note"])
+}
+
+// TestQueryDocuments_MultiCategories verifies categories[] IN filter returns all matching categories.
+func TestQueryDocuments_MultiCategories(t *testing.T) {
+	db := testDB(t)
+
+	docs := []store.Document{
+		{Type: "fact", Project: "acme-corp", Category: "architecture", Title: "arch", Content: "c"},
+		{Type: "fact", Project: "acme-corp", Category: "config", Title: "conf", Content: "c"},
+		{Type: "fact", Project: "acme-corp", Category: "ops", Title: "ops", Content: "c"},
+	}
+	for _, d := range docs {
+		_, err := store.UpsertDocument(db, d)
+		require.NoError(t, err)
+	}
+
+	results, err := store.QueryDocuments(db, nil, nil, []string{"architecture", "config"}, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	catSet := make(map[string]bool)
+	for _, r := range results {
+		catSet[r.Category] = true
+	}
+	assert.True(t, catSet["architecture"])
+	assert.True(t, catSet["config"])
+	assert.False(t, catSet["ops"])
+}
+
+// TestSearchDocuments_MultiTypes verifies types[] filter on search.
+func TestSearchDocuments_MultiTypes(t *testing.T) {
+	db := testDB(t)
+
+	docs := []store.Document{
+		{Type: "decision", Project: "acme-corp", Title: "dec search", Content: "golang service decision"},
+		{Type: "fact", Project: "acme-corp", Title: "fact search", Content: "golang service fact"},
+		{Type: "note", Project: "acme-corp", Title: "note search", Content: "golang service note"},
+	}
+	for _, d := range docs {
+		_, err := store.UpsertDocument(db, d)
+		require.NoError(t, err)
+	}
+
+	results, err := store.SearchDocuments(db, "golang", []string{"decision", "fact"}, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	typeSet := make(map[string]bool)
+	for _, r := range results {
+		typeSet[r.Type] = true
+	}
+	assert.True(t, typeSet["decision"])
+	assert.True(t, typeSet["fact"])
+	assert.False(t, typeSet["note"])
+}
+
+// TestSearchDocuments_MultiCategories verifies categories[] filter on search.
+func TestSearchDocuments_MultiCategories(t *testing.T) {
+	db := testDB(t)
+
+	docs := []store.Document{
+		{Type: "fact", Project: "acme-corp", Category: "arch", Title: "arch search", Content: "redis cache decision"},
+		{Type: "fact", Project: "acme-corp", Category: "ops", Title: "ops search", Content: "redis deployment ops"},
+		{Type: "fact", Project: "acme-corp", Category: "security", Title: "sec search", Content: "redis auth security"},
+	}
+	for _, d := range docs {
+		_, err := store.UpsertDocument(db, d)
+		require.NoError(t, err)
+	}
+
+	results, err := store.SearchDocuments(db, "redis", nil, nil, []string{"arch", "ops"}, 50)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	catSet := make(map[string]bool)
+	for _, r := range results {
+		catSet[r.Category] = true
+	}
+	assert.True(t, catSet["arch"])
+	assert.True(t, catSet["ops"])
+	assert.False(t, catSet["security"])
 }

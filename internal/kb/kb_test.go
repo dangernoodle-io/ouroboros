@@ -166,13 +166,13 @@ func TestImportJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify decision imported
-	decisions, err := store.QueryDocuments(testdb, "decision", []string{"acme-corp"}, "", "", nil, 50)
+	decisions, err := store.QueryDocuments(testdb, []string{"decision"}, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 	assert.Equal(t, "Use PostgreSQL", decisions[0].Title)
 
 	// Verify fact imported
-	facts, err := store.QueryDocuments(testdb, "fact", []string{"acme-corp"}, "", "", nil, 50)
+	facts, err := store.QueryDocuments(testdb, []string{"fact"}, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, facts, 1)
 	assert.Equal(t, "db-host", facts[0].Title)
@@ -205,13 +205,13 @@ func TestImportJSONDefaultProject(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify decision used default project
-	decisions, err := store.QueryDocuments(testdb, "decision", []string{"acme-corp"}, "", "", nil, 50)
+	decisions, err := store.QueryDocuments(testdb, []string{"decision"}, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, decisions, 1)
 	assert.Equal(t, "acme-corp", decisions[0].Project)
 
 	// Verify fact used default project
-	facts, err := store.QueryDocuments(testdb, "fact", []string{"acme-corp"}, "", "", nil, 50)
+	facts, err := store.QueryDocuments(testdb, []string{"fact"}, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, facts, 1)
 	assert.Equal(t, "acme-corp", facts[0].Project)
@@ -260,7 +260,7 @@ func TestImportDataAutoDetectJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify imported
-	docs, err := store.QueryDocuments(testdb, "decision", []string{"acme-corp"}, "", "", nil, 50)
+	docs, err := store.QueryDocuments(testdb, []string{"decision"}, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 }
@@ -362,10 +362,10 @@ func TestExportImportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify counts match between databases
-	docs1, err := store.QueryDocuments(testdb1, "", []string{"acme-corp"}, "", "", nil, 500)
+	docs1, err := store.QueryDocuments(testdb1, nil, []string{"acme-corp"}, nil, "", nil, 500)
 	require.NoError(t, err)
 
-	docs2, err := store.QueryDocuments(testdb2, "", []string{"acme-corp"}, "", "", nil, 500)
+	docs2, err := store.QueryDocuments(testdb2, nil, []string{"acme-corp"}, nil, "", nil, 500)
 	require.NoError(t, err)
 
 	assert.Equal(t, len(docs1), len(docs2))
@@ -390,7 +390,7 @@ func TestImportJSONWhitespace(t *testing.T) {
 	err := kb.Import(testdb, "", jsonStr)
 	require.NoError(t, err)
 
-	docs, err := store.QueryDocuments(testdb, "decision", []string{"acme-corp"}, "", "", nil, 50)
+	docs, err := store.QueryDocuments(testdb, []string{"decision"}, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 	assert.Equal(t, "Test Decision", docs[0].Title)
@@ -438,7 +438,7 @@ func TestWriteBatch_ValidationFailureAbortsAll(t *testing.T) {
 	assert.Nil(t, results)
 
 	// Neither entry should be in DB
-	docs, qerr := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	docs, qerr := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, qerr)
 	assert.Empty(t, docs)
 }
@@ -458,7 +458,7 @@ func TestWriteBatch_RebuildFTSCalledOnce(t *testing.T) {
 	// FTS search for each distinct token must return the correct doc,
 	// proving RebuildFTS ran after commit (not mid-tx, where it would fail).
 	for _, e := range entries {
-		results, serr := store.SearchDocuments(db, e.Content, "", nil, 10)
+		results, serr := store.SearchDocuments(db, e.Content, nil, nil, nil, 10)
 		require.NoError(t, serr)
 		require.Len(t, results, 1, "FTS should find exactly one doc for %q", e.Content)
 		assert.Equal(t, e.Title, results[0].Title)
@@ -505,19 +505,19 @@ func TestImportMultipleProjects(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify both projects have data
-	docs1, err := store.QueryDocuments(testdb, "decision", []string{"acme-corp"}, "", "", nil, 50)
+	docs1, err := store.QueryDocuments(testdb, []string{"decision"}, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, docs1, 1)
 
-	docs2, err := store.QueryDocuments(testdb, "decision", []string{"other-proj"}, "", "", nil, 50)
+	docs2, err := store.QueryDocuments(testdb, []string{"decision"}, []string{"other-proj"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, docs2, 1)
 
-	facts1, err := store.QueryDocuments(testdb, "fact", []string{"acme-corp"}, "", "", nil, 50)
+	facts1, err := store.QueryDocuments(testdb, []string{"fact"}, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, facts1, 1)
 
-	facts2, err := store.QueryDocuments(testdb, "fact", []string{"other-proj"}, "", "", nil, 50)
+	facts2, err := store.QueryDocuments(testdb, []string{"fact"}, []string{"other-proj"}, nil, "", nil, 50)
 	require.NoError(t, err)
 	assert.Len(t, facts2, 1)
 }
@@ -553,7 +553,7 @@ func TestImportJSON_AtomicRollback(t *testing.T) {
 	require.NoError(t, dropErr)
 
 	// No rows must have been committed — the transaction must have rolled back.
-	docs, qerr := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	docs, qerr := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, qerr)
 	assert.Empty(t, docs, "no documents should persist after a rolled-back import")
 }
@@ -577,7 +577,7 @@ func TestImportJSON_ValidationFailureAbortsBeforeTx(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing title")
 
-	docs, qerr := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	docs, qerr := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, qerr)
 	assert.Empty(t, docs)
 }
@@ -607,7 +607,7 @@ func TestImportJSON_MissingType(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing type")
 
-	docs, qerr := store.QueryDocuments(db, "", []string{"acme-corp"}, "", "", nil, 50)
+	docs, qerr := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
 	require.NoError(t, qerr)
 	assert.Empty(t, docs)
 }

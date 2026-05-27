@@ -55,10 +55,18 @@ func runLSKB(out io.Writer, db *sql.DB, projectName, docType, category string, t
 	var summaries []store.DocumentSummary
 	var err error
 
+	var docTypes []string
+	if docType != "" {
+		docTypes = []string{docType}
+	}
+	var categories []string
+	if category != "" {
+		categories = []string{category}
+	}
 	if search != "" {
-		summaries, err = store.SearchDocuments(db, search, docType, projects, limit)
+		summaries, err = store.SearchDocuments(db, search, docTypes, projects, categories, limit)
 	} else {
-		summaries, err = store.QueryDocuments(db, docType, projects, category, "", tags, limit)
+		summaries, err = store.QueryDocuments(db, docTypes, projects, categories, "", tags, limit)
 	}
 	if err != nil {
 		return fmt.Errorf("ls kb: query failed: %w", err)

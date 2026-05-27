@@ -70,7 +70,7 @@ func TestRunImportValidJSON(t *testing.T) {
 	assert.Equal(t, "ok\n", buf.String())
 
 	// Verify document was imported
-	docs, err := store.QueryDocuments(db, "", []string{"test-proj"}, "", "", nil, 10)
+	docs, err := store.QueryDocuments(db, nil, []string{"test-proj"}, nil, "", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 	assert.Equal(t, "Use PostgreSQL", docs[0].Title)
@@ -95,7 +95,7 @@ func TestRunImportWithDefaultProject(t *testing.T) {
 	assert.Equal(t, "ok\n", buf.String())
 
 	// Verify document was imported with default project
-	docs, err := store.QueryDocuments(db, "", []string{"default-proj"}, "", "", nil, 10)
+	docs, err := store.QueryDocuments(db, nil, []string{"default-proj"}, nil, "", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 	assert.Equal(t, "default-proj", docs[0].Project)
@@ -133,7 +133,7 @@ func TestRunImportMultipleDocuments(t *testing.T) {
 	assert.Equal(t, "ok\n", buf.String())
 
 	// Verify all documents were imported
-	docs, err := store.QueryDocuments(db, "", []string{"test-proj"}, "", "", nil, 10)
+	docs, err := store.QueryDocuments(db, nil, []string{"test-proj"}, nil, "", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, docs, 3)
 }
@@ -216,7 +216,7 @@ func TestRunImportWithTags(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify document with tags was imported
-	docs, err := store.QueryDocuments(db, "", []string{"test-proj"}, "", "", nil, 10)
+	docs, err := store.QueryDocuments(db, nil, []string{"test-proj"}, nil, "", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 	assert.Equal(t, "Deployment strategy", docs[0].Title)
@@ -246,7 +246,7 @@ func TestRunImportWithMetadata(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify document with metadata was imported
-	docs, err := store.QueryDocuments(db, "", []string{"test-proj"}, "", "", nil, 10)
+	docs, err := store.QueryDocuments(db, nil, []string{"test-proj"}, nil, "", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 

@@ -52,7 +52,11 @@ func runQuery(out io.Writer, db *sql.DB, project, docType, search, sessionID str
 			return fmt.Errorf("query: search failed: %w", err)
 		}
 	} else {
-		summaries, err = store.QueryDocuments(db, docType, projects, "", "", nil, limit, sessionID)
+		var docTypes []string
+		if docType != "" {
+			docTypes = []string{docType}
+		}
+		summaries, err = store.QueryDocuments(db, docTypes, projects, nil, "", nil, limit, sessionID)
 		if err != nil {
 			return fmt.Errorf("query: list failed: %w", err)
 		}
