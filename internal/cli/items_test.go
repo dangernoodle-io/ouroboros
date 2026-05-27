@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -36,6 +37,28 @@ func TestRunItemsProjectNotFound(t *testing.T) {
 	err := runItems(&buf, db, "nonexistent", "open")
 	require.NoError(t, err) // swallowed
 	assert.Equal(t, "[]", strings.TrimSpace(buf.String()))
+}
+
+func TestRunItemsLimit(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	for i := range 5 {
+		_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", fmt.Sprintf("Item %d", i+1), "", "", "")
+		require.NoError(t, err)
+	}
+
+	old := itemsLimitFlag
+	itemsLimitFlag = 3
+	t.Cleanup(func() { itemsLimitFlag = old })
+
+	var buf bytes.Buffer
+	err = runItems(&buf, db, "acme-corp", "open")
+	require.NoError(t, err)
+
+	var items []backlog.Item
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &items))
+	assert.Len(t, items, 3)
 }
 
 func TestRunItemsStatusDone(t *testing.T) {

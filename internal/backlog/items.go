@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 )
 
 type Item struct {
@@ -34,7 +33,7 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 	}
 
 	id := fmt.Sprintf("%s-%d", prefix, seq)
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := nowRFC3339()
 
 	_, err = tx.Exec(
 		"INSERT INTO items (id, project_id, seq, priority, title, description, notes, component, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
@@ -102,7 +101,7 @@ func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
 		return GetItem(d, id)
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := nowRFC3339()
 	sets = append(sets, "updated = ?")
 	args = append(args, now)
 	args = append(args, id)
@@ -115,7 +114,7 @@ func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
 }
 
 func MarkDone(d *sql.DB, id string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := nowRFC3339()
 	result, err := d.Exec("UPDATE items SET status = 'done', updated = ? WHERE id = ?", now, id)
 	if err != nil {
 		return fmt.Errorf("mark done: %w", err)
@@ -152,6 +151,7 @@ type ItemFilter struct {
 	PriorityMax *int
 	Status      *string
 	Component   *string
+	Limit       int
 }
 
 func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
@@ -187,6 +187,11 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 	}
 
 	query += " ORDER BY CAST(SUBSTR(priority, 2) AS INTEGER), id"
+
+	if f.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, f.Limit)
+	}
 
 	rows, err := d.Query(query, args...)
 	if err != nil {

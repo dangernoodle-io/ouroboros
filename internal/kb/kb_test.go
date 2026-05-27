@@ -611,3 +611,39 @@ func TestImportJSON_MissingType(t *testing.T) {
 	require.NoError(t, qerr)
 	assert.Empty(t, docs)
 }
+
+func TestWriteBatchIntraBatchDedup(t *testing.T) {
+	db := testDB(t)
+
+	// 3 entries: index 0 and 2 share the same key; index 2 (last-wins) should survive.
+	entries := []kb.Entry{
+		{Type: "decision", Project: "acme-corp", Category: "arch", Title: "cache-strategy", Content: "first version"},
+		{Type: "decision", Project: "acme-corp", Category: "arch", Title: "db-choice", Content: "use postgres"},
+		{Type: "decision", Project: "acme-corp", Category: "arch", Title: "cache-strategy", Content: "last version wins"},
+	}
+
+	results, err := kb.WriteBatch(db, entries, "")
+	require.NoError(t, err)
+
+	// Only 2 distinct keys → 2 results
+	require.Len(t, results, 2)
+
+	// Verify only 2 rows stored
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+
+	// Find the cache-strategy doc and verify index 2's content won
+	var cacheDoc *store.DocumentSummary
+	for i := range docs {
+		if docs[i].Title == "cache-strategy" {
+			cacheDoc = &docs[i]
+			break
+		}
+	}
+	require.NotNil(t, cacheDoc, "cache-strategy doc not found")
+
+	full, err := store.GetDocument(db, cacheDoc.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "last version wins", full.Content)
+}

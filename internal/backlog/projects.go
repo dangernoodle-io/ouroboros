@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 )
 
 var projectNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{2,}$`)
@@ -47,7 +46,7 @@ func CreateProject(db *sql.DB, name, prefix string) (*Project, error) {
 	if err := ValidateProjectName(name); err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := nowRFC3339()
 	result, err := db.Exec("INSERT INTO projects (name, prefix, created) VALUES (?, ?, ?)", name, prefix, now)
 	if err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
@@ -279,8 +278,8 @@ func RenameProject(db *sql.DB, oldName, newName, newPrefix string) (*Project, er
 	}
 
 	if newPrefix != "" {
-		nowRFC3339 := time.Now().UTC().Format(time.RFC3339)
-		if err := renamePrefixInTx(tx, project.ID, newPrefix, nowRFC3339); err != nil {
+		renamedAt := nowRFC3339()
+		if err := renamePrefixInTx(tx, project.ID, newPrefix, renamedAt); err != nil {
 			return nil, err
 		}
 	}
