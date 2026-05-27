@@ -343,6 +343,8 @@ func TestHandleSearch_SingleQuery_BackwardsCompat(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "tiktoken", summaries[0].Title)
+	// SearchDocuments uses FTS path; score field should not be populated (SearchDocuments doesn't expose BM25)
+	assert.Zero(t, summaries[0].Score)
 }
 
 // TestHandleSearch_Batch_PositionalResults tests batch mode returns [][]DocumentSummary in input order.

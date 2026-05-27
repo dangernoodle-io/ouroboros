@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, extractAllKbBlocks, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType } = require('../scripts/lib');
+const { extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -1202,4 +1202,88 @@ test('ALREADY_PERSISTED_PATTERNS - true confirm: tool_result payload create shou
 test('ALREADY_PERSISTED_PATTERNS - true confirm: tool_result payload update should match', () => {
   const msg = 'mcp__plugin__put_entry {"action": "update", "title": "decision updated"}';
   assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), true);
+});
+
+// OU-124: extractAllKbBlocks perf — tail-read cap
+test('extractAllKbBlocks - large file: only reads tail (MAX_TAIL_BYTES cap)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-large-'));
+  const transcriptPath = path.join(tmpDir, 'large.jsonl');
+
+  // Build a file well over 2MB by prepending bulk content before the real lines.
+  // The decision lines are placed at the end so they fall within the tail window.
+  const decisionLine = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: 'We decided to use PostgreSQL' }] },
+  }) + '\n';
+
+  // Pad to exceed MAX_TAIL_BYTES with non-decision lines
+  const paddingLine = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: 'Regular filler text here' }] },
+  }) + '\n';
+
+  // Write bulk padding (3MB worth) then 10 decision lines at end
+  const fd = fs.openSync(transcriptPath, 'w');
+  let written = 0;
+  while (written < MAX_TAIL_BYTES * 1.5) {
+    const buf = Buffer.from(paddingLine);
+    fs.writeSync(fd, buf);
+    written += buf.length;
+  }
+  for (let i = 0; i < 10; i++) {
+    fs.writeSync(fd, Buffer.from(decisionLine));
+  }
+  fs.closeSync(fd);
+
+  const stat = fs.statSync(transcriptPath);
+  assert(stat.size > MAX_TAIL_BYTES, 'file should exceed MAX_TAIL_BYTES for this test to be meaningful');
+
+  const start = Date.now();
+  const result = extractAllKbBlocks(transcriptPath);
+  const elapsed = Date.now() - start;
+
+  // Perf assertion: should complete well under 500ms even for a large file
+  assert(elapsed < 500, `extractAllKbBlocks took ${elapsed}ms, expected < 500ms`);
+
+  // Decision lines at the tail should be detected
+  const decisionCount = result.turns.filter(t => t.hasDecisionLanguage).length;
+  assert(decisionCount > 0, 'should detect decision turns from the tail');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('extractAllKbBlocks - large file: kb-blocks in tail are parsed correctly', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-large-kb-'));
+  const transcriptPath = path.join(tmpDir, 'large.jsonl');
+
+  const kbJson = '[{"type":"decision","title":"use postgres"}]';
+  const kbLine = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: `Decision:\n\`\`\`kb\n${kbJson}\n\`\`\`` }] },
+  }) + '\n';
+
+  const paddingLine = JSON.stringify({
+    type: 'assistant',
+    isSidechain: false,
+    message: { content: [{ type: 'text', text: 'filler line' }] },
+  }) + '\n';
+
+  const fd = fs.openSync(transcriptPath, 'w');
+  let written = 0;
+  while (written < MAX_TAIL_BYTES * 1.5) {
+    const buf = Buffer.from(paddingLine);
+    fs.writeSync(fd, buf);
+    written += buf.length;
+  }
+  fs.writeSync(fd, Buffer.from(kbLine));
+  fs.closeSync(fd);
+
+  const result = extractAllKbBlocks(transcriptPath);
+  assert(result.blocks.length >= 1, 'should find the kb-block placed in the tail');
+  assert.strictEqual(result.blocks[result.blocks.length - 1].text, kbJson);
+
+  fs.rmSync(tmpDir, { recursive: true });
 });

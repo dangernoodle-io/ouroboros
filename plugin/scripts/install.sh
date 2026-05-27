@@ -24,7 +24,11 @@ if [ -n "${OUROBOROS_DEV_BINARY:-}" ]; then
   if [ -x "$BINARY" ] && [ "$(stat_mt_size "$OUROBOROS_DEV_BINARY")" = "$(stat_mt_size "$BINARY")" ]; then
     exit 0
   fi
-  cp "$OUROBOROS_DEV_BINARY" "$BINARY"
+  # Atomic rename: copy to a temp file first, then mv into place.
+  # mv on the same filesystem is atomic — in-flight MCP subprocesses keep the
+  # old inode open until they exit; the next spawn picks up the new binary.
+  cp "$OUROBOROS_DEV_BINARY" "$BINARY.tmp"
+  mv "$BINARY.tmp" "$BINARY"
   chmod 755 "$BINARY"
   [ "$(uname -s)" = "Darwin" ] && codesign -s - "$BINARY" 2>/dev/null
   printf 'dev' > "$VERSION_FILE"

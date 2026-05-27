@@ -3,10 +3,12 @@
 const { execSync } = require('child_process');
 const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent, queryKb } = require(__dirname + '/lib');
 
-const COOLDOWN_MS = 1800000; // 30 minutes per project
+const COOLDOWN_MS = parseInt(process.env.OUROBOROS_UPC_COOLDOWN_MS, 10) || 300000; // 5 minutes per project (override: OUROBOROS_UPC_COOLDOWN_MS)
 const RESUME_COOLDOWN_MS = 0; // no cooldown for resume prompts
 const MAX_ENTRIES = 10;
 const MAX_SEARCH = 5;
+// BM25 scores are negative; less negative = more relevant. Drop results weaker than this threshold.
+const BM25_THRESHOLD = parseFloat(process.env.OUROBOROS_UPC_BM25_THRESHOLD) || -2.0;
 
 // Patterns for low-signal or unrelated prompts
 const SKIP_PATTERNS = [
@@ -112,6 +114,15 @@ async function main() {
 
     if (!rows || rows.length === 0) {
       process.exit(0);
+    }
+
+    // Filter weak FTS matches: BM25 score is negative; drop anything weaker than threshold.
+    // Only applies to specific-intent queries (resume fetches by list, no score field).
+    if (intent === 'specific') {
+      rows = rows.filter(r => typeof r.score !== 'number' || r.score >= BM25_THRESHOLD);
+      if (rows.length === 0) {
+        process.exit(0);
+      }
     }
 
     // Touch cooldown

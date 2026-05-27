@@ -540,3 +540,30 @@ test('pre-compact - internal error → exit 0 (fail-open)', async () => {
 
   assert.strictEqual(result.code, 0);
 });
+
+// OU-123: fire event logged at entry
+test('OU-123: pre-compact logs kind=fire at entry before any early exits', async () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-fire-home-'));
+  try {
+    const result = await runPreCompact(
+      { transcript_path: '', cwd: '', session_id: 'sess-fire-test' },
+      { HOME: tmpHome, OUROBOROS_HOOK_LOG: '1' }
+    );
+
+    assert.strictEqual(result.code, 0);
+
+    const logFile = path.join(tmpHome, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist after any run');
+
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n').filter(Boolean);
+    const fireEvent = lines.find(line => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.hook === 'pre_compact' && entry.kind === 'fire';
+      } catch (e) { return false; }
+    });
+    assert(fireEvent, 'should have a fire event logged for pre_compact');
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});

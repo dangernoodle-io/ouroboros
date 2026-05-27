@@ -186,6 +186,27 @@ func TestQueryDocumentsFTS(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "release-process", summaries[0].Title)
+	assert.NotEqual(t, 0.0, summaries[0].Score, "FTS path should populate BM25 score")
+}
+
+func TestQueryDocumentsFTSWithFilters(t *testing.T) {
+	db := testDB(t)
+
+	for _, doc := range []store.Document{
+		{Type: "note", Project: "acme-corp", Category: "ops", Title: "release-a", Content: "trigger goreleaser tag"},
+		{Type: "note", Project: "acme-corp", Category: "docs", Title: "release-b", Content: "goreleaser release docs"},
+		{Type: "decision", Project: "acme-corp", Category: "ops", Title: "release-c", Content: "goreleaser config decision"},
+	} {
+		_, err := store.UpsertDocument(db, doc)
+		require.NoError(t, err)
+	}
+
+	// FTS query with type + category filters — exercises full isFTS branch with multiple filters.
+	summaries, err := store.QueryDocuments(db, []string{"note"}, []string{"acme-corp"}, []string{"ops"}, "goreleaser", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "release-a", summaries[0].Title)
+	assert.NotEqual(t, 0.0, summaries[0].Score)
 }
 
 func TestQueryDocumentsTagFilter(t *testing.T) {
@@ -641,6 +662,11 @@ func TestKeywordSearch(t *testing.T) {
 		titles := []string{summaries[0].Title, summaries[1].Title}
 		assert.Contains(t, titles, "Database Choice")
 		assert.Contains(t, titles, "DB Host")
+		// BM25 scores are negative (less negative = more relevant); verify populated
+		for _, s := range summaries {
+			assert.NotZero(t, s.Score, "BM25 score should be non-zero for FTS matches")
+			assert.Less(t, s.Score, 0.0, "BM25 score should be negative")
+		}
 	})
 
 	t.Run("keyword search with project filter", func(t *testing.T) {
