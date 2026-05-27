@@ -83,6 +83,12 @@ When in doubt: the caller can always ask for more. They cannot un-spend tokens o
 - `plugin/agents/` — backlog-manager, knowledge-explorer subagents
 - `plugin/tests/` — node:test suite (zero npm deps), run via `plugin/tests/run.sh`
 
+### Component convention
+
+- Items scoped to the Go binary/library code: omit `component` (project-level).
+- Items scoped to the plugin wrapper (`plugin/` directory): set `component: "plugin"`.
+- Examples: an MCP handler bug = no component; a `stop.js` hook fix = `component: "plugin"`.
+
 **No plugin version field**: `plugin/.claude-plugin/plugin.json` intentionally omits `version`. When absent, Claude Code keys its plugin cache on the source commit sha, so changing the `marketplace.json` ref to a new tag automatically invalidates the cache — no lockstep bump required. Release automation only needs to update the marketplace ref.
 
 **Local dev**: from a clone of `dangernoodle-marketplace`, run `.scripts/plugin-dev.sh link ouroboros-mcp` to symlink the plugin cache dir to this working tree.

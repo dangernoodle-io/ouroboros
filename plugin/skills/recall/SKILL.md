@@ -11,7 +11,7 @@ model: sonnet
 
 3. **Query both sources:**
    - KB: `search` with query + `projects: ["<project>"]`; if no query, `get` with `projects: ["<project>"]` for summaries
-   - Backlog: `item` with `projects: ["<project>"]` (add `status: "open"` for broad queries)
+   - Backlog: `item` with `projects: ["<project>"]` (add `status: "open"` for broad queries); narrow to a sub-area with `component="plugin"` (e.g. `item projects=["ouroboros"] component="plugin"`)
 
 4. **Present** grouped by source:
    - **Knowledge Base** — decisions, facts, notes, relations (summaries only)

@@ -18,7 +18,7 @@ import (
 func TestRunStatuslineEmpty(t *testing.T) {
 	db := newTestDB(t)
 	var buf bytes.Buffer
-	err := runStatusline(&buf, db, "", false)
+	err := runStatusline(&buf, db, "", false, false)
 	require.NoError(t, err)
 	assert.Empty(t, buf.String())
 }
@@ -47,7 +47,7 @@ func TestRunStatuslineKBOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runStatusline(&buf, db, "", false)
+	err = runStatusline(&buf, db, "", false, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -71,7 +71,7 @@ func TestRunStatuslineBacklogOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runStatusline(&buf, db, "", false)
+	err = runStatusline(&buf, db, "", false, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -106,7 +106,7 @@ func TestRunStatuslineFull(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runStatusline(&buf, db, "", false)
+	err = runStatusline(&buf, db, "", false, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -148,7 +148,7 @@ func TestRunStatuslineJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runStatusline(&buf, db, "", true)
+	err = runStatusline(&buf, db, "", true, false)
 	require.NoError(t, err)
 
 	var data statuslineData
@@ -198,7 +198,7 @@ func TestRunStatuslineProjectFilter(t *testing.T) {
 
 	// Query with project filter
 	var buf bytes.Buffer
-	err = runStatusline(&buf, db, "project-a", true)
+	err = runStatusline(&buf, db, "project-a", true, false)
 	require.NoError(t, err)
 
 	var data statuslineData
@@ -305,4 +305,58 @@ func TestFormatStatuslineANSIProjectFirst(t *testing.T) {
 		assert.NotContains(t, output, "ouroboros:\033[0m ]",
 			"should not have project bracket after ouroboros:")
 	})
+}
+
+func TestRunStatuslinePlainFlag(t *testing.T) {
+	db := newTestDB(t)
+
+	_, err := store.UpsertDocument(db, store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use SQLite",
+	})
+	require.NoError(t, err)
+
+	p, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, p.ID, "AC", "P1", "Task 1", "", "", "")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runStatusline(&buf, db, "", false, true)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.NotContains(t, output, "\033[", "plain output must contain no ANSI escapes")
+	assert.Contains(t, output, "KB 1")
+	assert.Contains(t, output, "BL 1")
+}
+
+func TestRunStatuslineNoColorEnv(t *testing.T) {
+	t.Setenv("OUROBOROS_NO_COLOR", "1")
+
+	db := newTestDB(t)
+
+	_, err := store.UpsertDocument(db, store.Document{
+		Type:    "fact",
+		Project: "acme-corp",
+		Title:   "Endpoint URL",
+	})
+	require.NoError(t, err)
+
+	p, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, p.ID, "AC", "P0", "Critical bug", "", "", "")
+	require.NoError(t, err)
+
+	// Simulate env-driven plain by passing plain=true (as the cobra RunE would compute)
+	plain := true
+	var buf bytes.Buffer
+	err = runStatusline(&buf, db, "", false, plain)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.NotContains(t, output, "\033[", "OUROBOROS_NO_COLOR output must contain no ANSI escapes")
+	assert.Contains(t, output, "KB 1")
+	assert.Contains(t, output, "BL 1")
 }
