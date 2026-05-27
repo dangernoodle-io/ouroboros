@@ -98,15 +98,10 @@ func TestToolsListFootprint(t *testing.T) {
 	// Per-tool: validate annotation structure per OU-75.
 	// Each tool should have only the expected annotation fields set.
 	expectedAnnotations := map[string]map[string]any{
-		"get":     {"readOnlyHint": true},
-		"search":  {"readOnlyHint": true},
-		"export":  {"readOnlyHint": true},
-		"delete":  {"destructiveHint": true, "idempotentHint": true},
-		"put":     {"idempotentHint": true},
-		"config":  {"idempotentHint": true},
-		"project": {},
-		"item":    {"destructiveHint": true},
-		"plan":    {},
+		"get":    {"readOnlyHint": true},
+		"search": {"readOnlyHint": true},
+		"put":    {"idempotentHint": true},
+		"item":   {"destructiveHint": true},
 	}
 	t.Logf("  per-tool annotation structure (OU-75):")
 	for _, tool := range tools {
@@ -171,7 +166,6 @@ func TestProgressiveRegistration(t *testing.T) {
 
 	// Reset gates for test isolation
 	tier1Once = sync.Once{}
-	tier2Once = sync.Once{}
 
 	srv := buildServer(db, nil, "test")
 
@@ -198,42 +192,11 @@ func TestProgressiveRegistration(t *testing.T) {
 
 	// ---- Step 3: assert tier-1 tools now registered ----
 	allTools = srv.ListTools()
-	t.Logf("after tier-0 call: %d total tools (expected 6)", len(allTools))
-	require.Equal(t, 6, len(allTools), "should have 6 tools after tier-1 unlock")
-	assertToolsPresent(t, allTools, []string{"get", "search", "put", "project", "item", "plan"})
+	t.Logf("after tier-0 call: %d total tools (expected 4)", len(allTools))
+	require.Equal(t, 4, len(allTools), "should have 4 tools after tier-1 unlock")
+	assertToolsPresent(t, allTools, []string{"get", "search", "put", "item"})
 
-	// ---- Step 4: invoke tier-1 handler to unlock tier-2 ----
-	toolPut := allTools["put"]
-	require.NotNil(t, toolPut, "put tool should now exist")
-
-	result, err = toolPut.Handler(context.Background(), mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Name: "put",
-			Arguments: map[string]interface{}{
-				"entries": []interface{}{
-					map[string]interface{}{
-						"type":    "test",
-						"project": "proj",
-						"title":   "test entry",
-						"content": "test",
-					},
-				},
-			},
-		},
-	})
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	// ---- Step 5: assert all tier-2 tools now registered ----
-	allTools = srv.ListTools()
-	t.Logf("after tier-1 call: %d total tools (expected 9)", len(allTools))
-	require.Equal(t, 9, len(allTools), "should have all 9 tools after tier-2 unlock")
-	assertToolsPresent(t, allTools, []string{
-		"get", "search", "put", "project", "item", "plan",
-		"delete", "export", "config",
-	})
-
-	// ---- Step 6: verify idempotency ----
+	// ---- Step 4: verify idempotency ----
 	// Call tier-0 again; tier-1 should not re-register (no duplicate tools)
 	toolGet = allTools["get"]
 	require.NotNil(t, toolGet)
@@ -249,8 +212,8 @@ func TestProgressiveRegistration(t *testing.T) {
 	require.NoError(t, err)
 
 	allTools = srv.ListTools()
-	t.Logf("after second tier-0 call: %d total tools (should be 9, not more)", len(allTools))
-	require.Equal(t, 9, len(allTools), "tools should not re-register (idempotency)")
+	t.Logf("after second tier-0 call: %d total tools (should be 4, not more)", len(allTools))
+	require.Equal(t, 4, len(allTools), "tools should not re-register (idempotency)")
 }
 
 // assertToolsPresent verifies that all named tools exist in the server tool map.

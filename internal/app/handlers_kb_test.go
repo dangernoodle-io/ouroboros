@@ -561,6 +561,44 @@ func TestHandleSearch_BothProvided_QueriesWins(t *testing.T) {
 	assert.Equal(t, "about alpha", resultSets[1][0].Title)
 }
 
+// TestHandleSearchWithProgress_CallsHandler verifies the wrapper invokes the
+// underlying search and returns results (exercises the inner function body at line 191).
+func TestHandleSearchWithProgress_CallsHandler(t *testing.T) {
+	resetDB(t)
+
+	// Seed a document
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "Use SQLite",
+				"content": "Lightweight embedded database for local storage",
+			},
+		},
+	})
+	_, err := handlePut(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	// Build a real MCPServer so unlockTier1 has a valid receiver
+	srv := buildServer(db, nil, "test-progress")
+
+	handler := handleSearchWithProgress(db, nil, srv)
+	searchReq := makeRequest(map[string]interface{}{
+		"query": "SQLite",
+	})
+	result, err := handler(context.TODO(), searchReq)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var summaries []store.DocumentSummary
+	err = unmarshalResult(result, &summaries)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Use SQLite", summaries[0].Title)
+}
+
 // TestHandleSearch_MultiProject tests search with multiple project filters.
 func TestHandleSearch_MultiProject(t *testing.T) {
 	resetDB(t)
@@ -614,35 +652,4 @@ func TestHandleSearch_MultiProject(t *testing.T) {
 	assert.True(t, projects["project-a"])
 	assert.True(t, projects["project-b"])
 	assert.False(t, projects["project-c"])
-}
-
-// TestHandleImport tests that import handler returns CLI-only error.
-func TestHandleImport(t *testing.T) {
-	req := makeRequest(map[string]interface{}{
-		"content": `{"documents":[{"type":"decision","project":"test","title":"Test"}]}`,
-		"project": "default-proj",
-	})
-
-	result, err := handleImport(db)(context.TODO(), req)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.True(t, result.IsError)
-
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "CLI-only")
-}
-
-// TestHandleImportNoArgs tests import handler error regardless of arguments.
-func TestHandleImportNoArgs(t *testing.T) {
-	req := makeRequest(map[string]interface{}{})
-
-	result, err := handleImport(db)(context.TODO(), req)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.True(t, result.IsError)
-
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "CLI-only")
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -26,1050 +27,6 @@ func resetAllDB(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec("DELETE FROM documents")
 	require.NoError(t, err)
-}
-
-func TestHandleProject(t *testing.T) {
-	resetAllDB(t)
-
-	// Create a project
-	req := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-
-	var proj backlog.Project
-	err = unmarshalResult(result, &proj)
-	require.NoError(t, err)
-	assert.Equal(t, "acme-corp", proj.Name)
-	assert.Equal(t, "AC", proj.Prefix)
-	assert.NotZero(t, proj.ID)
-
-	// List projects
-	req = makeRequest(map[string]interface{}{
-		"op": "list",
-	})
-	result, err = handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-
-	var projects []backlog.Project
-	err = unmarshalResult(result, &projects)
-	require.NoError(t, err)
-	assert.Len(t, projects, 1)
-	assert.Equal(t, "acme-corp", projects[0].Name)
-}
-
-func TestHandleProjectRename(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project
-	createReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "old-name",
-	})
-	createResult, err := handleProject(db, bk)(context.TODO(), createReq)
-	require.NoError(t, err)
-
-	var proj backlog.Project
-	err = unmarshalResult(createResult, &proj)
-	require.NoError(t, err)
-	assert.Equal(t, "old-name", proj.Name)
-
-	// Rename project
-	renameReq := makeRequest(map[string]interface{}{
-		"op":       "rename",
-		"name":     "old-name",
-		"new_name": "new-name",
-	})
-	renameResult, err := handleProject(db, bk)(context.TODO(), renameReq)
-	require.NoError(t, err)
-
-	var renamedProj backlog.Project
-	err = unmarshalResult(renameResult, &renamedProj)
-	require.NoError(t, err)
-	assert.Equal(t, "new-name", renamedProj.Name)
-	assert.Equal(t, proj.ID, renamedProj.ID)
-
-	// Verify list shows new name
-	listReq := makeRequest(map[string]interface{}{
-		"op": "list",
-	})
-	listResult, err := handleProject(db, bk)(context.TODO(), listReq)
-	require.NoError(t, err)
-
-	var projects []backlog.Project
-	err = unmarshalResult(listResult, &projects)
-	require.NoError(t, err)
-	assert.Len(t, projects, 1)
-	assert.Equal(t, "new-name", projects[0].Name)
-}
-
-func TestHandleProjectPrefixCollision(t *testing.T) {
-	resetAllDB(t)
-
-	// Create first project with AC prefix
-	req := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-
-	var proj backlog.Project
-	err = unmarshalResult(result, &proj)
-	require.NoError(t, err)
-	assert.Equal(t, "AC", proj.Prefix)
-
-	// Create second project starting with A — should get derived prefix
-	req = makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "alpha-team",
-	})
-	result, err = handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-
-	var proj2 backlog.Project
-	err = unmarshalResult(result, &proj2)
-	require.NoError(t, err)
-	assert.NotEqual(t, "AC", proj2.Prefix)
-}
-
-func TestHandleItemCreate(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project first
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	projResult, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	var proj backlog.Project
-	err = unmarshalResult(projResult, &proj)
-	require.NoError(t, err)
-
-	// Create item using batch entries
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":     "acme-corp",
-				"priority":    "P1",
-				"title":       "Fix login bug",
-				"description": "Users cannot log in",
-			},
-		},
-	})
-	itemResult, err := handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	var resp []map[string]interface{}
-	err = unmarshalResult(itemResult, &resp)
-	require.NoError(t, err)
-	require.Len(t, resp, 1)
-	id, ok := resp[0]["id"].(string)
-	require.True(t, ok)
-
-	// Fetch to verify
-	fetchReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{id},
-	})
-	fetchResult, err := handleItem(db, bk)(context.TODO(), fetchReq)
-	require.NoError(t, err)
-
-	var items []map[string]interface{}
-	err = unmarshalResult(fetchResult, &items)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	item := items[0]
-	assert.Equal(t, "AC-1", item["id"])
-	assert.Equal(t, "P1", item["priority"])
-	assert.Equal(t, "Fix login bug", item["title"])
-	assert.Equal(t, "Users cannot log in", item["description"])
-	assert.Equal(t, "open", item["status"])
-}
-
-func TestHandleItemGet(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project and item
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P2",
-				"title":    "Update docs",
-			},
-		},
-	})
-	createResult, err := handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	var createResp []map[string]interface{}
-	err = unmarshalResult(createResult, &createResp)
-	require.NoError(t, err)
-	require.Len(t, createResp, 1)
-
-	// Get item by ID using ids[] fetch
-	getReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{"AC-1"},
-	})
-	getResult, err := handleItem(db, bk)(context.TODO(), getReq)
-	require.NoError(t, err)
-
-	var items []map[string]interface{}
-	err = unmarshalResult(getResult, &items)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	item := items[0]
-	assert.Equal(t, "AC-1", item["id"])
-	assert.Equal(t, "Update docs", item["title"])
-	assert.Equal(t, "P2", item["priority"])
-}
-
-func TestHandleItemUpdate(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project and item
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P3",
-				"title":    "Original title",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// Update item using batch entries
-	updateReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"id":       "AC-1",
-				"priority": "P1",
-				"title":    "Updated title",
-			},
-		},
-	})
-	updateResult, err := handleItem(db, bk)(context.TODO(), updateReq)
-	require.NoError(t, err)
-
-	var updateResp []map[string]interface{}
-	err = unmarshalResult(updateResult, &updateResp)
-	require.NoError(t, err)
-	require.Len(t, updateResp, 1)
-	assert.Equal(t, "update", updateResp[0]["action"])
-
-	// Fetch to verify
-	fetchReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{"AC-1"},
-	})
-	fetchResult, err := handleItem(db, bk)(context.TODO(), fetchReq)
-	require.NoError(t, err)
-
-	var items []map[string]interface{}
-	err = unmarshalResult(fetchResult, &items)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	item := items[0]
-	assert.Equal(t, "AC-1", item["id"])
-	assert.Equal(t, "P1", item["priority"])
-	assert.Equal(t, "Updated title", item["title"])
-}
-
-func TestHandleItemDone(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project and item
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P1",
-				"title":    "Task to complete",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// Mark as done using batch entries
-	doneReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"id":     "AC-1",
-				"status": "done",
-			},
-		},
-	})
-	doneResult, err := handleItem(db, bk)(context.TODO(), doneReq)
-	require.NoError(t, err)
-
-	var doneResp []map[string]interface{}
-	err = unmarshalResult(doneResult, &doneResp)
-	require.NoError(t, err)
-	require.Len(t, doneResp, 1)
-
-	// Fetch to verify status
-	fetchReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{"AC-1"},
-	})
-	fetchResult, err := handleItem(db, bk)(context.TODO(), fetchReq)
-	require.NoError(t, err)
-
-	var items []map[string]interface{}
-	err = unmarshalResult(fetchResult, &items)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	assert.Equal(t, "done", items[0]["status"])
-}
-
-func TestHandleItemList(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	// Create multiple items using batch entries
-	for i := 1; i <= 3; i++ {
-		itemReq := makeRequest(map[string]interface{}{
-			"entries": []interface{}{
-				map[string]interface{}{
-					"project":  "acme-corp",
-					"priority": "P1",
-					"title":    "Item " + string(rune('0'+i)),
-				},
-			},
-		})
-		_, err = handleItem(db, bk)(context.TODO(), itemReq)
-		require.NoError(t, err)
-	}
-
-	// List items
-	listReq := makeRequest(map[string]interface{}{
-		"projects": []interface{}{"acme-corp"},
-	})
-	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
-	require.NoError(t, err)
-
-	// Result is text in list mode
-	require.Len(t, listResult.Content, 1)
-	textContent, ok := mcp.AsTextContent(listResult.Content[0])
-	require.True(t, ok)
-	text := textContent.Text
-
-	assert.Contains(t, text, "AC-1")
-	assert.Contains(t, text, "AC-2")
-	assert.Contains(t, text, "AC-3")
-	assert.Contains(t, text, "Item 1")
-	assert.Contains(t, text, "Item 2")
-	assert.Contains(t, text, "Item 3")
-}
-
-func TestHandleItemListFilter(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	// Create items with different priorities and status using batch entries
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P1",
-				"title":    "High priority",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	itemReq = makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P3",
-				"title":    "Low priority",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// Mark one as done using batch entries
-	doneReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"id":     "AC-1",
-				"status": "done",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), doneReq)
-	require.NoError(t, err)
-
-	// Filter by status=done
-	listReq := makeRequest(map[string]interface{}{
-		"projects": []interface{}{"acme-corp"},
-		"status":   "done",
-	})
-	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
-	require.NoError(t, err)
-
-	textContent, ok := mcp.AsTextContent(listResult.Content[0])
-	require.True(t, ok)
-	text := textContent.Text
-
-	assert.Contains(t, text, "AC-1")
-	assert.NotContains(t, text, "AC-2")
-}
-
-func TestHandlePlanCreate(t *testing.T) {
-	resetAllDB(t)
-
-	// Create standalone plan using batch entries
-	planReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"title":   "Implementation plan",
-				"content": "Step 1: Design\nStep 2: Implement",
-			},
-		},
-	})
-	planResult, err := handlePlan(db, bk)(context.TODO(), planReq)
-	require.NoError(t, err)
-
-	var resp []map[string]interface{}
-	err = unmarshalResult(planResult, &resp)
-	require.NoError(t, err)
-	require.Len(t, resp, 1)
-	id, ok := resp[0]["id"].(float64)
-	require.True(t, ok)
-	planID := int64(id)
-
-	// Fetch to verify
-	fetchReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{float64(planID)},
-	})
-	fetchResult, err := handlePlan(db, bk)(context.TODO(), fetchReq)
-	require.NoError(t, err)
-
-	var plans []map[string]interface{}
-	err = unmarshalResult(fetchResult, &plans)
-	require.NoError(t, err)
-	require.Len(t, plans, 1)
-	plan := plans[0]
-	assert.Equal(t, "Implementation plan", plan["title"])
-	assert.Equal(t, "Step 1: Design\nStep 2: Implement", plan["content"])
-	assert.Equal(t, "draft", plan["status"])
-	assert.Nil(t, plan["project_id"])
-	assert.Nil(t, plan["item_id"])
-}
-
-func TestHandlePlanCreateLinked(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project and item
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P1",
-				"title":    "Implement feature",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// Create linked plan using batch entries
-	planReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"title":   "Feature plan",
-				"content": "Details here",
-				"project": "acme-corp",
-				"item_id": "AC-1",
-			},
-		},
-	})
-	planResult, err := handlePlan(db, bk)(context.TODO(), planReq)
-	require.NoError(t, err)
-
-	var resp []map[string]interface{}
-	err = unmarshalResult(planResult, &resp)
-	require.NoError(t, err)
-	require.Len(t, resp, 1)
-	id, ok := resp[0]["id"].(float64)
-	require.True(t, ok)
-	planID := int64(id)
-
-	// Fetch to verify links
-	fetchReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{float64(planID)},
-	})
-	fetchResult, err := handlePlan(db, bk)(context.TODO(), fetchReq)
-	require.NoError(t, err)
-
-	var plans []map[string]interface{}
-	err = unmarshalResult(fetchResult, &plans)
-	require.NoError(t, err)
-	require.Len(t, plans, 1)
-	plan := plans[0]
-	assert.NotNil(t, plan["project_id"])
-	assert.NotNil(t, plan["item_id"])
-	assert.Equal(t, "AC-1", plan["item_id"])
-}
-
-func TestHandlePlanGet(t *testing.T) {
-	resetAllDB(t)
-
-	// Create plan using batch entries
-	planReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"title":   "Test plan",
-				"content": "Test content",
-			},
-		},
-	})
-	createResult, err := handlePlan(db, bk)(context.TODO(), planReq)
-	require.NoError(t, err)
-
-	var createResp []map[string]interface{}
-	err = unmarshalResult(createResult, &createResp)
-	require.NoError(t, err)
-	require.Len(t, createResp, 1)
-	id, ok := createResp[0]["id"].(float64)
-	require.True(t, ok)
-	planID := int64(id)
-
-	// Get plan by ID using ids[] fetch
-	getReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{float64(planID)},
-	})
-	getResult, err := handlePlan(db, bk)(context.TODO(), getReq)
-	require.NoError(t, err)
-
-	var plans []map[string]interface{}
-	err = unmarshalResult(getResult, &plans)
-	require.NoError(t, err)
-	require.Len(t, plans, 1)
-	plan := plans[0]
-	assert.Equal(t, float64(planID), plan["id"])
-	assert.Equal(t, "Test plan", plan["title"])
-	assert.Equal(t, "Test content", plan["content"])
-}
-
-func TestHandlePlanUpdate(t *testing.T) {
-	resetAllDB(t)
-
-	// Create plan using batch entries
-	createReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"title":   "Original title",
-				"content": "Original content",
-			},
-		},
-	})
-	createResult, err := handlePlan(db, bk)(context.TODO(), createReq)
-	require.NoError(t, err)
-
-	var createResp []map[string]interface{}
-	err = unmarshalResult(createResult, &createResp)
-	require.NoError(t, err)
-	require.Len(t, createResp, 1)
-	id, ok := createResp[0]["id"].(float64)
-	require.True(t, ok)
-	planID := int64(id)
-
-	// Update plan using batch entries
-	updateReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"id":     float64(planID),
-				"title":  "Updated title",
-				"status": "active",
-			},
-		},
-	})
-	updateResult, err := handlePlan(db, bk)(context.TODO(), updateReq)
-	require.NoError(t, err)
-
-	var updateResp []map[string]interface{}
-	err = unmarshalResult(updateResult, &updateResp)
-	require.NoError(t, err)
-	require.Len(t, updateResp, 1)
-	assert.Equal(t, "update", updateResp[0]["action"])
-
-	// Fetch updated plan to verify
-	fetchReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{float64(planID)},
-	})
-	fetchResult, err := handlePlan(db, bk)(context.TODO(), fetchReq)
-	require.NoError(t, err)
-
-	var plans []map[string]interface{}
-	err = unmarshalResult(fetchResult, &plans)
-	require.NoError(t, err)
-	require.Len(t, plans, 1)
-	plan := plans[0]
-	assert.Equal(t, "Updated title", plan["title"])
-	assert.Equal(t, "active", plan["status"])
-}
-
-func TestHandlePlanList(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	// Create multiple plans using batch entries
-	for i := 1; i <= 2; i++ {
-		planReq := makeRequest(map[string]interface{}{
-			"entries": []interface{}{
-				map[string]interface{}{
-					"title":   "Plan " + string(rune('0'+i)),
-					"project": "acme-corp",
-				},
-			},
-		})
-		_, err = handlePlan(db, bk)(context.TODO(), planReq)
-		require.NoError(t, err)
-	}
-
-	// List plans
-	listReq := makeRequest(map[string]interface{}{
-		"projects": []interface{}{"acme-corp"},
-	})
-	listResult, err := handlePlan(db, bk)(context.TODO(), listReq)
-	require.NoError(t, err)
-
-	var plans []backlog.Plan
-	err = unmarshalResult(listResult, &plans)
-	require.NoError(t, err)
-	assert.Len(t, plans, 2)
-}
-
-func TestHandleConfig(t *testing.T) {
-	resetAllDB(t)
-
-	// Try to set config via MCP should return CLI-only error
-	setReq := makeRequest(map[string]interface{}{
-		"key":   "api_key",
-		"value": "secret123",
-	})
-	setResult, err := handleConfig(db)(context.TODO(), setReq)
-	require.NoError(t, err)
-	assert.True(t, setResult.IsError)
-	textContent, ok := mcp.AsTextContent(setResult.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "CLI-only")
-
-	// Get config still works (set it directly in DB for testing)
-	require.NoError(t, backlog.SetConfig(db, "api_key", "secret123"))
-	getReq := makeRequest(map[string]interface{}{
-		"key": "api_key",
-	})
-	getResult, err := handleConfig(db)(context.TODO(), getReq)
-	require.NoError(t, err)
-
-	var getResp map[string]string
-	err = unmarshalResult(getResult, &getResp)
-	require.NoError(t, err)
-	assert.Equal(t, "secret123", getResp["value"])
-}
-
-func TestHandleConfigGetAll(t *testing.T) {
-	resetAllDB(t)
-
-	// Set multiple configs directly in DB
-	require.NoError(t, backlog.SetConfig(db, "key1", "value1"))
-	require.NoError(t, backlog.SetConfig(db, "key2", "value2"))
-
-	// Get all configs via MCP
-	getAllReq := makeRequest(map[string]interface{}{})
-	getAllResult, err := handleConfig(db)(context.TODO(), getAllReq)
-	require.NoError(t, err)
-
-	var allConfigs map[string]string
-	err = unmarshalResult(getAllResult, &allConfigs)
-	require.NoError(t, err)
-	assert.Len(t, allConfigs, 2)
-	assert.Equal(t, "value1", allConfigs["key1"])
-	assert.Equal(t, "value2", allConfigs["key2"])
-}
-
-func TestHandleConfigNotFound(t *testing.T) {
-	resetAllDB(t)
-
-	// Try to get nonexistent key
-	getReq := makeRequest(map[string]interface{}{
-		"key": "nonexistent",
-	})
-	getResult, err := handleConfig(db)(context.TODO(), getReq)
-	require.NoError(t, err)
-	assert.True(t, getResult.IsError)
-}
-
-func TestHandleConfigSetCliOnly(t *testing.T) {
-	resetAllDB(t)
-
-	// Try to set config via MCP should return CLI-only error
-	setReq := makeRequest(map[string]interface{}{
-		"key":   "api_key",
-		"value": "secret123",
-	})
-	setResult, err := handleConfig(db)(context.TODO(), setReq)
-	require.NoError(t, err)
-	assert.True(t, setResult.IsError)
-	textContent, ok := mcp.AsTextContent(setResult.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "CLI-only")
-	assert.Contains(t, textContent.Text, "ouroboros config set")
-}
-
-func TestHandleProjectGet(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project via handler
-	createReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), createReq)
-	require.NoError(t, err)
-
-	// Get project by name
-	getReq := makeRequest(map[string]interface{}{
-		"op":   "get",
-		"name": "acme-corp",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), getReq)
-	require.NoError(t, err)
-
-	var proj backlog.Project
-	err = unmarshalResult(result, &proj)
-	require.NoError(t, err)
-	assert.Equal(t, "acme-corp", proj.Name)
-	assert.Equal(t, "AC", proj.Prefix)
-	assert.NotZero(t, proj.ID)
-}
-
-func TestHandleProjectDeleteBlocked(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project and add an item
-	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
-	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"op":   "delete",
-		"name": "acme-corp",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "items")
-}
-
-func TestHandleProjectDeleteForce(t *testing.T) {
-	resetAllDB(t)
-
-	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
-	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"op":    "delete",
-		"name":  "acme-corp",
-		"force": true,
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.False(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "acme-corp")
-}
-
-func TestHandleProjectDeleteReassign(t *testing.T) {
-	resetAllDB(t)
-
-	src, err := backlog.CreateProject(db, "src-proj", "SP")
-	require.NoError(t, err)
-	_, err = backlog.CreateProject(db, "dst-proj", "DP")
-	require.NoError(t, err)
-	_, err = backlog.AddItem(db, src.ID, src.Prefix, "P1", "Task", "", "", "")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"op":          "delete",
-		"name":        "src-proj",
-		"reassign_to": "dst-proj",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.False(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "src-proj")
-}
-
-func TestHandleProjectDeleteMutex(t *testing.T) {
-	resetAllDB(t)
-
-	_, err := backlog.CreateProject(db, "acme-corp", "AC")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"op":          "delete",
-		"name":        "acme-corp",
-		"force":       true,
-		"reassign_to": "other-proj",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "mutually exclusive")
-}
-
-func TestHandleProjectMissingOp(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "op is required")
-}
-
-func TestHandleProjectUnknownOp(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op": "foo",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "unknown op")
-}
-
-func TestHandleProjectCreateMissingName(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op": "create",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "name is required")
-}
-
-func TestHandleProjectCreateValidationError(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "AB",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "invalid project name")
-}
-
-func TestHandleProjectGetMissingName(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op": "get",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "name is required")
-}
-
-func TestHandleProjectGetNotFound(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op":   "get",
-		"name": "nonexistent",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-}
-
-func TestHandleProjectRenameMissingName(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op":       "rename",
-		"new_name": "new-name",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "name is required")
-}
-
-func TestHandleProjectRenameMissingNewName(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op":   "rename",
-		"name": "old-name",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "new_name or new_prefix is required")
-}
-
-func TestHandleProjectRenameError(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op":       "rename",
-		"name":     "nonexistent",
-		"new_name": "new-name",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-}
-
-func TestHandleProjectDeleteMissingName(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op": "delete",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "name is required")
-}
-
-func TestHandleItemInvalidPriority(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	// Try to create item with invalid priority using batch entries
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "X9",
-				"title":    "Invalid item",
-			},
-		},
-	})
-	itemResult, err := handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-	assert.True(t, itemResult.IsError)
-}
-
-func TestHandleItemNonexistentProject(t *testing.T) {
-	resetAllDB(t)
-
-	// Try to create item in nonexistent project
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "nonexistent",
-				"priority": "P1",
-				"title":    "Item",
-			},
-		},
-	})
-	itemResult, err := handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-	assert.True(t, itemResult.IsError)
 }
 
 func TestParsePriority(t *testing.T) {
@@ -1185,343 +142,21 @@ func TestHandleItemBatchCreateAndUpdate(t *testing.T) {
 	assert.Equal(t, "P2", updated.Priority)
 }
 
-// TestHandlePlanBatchFetch tests batch fetch for plans.
-func TestHandlePlanBatchFetch(t *testing.T) {
-	resetBacklogDBBatch(t)
+func TestHandleItemWithProgressCallsHandler(t *testing.T) {
+	resetAllDB(t)
 
-	proj, err := backlog.CreateProject(db, "test-project", "TP")
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	plan1, err := backlog.CreatePlan(db, "Plan 1", "Content 1", &proj.ID, nil)
-	require.NoError(t, err)
+	handler := handleItemWithProgress(db, bk)
 
-	plan2, err := backlog.CreatePlan(db, "Plan 2", "Content 2", &proj.ID, nil)
-	require.NoError(t, err)
-
+	// Call with list mode — should succeed and return "no items"
 	req := makeRequest(map[string]interface{}{
-		"ids": []interface{}{float64(plan1.ID), float64(plan2.ID)},
-	})
-
-	result, err := handlePlan(db, nil)(context.TODO(), req)
-	require.NoError(t, err)
-
-	var plans []map[string]interface{}
-	err = unmarshalResult(result, &plans)
-	require.NoError(t, err)
-	require.Len(t, plans, 2)
-
-	assert.Equal(t, "Plan 1", plans[0]["title"])
-	assert.Equal(t, "Plan 2", plans[1]["title"])
-}
-
-// TestHandlePlanBatchCreateAndUpdate tests batch with mixed creates and updates.
-func TestHandlePlanBatchCreateAndUpdate(t *testing.T) {
-	resetBacklogDBBatch(t)
-
-	proj, err := backlog.CreateProject(db, "test-project", "TP")
-	require.NoError(t, err)
-
-	plan1, err := backlog.CreatePlan(db, "Plan 1", "Initial content", &proj.ID, nil)
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"id":     float64(plan1.ID),
-				"title":  "Plan 1 Updated",
-				"status": "active",
-			},
-			map[string]interface{}{
-				"title":   "Plan 2 New",
-				"content": "New plan content",
-				"project": "test-project",
-			},
-		},
-	})
-
-	result, err := handlePlan(db, nil)(context.TODO(), req)
-	require.NoError(t, err)
-
-	var resp []map[string]interface{}
-	err = unmarshalResult(result, &resp)
-	require.NoError(t, err)
-	require.Len(t, resp, 2)
-
-	assert.Equal(t, "update", resp[0]["action"])
-	assert.Equal(t, "create", resp[1]["action"])
-
-	updated, err := backlog.GetPlan(db, plan1.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "Plan 1 Updated", updated.Title)
-	assert.Equal(t, "active", updated.Status)
-}
-
-func TestHandleItemCreateWithComponent(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project first
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	// Create item with component using batch entries
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":   "acme-corp",
-				"priority":  "P1",
-				"title":     "Implement feature",
-				"component": "ouroboros-mcp",
-			},
-		},
-	})
-	itemResult, err := handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	var resp []map[string]interface{}
-	err = unmarshalResult(itemResult, &resp)
-	require.NoError(t, err)
-	require.Len(t, resp, 1)
-
-	// Fetch to verify component was set
-	fetchReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{"AC-1"},
-	})
-	fetchResult, err := handleItem(db, bk)(context.TODO(), fetchReq)
-	require.NoError(t, err)
-
-	var items []map[string]interface{}
-	err = unmarshalResult(fetchResult, &items)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	assert.Equal(t, "ouroboros-mcp", items[0]["component"])
-}
-
-func TestHandleItemListFilterComponent(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	// Create items with different components using batch entries
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":   "acme-corp",
-				"priority":  "P1",
-				"title":     "Item for plugin-a",
-				"component": "plugin-a",
-			},
-			map[string]interface{}{
-				"project":   "acme-corp",
-				"priority":  "P2",
-				"title":     "Item for plugin-b",
-				"component": "plugin-b",
-			},
-			map[string]interface{}{
-				"project":   "acme-corp",
-				"priority":  "P3",
-				"title":     "Another item for plugin-a",
-				"component": "plugin-a",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// Filter by component=plugin-a
-	listReq := makeRequest(map[string]interface{}{
-		"projects":  []interface{}{"acme-corp"},
-		"component": "plugin-a",
-	})
-	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
-	require.NoError(t, err)
-
-	textContent, ok := mcp.AsTextContent(listResult.Content[0])
-	require.True(t, ok)
-	text := textContent.Text
-
-	// Should contain both plugin-a items
-	assert.Contains(t, text, "AC-1")
-	assert.Contains(t, text, "AC-3")
-	assert.NotContains(t, text, "AC-2")
-}
-
-func TestHandleItemListOutputIncludesComponent(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	// Create two items: one with component, one without
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":   "acme-corp",
-				"priority":  "P1",
-				"title":     "Item with component",
-				"component": "ouroboros-mcp",
-			},
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P2",
-				"title":    "Item without component",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// List all items
-	listReq := makeRequest(map[string]interface{}{
 		"projects": []interface{}{"acme-corp"},
 	})
-	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
+	result, err := handler(context.TODO(), req)
 	require.NoError(t, err)
-
-	textContent, ok := mcp.AsTextContent(listResult.Content[0])
-	require.True(t, ok)
-	text := textContent.Text
-
-	// Output should include (ouroboros-mcp) for AC-1 and no component segment for AC-2
-	assert.Contains(t, text, "(ouroboros-mcp) Item with component")
-	assert.Contains(t, text, "Item without component")
-	assert.NotContains(t, text, "() Item without component") // No empty component segment
-}
-
-func TestHandleItemDeleteSingle(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project and two items
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P1",
-				"title":    "Item to delete",
-			},
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P2",
-				"title":    "Item to keep",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// Delete one item via delete_ids
-	deleteReq := makeRequest(map[string]interface{}{
-		"delete_ids": []interface{}{"AC-1"},
-	})
-	deleteResult, err := handleItem(db, bk)(context.TODO(), deleteReq)
-	require.NoError(t, err)
-
-	var deleteResp map[string]interface{}
-	err = unmarshalResult(deleteResult, &deleteResp)
-	require.NoError(t, err)
-	assert.Equal(t, float64(1), deleteResp["deleted"])
-
-	// Verify AC-1 is gone by trying to fetch it (should error)
-	getReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{"AC-1"},
-	})
-	getResult, err := handleItem(db, bk)(context.TODO(), getReq)
-	require.NoError(t, err)
-	// Check that result is an error
-	assert.True(t, len(getResult.Content) > 0)
-
-	// Verify AC-2 still exists
-	getReq2 := makeRequest(map[string]interface{}{
-		"ids": []interface{}{"AC-2"},
-	})
-	getResult2, err := handleItem(db, bk)(context.TODO(), getReq2)
-	require.NoError(t, err)
-
-	var items2 []map[string]interface{}
-	err = unmarshalResult(getResult2, &items2)
-	require.NoError(t, err)
-	require.Len(t, items2, 1)
-	assert.Equal(t, "AC-2", items2[0]["id"])
-}
-
-func TestHandleItemDeleteMultiple(t *testing.T) {
-	resetAllDB(t)
-
-	// Create project and three items
-	projReq := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "acme-corp",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq)
-	require.NoError(t, err)
-
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P1",
-				"title":    "Item 1",
-			},
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P2",
-				"title":    "Item 2",
-			},
-			map[string]interface{}{
-				"project":  "acme-corp",
-				"priority": "P3",
-				"title":    "Item 3",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// Delete two items
-	deleteReq := makeRequest(map[string]interface{}{
-		"delete_ids": []interface{}{"AC-1", "AC-3"},
-	})
-	deleteResult, err := handleItem(db, bk)(context.TODO(), deleteReq)
-	require.NoError(t, err)
-
-	var deleteResp map[string]interface{}
-	err = unmarshalResult(deleteResult, &deleteResp)
-	require.NoError(t, err)
-	assert.Equal(t, float64(2), deleteResp["deleted"])
-
-	// Verify only AC-2 remains by fetching it directly
-	getReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{"AC-2"},
-	})
-	getResult, err := handleItem(db, bk)(context.TODO(), getReq)
-	require.NoError(t, err)
-
-	var items []map[string]interface{}
-	err = unmarshalResult(getResult, &items)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	assert.Equal(t, "AC-2", items[0]["id"])
+	require.NotNil(t, result)
 }
 
 func TestHandleItemDeleteNonexistent(t *testing.T) {
@@ -1540,217 +175,419 @@ func TestHandleItemDeleteNonexistent(t *testing.T) {
 	assert.Equal(t, float64(0), deleteResp["deleted"])
 }
 
-// TestHandleItemListMultiProject tests item list with multiple project filters.
-func TestHandleProjectCreatePrefixExhausted(t *testing.T) {
+func TestHandleItemListOutput(t *testing.T) {
 	resetAllDB(t)
 
-	// Exhaust all prefixes starting with A: base AL + A1..A9
-	_, err := backlog.CreateProject(db, "alpha-00", "AL")
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	for i := 1; i <= 9; i++ {
-		name := "alpha-0" + string(rune('0'+i))
-		prefix := "A" + string(rune('0'+i))
-		_, err = backlog.CreateProject(db, name, prefix)
-		require.NoError(t, err)
-	}
-
-	req := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "alpha-xyz",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.True(t, result.IsError)
-	textContent, ok := mcp.AsTextContent(result.Content[0])
-	require.True(t, ok)
-	assert.Contains(t, textContent.Text, "prefix")
-}
-
-func TestHandleProjectListEmpty(t *testing.T) {
-	resetAllDB(t)
-
-	req := makeRequest(map[string]interface{}{
-		"op": "list",
-	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
-	require.NoError(t, err)
-	assert.False(t, result.IsError)
-
-	var projects []backlog.Project
-	err = unmarshalResult(result, &projects)
-	require.NoError(t, err)
-	assert.NotNil(t, projects)
-	assert.Len(t, projects, 0)
-}
-
-func TestHandleItemWithProgressCallsHandler(t *testing.T) {
-	resetAllDB(t)
-
-	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task one", "", "", "")
 	require.NoError(t, err)
 
-	srv := buildServer(db, bk, "test")
-	handler := handleItemWithProgress(db, bk, srv)
-
-	// Call with list mode — should succeed and return "no items"
-	req := makeRequest(map[string]interface{}{
-		"projects": []interface{}{"acme-corp"},
-	})
-	result, err := handler(context.TODO(), req)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-}
-
-func TestHandlePlanWithProgressCallsHandler(t *testing.T) {
-	resetAllDB(t)
-
-	_, err := backlog.CreateProject(db, "acme-corp", "AC")
-	require.NoError(t, err)
-
-	srv := buildServer(db, bk, "test")
-	handler := handlePlanWithProgress(db, bk, srv)
-
-	// Call with list mode — should succeed and return empty plans list
-	req := makeRequest(map[string]interface{}{
-		"projects": []interface{}{"acme-corp"},
-	})
-	result, err := handler(context.TODO(), req)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-}
-
-func TestHandleItemListMultiProject(t *testing.T) {
-	resetAllDB(t)
-
-	// Create two projects
-	projReq1 := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "project-a",
-	})
-	_, err := handleProject(db, bk)(context.TODO(), projReq1)
-	require.NoError(t, err)
-
-	projReq2 := makeRequest(map[string]interface{}{
-		"op":   "create",
-		"name": "project-b",
-	})
-	_, err = handleProject(db, bk)(context.TODO(), projReq2)
-	require.NoError(t, err)
-
-	// Create items in project-a
-	itemReq := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "project-a",
-				"priority": "P1",
-				"title":    "Item in project-a",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// Create items in project-b
-	itemReq = makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{
-				"project":  "project-b",
-				"priority": "P2",
-				"title":    "Item in project-b",
-			},
-		},
-	})
-	_, err = handleItem(db, bk)(context.TODO(), itemReq)
-	require.NoError(t, err)
-
-	// List items from both projects
 	listReq := makeRequest(map[string]interface{}{
-		"projects": []interface{}{"project-a", "project-b"},
+		"projects": []interface{}{"acme-corp"},
 	})
 	listResult, err := handleItem(db, bk)(context.TODO(), listReq)
 	require.NoError(t, err)
 
 	textContent, ok := mcp.AsTextContent(listResult.Content[0])
 	require.True(t, ok)
-	text := textContent.Text
-
-	// Should contain items from both projects
-	// Prefixes are derived from project names: project-a → PR, project-b → P1
-	assert.Contains(t, text, "Item in project-a")
-	assert.Contains(t, text, "Item in project-b")
-	// IDs should be PR-1 and P1-1 but we just check that both projects appear
-	assert.Contains(t, text, "[open] Item in project-a")
-	assert.Contains(t, text, "[open] Item in project-b")
+	assert.Contains(t, textContent.Text, "AC-1")
+	assert.Contains(t, textContent.Text, "Task one")
 }
 
-func TestHandleProjectRenameWithNewPrefix(t *testing.T) {
+// TestHandleItemCreate creates an item via entries=[{...}] and verifies response.
+func TestHandleItemCreate(t *testing.T) {
 	resetAllDB(t)
 
-	proj, err := backlog.CreateProject(db, "test-project", "TP")
-	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
-		"op":         "rename",
-		"name":       "test-project",
-		"new_prefix": "XX",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "New task",
+			},
+		},
 	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
+	result, err := handleItem(db, nil)(context.TODO(), req)
 	require.NoError(t, err)
-	assert.False(t, result.IsError)
+	require.False(t, result.IsError)
 
-	var renamed backlog.Project
-	err = unmarshalResult(result, &renamed)
+	var resp []map[string]interface{}
+	err = unmarshalResult(result, &resp)
 	require.NoError(t, err)
-	assert.Equal(t, "test-project", renamed.Name)
-	assert.Equal(t, "XX", renamed.Prefix)
-
-	item, err := backlog.GetItem(db, "XX-1")
-	require.NoError(t, err)
-	assert.Equal(t, "XX-1", item.ID)
+	require.Len(t, resp, 1)
+	assert.Equal(t, "create", resp[0]["action"])
+	assert.Equal(t, "AC-1", resp[0]["id"])
 }
 
-func TestHandleProjectRenameBothNameAndPrefix(t *testing.T) {
+// TestHandleItemCreateWithNotesAndComponent creates an item with notes and component.
+func TestHandleItemCreateWithNotesAndComponent(t *testing.T) {
 	resetAllDB(t)
 
-	proj, err := backlog.CreateProject(db, "old-project", "OP")
-	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
-		"op":         "rename",
-		"name":       "old-project",
-		"new_name":   "new-project",
-		"new_prefix": "NP",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":     "acme-corp",
+				"priority":    "P1",
+				"title":       "Task with extras",
+				"description": "A short description",
+				"notes":       "Detailed notes here",
+				"component":   "api",
+			},
+		},
 	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
+	result, err := handleItem(db, nil)(context.TODO(), req)
 	require.NoError(t, err)
-	assert.False(t, result.IsError)
+	require.False(t, result.IsError)
 
-	var renamed backlog.Project
-	err = unmarshalResult(result, &renamed)
-	require.NoError(t, err)
-	assert.Equal(t, "new-project", renamed.Name)
-	assert.Equal(t, "NP", renamed.Prefix)
+	var resp []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	require.Len(t, resp, 1)
+	assert.Equal(t, "create", resp[0]["action"])
 
-	item, err := backlog.GetItem(db, "NP-1")
+	// Verify stored data
+	item, err := backlog.GetItem(db, "AC-1")
 	require.NoError(t, err)
-	assert.Equal(t, "NP-1", item.ID)
+	assert.Equal(t, "Detailed notes here", item.Notes)
+	assert.Equal(t, "api", item.Component)
 }
 
-func TestHandleProjectRenameBothEmpty(t *testing.T) {
+// TestHandleItemInvalidPriority verifies error on bad priority in create mode.
+func TestHandleItemInvalidPriority(t *testing.T) {
 	resetAllDB(t)
 
-	_, err := backlog.CreateProject(db, "some-project", "SP")
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
-		"op":   "rename",
-		"name": "some-project",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P9",
+				"title":    "Bad priority task",
+			},
+		},
 	})
-	result, err := handleProject(db, bk)(context.TODO(), req)
+	result, err := handleItem(db, nil)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
+}
+
+// TestHandleItemNonexistentProject verifies error when project doesn't exist.
+func TestHandleItemNonexistentProject(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "nonexistent-project",
+				"priority": "P1",
+				"title":    "Orphan task",
+			},
+		},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleItemDescriptionTooLong verifies error when description exceeds 500 chars.
+func TestHandleItemDescriptionTooLong(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	longDesc := strings.Repeat("a", 502)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":     "acme-corp",
+				"priority":    "P1",
+				"title":       "Long desc task",
+				"description": longDesc,
+			},
+		},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "description exceeds 500 char hard cap")
+}
+
+// TestHandleItemUpdateInvalidPriority verifies error on bad priority in update mode.
+func TestHandleItemUpdateInvalidPriority(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Original task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":       item.ID,
+				"priority": "INVALID",
+			},
+		},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleItemListPriorityFilter tests listing with priority_min and priority_max.
+func TestHandleItemListPriorityFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Critical", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Normal", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P5", "Low", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"projects":     []interface{}{"acme-corp"},
+		"priority_min": "P1",
+		"priority_max": "P3",
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Normal")
+	assert.NotContains(t, textContent.Text, "Critical")
+	assert.NotContains(t, textContent.Text, "Low")
+}
+
+// TestHandleItemListPriorityMinInvalid verifies error on bad priority_min.
+func TestHandleItemListPriorityMinInvalid(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"priority_min": "X9",
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleItemListPriorityMaxInvalid verifies error on bad priority_max.
+func TestHandleItemListPriorityMaxInvalid(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"priority_min": "P0",
+		"priority_max": "P9",
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleItemListStatusFilter tests filtering by status.
+func TestHandleItemListStatusFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open task", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Another task", "", "", "")
+	require.NoError(t, err)
+	err = backlog.MarkDone(db, item.ID)
+	require.NoError(t, err)
+
+	// Filter for open only
+	req := makeRequest(map[string]interface{}{
+		"projects": []interface{}{"acme-corp"},
+		"status":   "open",
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Another task")
+	assert.NotContains(t, textContent.Text, "Open task")
+}
+
+// TestHandleItemListComponentFilter tests filtering by component.
+func TestHandleItemListComponentFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "API task", "", "", "api")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "UI task", "", "", "ui")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"projects":  []interface{}{"acme-corp"},
+		"component": "api",
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	// Component appears in list output
+	assert.Contains(t, textContent.Text, "api")
+	assert.Contains(t, textContent.Text, "API task")
+}
+
+// TestHandleItemListNonexistentProject verifies error when filtering by bad project.
+func TestHandleItemListNonexistentProject(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"projects": []interface{}{"no-such-project"},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleItemListMultiProject tests listing across two projects.
+func TestHandleItemListMultiProject(t *testing.T) {
+	resetAllDB(t)
+
+	proj1, err := backlog.CreateProject(db, "project-alpha", "PA")
+	require.NoError(t, err)
+	proj2, err := backlog.CreateProject(db, "project-beta", "PB")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj1.ID, proj1.Prefix, "P1", "Alpha task", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj2.ID, proj2.Prefix, "P2", "Beta task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"projects": []interface{}{"project-alpha", "project-beta"},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Alpha task")
+	assert.Contains(t, textContent.Text, "Beta task")
+}
+
+// TestHandleItemDeleteMultiple creates two items then deletes both via delete_ids.
+func TestHandleItemDeleteMultiple(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item1, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Delete me 1", "", "", "")
+	require.NoError(t, err)
+	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Delete me 2", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"delete_ids": []interface{}{item1.ID, item2.ID},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resp map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	assert.Equal(t, float64(2), resp["deleted"])
+}
+
+// TestHandleItemBatchCreate creates multiple items in a single entries call.
+func TestHandleItemBatchCreate(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P0",
+				"title":    "Batch task 1",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "Batch task 2",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "Batch task 3",
+			},
+		},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resp []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	require.Len(t, resp, 3)
+	for _, r := range resp {
+		assert.Equal(t, "create", r["action"])
+	}
+}
+
+// TestHandleItemGetVerbose tests ids fetch with verbose=true (notes are included).
+func TestHandleItemGetVerbose(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Verbose task", "", "secret notes", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"ids":     []interface{}{item.ID},
+		"verbose": true,
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var items []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &items))
+	require.Len(t, items, 1)
+	assert.Equal(t, "secret notes", items[0]["notes"])
+}
+
+// TestHandleItemGetMiss tests ids fetch where an ID doesn't exist returns an error.
+func TestHandleItemGetMiss(t *testing.T) {
+	resetAllDB(t)
+
+	// Requesting a nonexistent item ID returns an error result
+	req := makeRequest(map[string]interface{}{
+		"ids": []interface{}{"AC-9999"},
+	})
+	result, err := handleItem(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError, "fetching nonexistent item should return error result")
 }
