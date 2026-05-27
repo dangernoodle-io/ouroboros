@@ -9,10 +9,10 @@ import (
 
 type Item struct {
 	ID          string `json:"id"`
-	ProjectID   int64  `json:"project_id"`
+	ProjectID   int64  `json:"project_id,omitempty"`
 	Priority    string `json:"priority"`
 	Title       string `json:"title"`
-	Component   string `json:"component"`
+	Component   string `json:"component,omitempty"`
 	Description string `json:"description"`
 	Notes       string `json:"notes,omitempty"`
 	Status      string `json:"status"`
