@@ -27,6 +27,7 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
    - `notes` — unlimited narrative for humans (rationale, trade-offs, context); shown only when asked
    - `category` — optional (e.g. `config` for facts, procedure type for notes)
    - `tags` — array
+   - `component` — optional subproject tag (e.g. `"plugin"`, `"app"`) when filing item-typed work scoped to a sub-area
 
 5. **Report.** One line per item:
    - Stored: `[type] title — project`

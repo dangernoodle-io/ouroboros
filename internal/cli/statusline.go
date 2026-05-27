@@ -18,6 +18,7 @@ import (
 var (
 	statuslineProjectFlag string
 	statuslineJSONFlag    bool
+	statuslinePlainFlag   bool
 )
 
 var statuslineCmd = &cobra.Command{
@@ -25,7 +26,8 @@ var statuslineCmd = &cobra.Command{
 	Short: "Output formatted status line showing KB and backlog counts",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDB(func(db *sql.DB) error {
-			return runStatusline(cmd.OutOrStdout(), db, statuslineProjectFlag, statuslineJSONFlag)
+			plain := statuslinePlainFlag || os.Getenv("OUROBOROS_NO_COLOR") != ""
+			return runStatusline(cmd.OutOrStdout(), db, statuslineProjectFlag, statuslineJSONFlag, plain)
 		})
 	},
 }
@@ -33,6 +35,7 @@ var statuslineCmd = &cobra.Command{
 func init() {
 	statuslineCmd.Flags().StringVar(&statuslineProjectFlag, "project", "", "Explicit project filter")
 	statuslineCmd.Flags().BoolVar(&statuslineJSONFlag, "json", false, "Output JSON instead of ANSI")
+	statuslineCmd.Flags().BoolVar(&statuslinePlainFlag, "plain", false, "Output plain text without ANSI escapes")
 }
 
 type statuslineData struct {
@@ -51,7 +54,7 @@ type statuslineBacklog struct {
 	Items []backlog.PriorityCount `json:"items"`
 }
 
-func runStatusline(out io.Writer, db *sql.DB, project string, jsonOutput bool) error {
+func runStatusline(out io.Writer, db *sql.DB, project string, jsonOutput bool, plain bool) error {
 	// Resolve project filter
 	resolvedProject := project
 	if project == "" {
@@ -136,8 +139,13 @@ func runStatusline(out io.Writer, db *sql.DB, project string, jsonOutput bool) e
 		return nil
 	}
 
-	// ANSI output
-	line := formatStatuslineANSI(data)
+	// Plain or ANSI output
+	var line string
+	if plain {
+		line = formatStatuslinePlain(data)
+	} else {
+		line = formatStatuslineANSI(data)
+	}
 	fmt.Fprintln(out, line)
 	return nil
 }
@@ -193,6 +201,51 @@ func formatStatuslineANSI(data statuslineData) string {
 			sb.WriteString(color)
 			fmt.Fprintf(&sb, "%d×%s", pc.Count, pc.Priority)
 			sb.WriteString("\033[0m")
+		}
+		sb.WriteString(")")
+	}
+
+	return sb.String()
+}
+
+func formatStatuslinePlain(data statuslineData) string {
+	var sb strings.Builder
+
+	sb.WriteString("ouroboros:")
+
+	if data.Project != "" {
+		sb.WriteString(" [")
+		sb.WriteString(data.Project)
+		sb.WriteString("]")
+	}
+
+	sb.WriteString(" KB ")
+	fmt.Fprintf(&sb, "%d", data.KB.Total)
+
+	if len(data.KB.Types) > 0 {
+		sb.WriteString(" (")
+		for i, tc := range data.KB.Types {
+			if i > 0 {
+				sb.WriteString(" ")
+			}
+			fmt.Fprintf(&sb, "%d%s", tc.Count, typeAbbrev(tc.Type))
+		}
+		sb.WriteString(")")
+	}
+
+	sb.WriteString(" | ")
+
+	sb.WriteString("BL ")
+	fmt.Fprintf(&sb, "%d", data.Backlog.Total)
+	sb.WriteString(" open")
+
+	if len(data.Backlog.Items) > 0 {
+		sb.WriteString(" (")
+		for i, pc := range data.Backlog.Items {
+			if i > 0 {
+				sb.WriteString(" ")
+			}
+			fmt.Fprintf(&sb, "%d×%s", pc.Count, pc.Priority)
 		}
 		sb.WriteString(")")
 	}
