@@ -230,6 +230,113 @@ test('post-edit-check: Write tool_name works like Edit', () => {
   }
 });
 
+test('post-edit-check: MultiEdit with edits array → processes each file, nudge on KB match', () => {
+  const gitRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'post-edit-multiedit-'));
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-multiedit-home-'));
+  try {
+    fs.mkdirSync(path.join(gitRepoDir, '.git'));
+    const srcDir = path.join(gitRepoDir, 'src');
+    fs.mkdirSync(srcDir, { recursive: true });
+    const file1 = path.join(srcDir, 'service.js');
+    const file2 = path.join(srcDir, 'handler.js');
+    fs.writeFileSync(file1, '');
+    fs.writeFileSync(file2, '');
+    const input = JSON.stringify({
+      session_id: 'sess-multiedit-test',
+      tool_input: {
+        edits: [
+          { file_path: file1, old_string: 'a', new_string: 'b' },
+          { file_path: file2, old_string: 'c', new_string: 'd' },
+        ],
+      },
+    });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    // Both files should produce KB ref nudges (stub returns matches for any stem)
+    assert.match(result.stderr, /KB refs service\.js:/);
+    assert.match(result.stderr, /KB refs handler\.js:/);
+    assert.match(result.stderr, /check staleness/);
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    assert(fs.existsSync(logFile), 'hooks.log should exist');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const fireEvent = lines.find(line => {
+      try { const e = JSON.parse(line); return e.hook === 'post_edit_check' && e.kind === 'fire'; } catch (e) { return false; }
+    });
+    assert(fireEvent, 'should have a fire event');
+    const nudgeEvent = lines.find(line => {
+      try { const e = JSON.parse(line); return e.kind === 'nudge'; } catch (e) { return false; }
+    });
+    assert(nudgeEvent, 'should have a nudge event for MultiEdit KB match');
+  } finally {
+    fs.rmSync(gitRepoDir, { recursive: true });
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('post-edit-check: NotebookEdit with file_path → processed like Edit', () => {
+  const gitRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'post-edit-notebook-'));
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-notebook-home-'));
+  try {
+    fs.mkdirSync(path.join(gitRepoDir, '.git'));
+    const srcDir = path.join(gitRepoDir, 'notebooks');
+    fs.mkdirSync(srcDir, { recursive: true });
+    const testFile = path.join(srcDir, 'analysis.ipynb');
+    fs.writeFileSync(testFile, '');
+    const input = JSON.stringify({
+      session_id: 'sess-notebook-test',
+      tool_name: 'NotebookEdit',
+      tool_input: { file_path: testFile, cell_type: 'code', new_source: 'print("hello")' },
+    });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.match(result.stderr, /KB refs analysis\.ipynb:/);
+    assert.match(result.stderr, /check staleness/);
+  } finally {
+    fs.rmSync(gitRepoDir, { recursive: true });
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('post-edit-check: MultiEdit with empty edits array → noop', () => {
+  const gitRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'post-edit-empty-multiedit-'));
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-empty-multiedit-home-'));
+  try {
+    fs.mkdirSync(path.join(gitRepoDir, '.git'));
+    const input = JSON.stringify({
+      session_id: 'sess-empty-multiedit',
+      tool_input: { edits: [] },
+    });
+
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stderr.trim(), '');
+  } finally {
+    fs.rmSync(gitRepoDir, { recursive: true });
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
 test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true });

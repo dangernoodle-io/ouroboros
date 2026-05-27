@@ -144,7 +144,7 @@ test('subagent-stop: no kb block + tier-2 self-claim → decision:block JSON on 
   const input = JSON.stringify({
     agent_type: 'general',
     agent_id: 'abc12345678',
-    last_assistant_message: 'This is a long message that mentions the knowledge base which is a tier-2 pattern and should be logged as a self-claim',
+    last_assistant_message: 'This is a long message. [ouroboros] subagent main: persisted 2 entries to my-project [ids: 1,2] — a tier-2 confirmation that should be detected as a self-claim',
   });
   const result = runScript(input);
   assert.strictEqual(result.status, 2);

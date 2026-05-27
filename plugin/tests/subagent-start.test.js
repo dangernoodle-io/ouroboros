@@ -49,12 +49,12 @@ function runScript(input, env = {}) {
 }
 
 test('subagent-start: stub query returns 3 rows → stdout has KB header + 3 lines WITHOUT contract block', () => {
-  const input = JSON.stringify({ cwd: projectDir });
+  const input = JSON.stringify({ cwd: projectDir, session_id: 'sess-3rows-test' });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
   const stdout = result.stdout;
   assert(stdout.includes('[ouroboros]'));
-  assert(stdout.includes('KB (3)'));
+  assert(stdout.includes('KB context'), 'KB context section header should be present');
   assert(stdout.includes('[note] sample one'));
   assert(stdout.includes('[decision] sample two'));
   assert(stdout.includes('[fact] sample three'));
@@ -63,9 +63,9 @@ test('subagent-start: stub query returns 3 rows → stdout has KB header + 3 lin
   assert(!stdout.includes('persist any decisions/facts'), 'contract preamble should not appear for subagents');
 });
 
-test('subagent-start: stub query returns empty array → exit 0, no stdout', () => {
-  const input = JSON.stringify({ cwd: projectDir });
-  const result = runScript(input, { OUROBOROS_STUB_QUERY_EMPTY: '1' });
+test('subagent-start: stub query returns empty array and no items → exit 0, no stdout', () => {
+  const input = JSON.stringify({ cwd: projectDir, session_id: 'sess-empty-test' });
+  const result = runScript(input, { OUROBOROS_STUB_QUERY_EMPTY: '1', OUROBOROS_STUB_ITEMS_EMPTY: '1' });
   assert.strictEqual(result.status, 0);
   assert.strictEqual(result.stdout.trim(), '');
 });
@@ -164,12 +164,12 @@ test('subagent-start: subagent_start event logged with agent_type', () => {
 });
 
 test('subagent-start: KB summary still injected, contract block absent (regression)', () => {
-  const input = JSON.stringify({ cwd: projectDir });
+  const input = JSON.stringify({ cwd: projectDir, session_id: 'sess-regression-test' });
   const result = runScript(input);
   assert.strictEqual(result.status, 0);
   const stdout = result.stdout;
   assert(stdout.includes('[ouroboros]'));
-  assert(stdout.includes('KB (3)'));
+  assert(stdout.includes('KB context'), 'KB context section header should be present');
   assert(stdout.includes('[note] sample one'));
   assert(stdout.includes('[decision] sample two'));
   assert(stdout.includes('[fact] sample three'));
@@ -239,7 +239,7 @@ test('subagent-start: cwd resolves project via projectFromPath, KB injected', ()
 
     const stdout = result.stdout;
     assert(stdout.includes('[ouroboros]'), 'KB header should be injected');
-    assert(stdout.includes('KB (3)'), 'KB context should show 3 entries from stub');
+    assert(stdout.includes('KB context'), 'KB context section header should be present');
     assert(stdout.includes('[note] sample one'), 'KB entries should be formatted');
 
     const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
@@ -294,6 +294,141 @@ test('subagent-start: no cwd → no project → silent exit with events logged',
     assert(fireEvent, 'fire event should be logged even without project');
     assert(startEvent, 'subagent_start event should be logged even without project');
     assert(!fireEvent.includes('"project":"'), 'fire event should not have project field when cwd is missing');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+// OU-199: subagent context injection tests
+
+test('subagent-start: prompt present → search-based KB results injected (relevant label)', () => {
+  const input = JSON.stringify({
+    cwd: projectDir,
+    session_id: 'sess-ou199-prompt',
+    agent_type: 'general',
+    prompt: 'How does the authentication middleware work?',
+  });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+  const stdout = result.stdout;
+  assert(stdout.includes('[ouroboros] KB context (relevant):'), 'should show relevant label when prompt given');
+  assert(stdout.includes('[note] sample one'), 'KB entries should be listed');
+});
+
+test('subagent-start: no prompt → recent KB results injected (recent label)', () => {
+  const input = JSON.stringify({
+    cwd: projectDir,
+    session_id: 'sess-ou199-noprompt',
+    agent_type: 'general',
+  });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+  const stdout = result.stdout;
+  assert(stdout.includes('[ouroboros] KB context (recent):'), 'should show recent label when no prompt');
+  assert(stdout.includes('[note] sample one'), 'KB entries should be listed');
+});
+
+test('subagent-start: items query returns items → Open items section appears', () => {
+  const input = JSON.stringify({
+    cwd: projectDir,
+    session_id: 'sess-ou199-items',
+    agent_type: 'general',
+  });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+  const stdout = result.stdout;
+  assert(stdout.includes('[ouroboros] Open items'), 'Open items section should appear');
+  assert(stdout.includes('OU-1'), 'item ID should appear');
+  assert(stdout.includes('P2'), 'item priority should appear');
+  assert(stdout.includes('test item'), 'item title should appear');
+});
+
+test('subagent-start: items empty → no Open items section', () => {
+  const input = JSON.stringify({
+    cwd: projectDir,
+    session_id: 'sess-ou199-noitems',
+    agent_type: 'general',
+  });
+  const result = runScript(input, { OUROBOROS_STUB_ITEMS_EMPTY: '1' });
+  assert.strictEqual(result.status, 0);
+  const stdout = result.stdout;
+  assert(!stdout.includes('Open items'), 'Open items section should not appear when empty');
+});
+
+test('subagent-start: second fire within 60s → cooldown short-circuits (no context output)', () => {
+  const gitRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagent-start-cooldown-'));
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagent-start-cooldown-home-'));
+  const { execSync } = require('child_process');
+  try {
+    fs.mkdirSync(path.join(gitRepoDir, '.git'));
+    try { execSync('git init', { cwd: gitRepoDir, stdio: 'ignore' }); } catch (e) {}
+
+    const input = JSON.stringify({
+      cwd: gitRepoDir,
+      session_id: 'sess-cooldown-test',
+      agent_type: 'general',
+    });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+
+    // First fire — should inject context
+    const result1 = spawnSync('node', [SCRIPT_PATH], {
+      input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result1.status, 0);
+    assert(result1.stdout.includes('[ouroboros]'), 'first fire should inject KB context');
+
+    // Second fire in same session+project — cooldown should suppress
+    const result2 = spawnSync('node', [SCRIPT_PATH], {
+      input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result2.status, 0);
+    assert.strictEqual(result2.stdout.trim(), '', 'second fire within cooldown should not inject context');
+  } finally {
+    fs.rmSync(gitRepoDir, { recursive: true });
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('subagent-start: no project resolvable → fallback (silent exit)', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagent-start-fallback-home-'));
+  try {
+    const input = JSON.stringify({
+      session_id: 'sess-fallback-test',
+      agent_type: 'general',
+      prompt: 'Does not matter, no project',
+    });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '', 'no output when project cannot be resolved');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('subagent-start: only one fire+subagent_start event logged (no duplicate)', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'subagent-start-dedup-home-'));
+  try {
+    const input = JSON.stringify({
+      session_id: 'sess-dedup-test',
+      agent_type: 'general',
+    });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    if (fs.existsSync(logFile)) {
+      const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n').filter(Boolean);
+      const fireEvents = lines.filter(line => {
+        try { const e = JSON.parse(line); return e.hook === 'subagent_start' && e.kind === 'fire'; } catch (e) { return false; }
+      });
+      assert.strictEqual(fireEvents.length, 1, 'exactly one fire event should be logged');
+    }
   } finally {
     fs.rmSync(testHomeDir, { recursive: true });
   }

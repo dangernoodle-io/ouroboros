@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, extractAllKbBlocks, matchesAnyPattern, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType } = require('../scripts/lib');
+const { extractKbBlock, extractAllKbBlocks, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -1156,4 +1156,50 @@ test('extractAllKbBlocks - line cap: file with 2600 lines, maxLines=1000 → onl
   assert.strictEqual(decisionCount, 100);
 
   fs.rmSync(tmpDir, { recursive: true });
+});
+
+// Tests for OU-178: tightened ALREADY_PERSISTED_PATTERNS
+test('ALREADY_PERSISTED_PATTERNS - false-positive: "the knowledge base might have context" should NOT match', () => {
+  const msg = 'the knowledge base might have context about this decision';
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), false);
+});
+
+test("ALREADY_PERSISTED_PATTERNS - false-positive: \"I'll persist this decision\" should NOT match", () => {
+  const msg = "I'll persist this decision to the KB for future reference";
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), false);
+});
+
+test("ALREADY_PERSISTED_PATTERNS - false-positive: \"we'll need to make this persistent\" should NOT match", () => {
+  const msg = "we'll need to make this persistent so it survives across sessions";
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), false);
+});
+
+test('ALREADY_PERSISTED_PATTERNS - false-positive: bare "ouroboros" mention should NOT match', () => {
+  const msg = 'ouroboros is the tool we use for KB management';
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), false);
+});
+
+test('ALREADY_PERSISTED_PATTERNS - false-positive: "put MCP" should NOT match', () => {
+  const msg = 'we should put MCP server entries into the KB later';
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), false);
+});
+
+test('ALREADY_PERSISTED_PATTERNS - true confirm: server stderr echo should match', () => {
+  const msg = '[ouroboros] stop main: persisted 2 entries to my-project [ids: 1,2]';
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), true);
+});
+
+test('ALREADY_PERSISTED_PATTERNS - true confirm: persisted 1 entry (singular) should match', () => {
+  const msg = '[ouroboros] subagent abc1234: persisted 1 entry to acme-corp';
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), true);
+});
+
+test('ALREADY_PERSISTED_PATTERNS - true confirm: tool_result payload create should match', () => {
+  const msg = 'mcp__ouroboros-mcp__put {"action": "create", "id": 5, "title": "some decision"}';
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), true);
+});
+
+test('ALREADY_PERSISTED_PATTERNS - true confirm: tool_result payload update should match', () => {
+  const msg = 'mcp__plugin__put_entry {"action": "update", "title": "decision updated"}';
+  assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), true);
 });
