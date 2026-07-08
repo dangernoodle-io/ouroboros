@@ -1051,7 +1051,7 @@ func TestHandleGet_MissingDomain_Errors(t *testing.T) {
 	assert.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
 	require.True(t, ok)
-	assert.Contains(t, textContent.Text, `must be "kb" or "backlog"`)
+	assert.Contains(t, textContent.Text, `must be "kb", "backlog", or "roadmap"`)
 }
 
 // TestHandleGet_InvalidDomain_Errors verifies get rejects an unrecognized domain.
@@ -1072,7 +1072,7 @@ func TestHandleSearch_MissingDomain_Errors(t *testing.T) {
 	assert.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
 	require.True(t, ok)
-	assert.Contains(t, textContent.Text, `must be "kb" or "backlog"`)
+	assert.Contains(t, textContent.Text, `must be "kb", "backlog", or "roadmap"`)
 }
 
 // TestHandleGet_DomainBacklog_IdsFetch verifies get domain=backlog fetches items by id.

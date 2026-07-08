@@ -600,6 +600,24 @@ func TestItemsFTSBackfillOnMigration(t *testing.T) {
 	assert.Equal(t, 1, count, "migration 10 must backfill pre-existing items into items_fts")
 }
 
+func TestRoadmapSingletonIndex(t *testing.T) {
+	db := testDB(t)
+
+	var name string
+	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_documents_roadmap_singleton'").Scan(&name)
+	require.NoError(t, err)
+	assert.Equal(t, "idx_documents_roadmap_singleton", name)
+
+	now := "2024-01-01T00:00:00Z"
+	_, err = db.Exec(`INSERT INTO documents (type, project, category, title, content, created_at, updated_at)
+		VALUES ('roadmap', 'acme-corp', '', 'roadmap', '# Roadmap', ?, ?)`, now, now)
+	require.NoError(t, err)
+
+	_, err = db.Exec(`INSERT INTO documents (type, project, category, title, content, created_at, updated_at)
+		VALUES ('roadmap', 'acme-corp', '', 'other-title', '# Roadmap', ?, ?)`, now, now)
+	require.Error(t, err, "the partial unique index must block a second roadmap row for the same project")
+}
+
 func TestApplySchemaIdempotent(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
@@ -627,8 +645,8 @@ func TestMigrationVersionTracking(t *testing.T) {
 		versions = append(versions, v)
 	}
 
-	// Should have recorded migrations 1 through 10
-	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, versions)
+	// Should have recorded migrations 1 through 11
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, versions)
 
 	// Verify applied_at is set (not NULL)
 	var appliedAt string

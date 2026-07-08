@@ -68,6 +68,17 @@ func TestValidateDocument(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "roadmap type rejected (roadmap docs are written via internal/roadmap only)",
+			doc: store.Document{
+				Type:    "roadmap",
+				Project: "acme-corp",
+				Title:   "roadmap",
+				Content: "# Roadmap",
+			},
+			wantErr: true,
+			errMsg:  "invalid type",
+		},
+		{
 			name: "missing type",
 			doc: store.Document{
 				Project: "acme-corp",

@@ -8,6 +8,10 @@ import (
 
 const ContentMaxLen = 500
 
+// roadmap is intentionally excluded: the roadmap singleton doc is written
+// exclusively via internal/roadmap.Save (and the transactional Mutate), which
+// enforce roadmap-specific invariants (singleton row, structured metadata,
+// content-cap truncation) that the generic kb write path does not.
 var validTypes = map[string]bool{
 	"decision": true,
 	"fact":     true,

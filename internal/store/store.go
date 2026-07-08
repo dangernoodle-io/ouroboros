@@ -64,7 +64,12 @@ func InitDB(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// _txlock=immediate: db.Begin() acquires SQLite's write lock immediately
+	// rather than deferring it to the first write statement. This lets
+	// roadmap.Mutate serialize a full load-mutate-save cycle against
+	// concurrent writers, including another ouroboros process on the same
+	// file (SQLITE_BUSY + busy_timeout below handles lock contention).
+	db, err := sql.Open("sqlite", dbPath+"?_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -212,6 +217,10 @@ CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE ON items BEGIN
 END;
 
 INSERT INTO items_fts(rowid, title, description, notes) SELECT rowid, title, description, notes FROM items;`,
+	},
+	{
+		version: 11,
+		sql:     `CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_roadmap_singleton ON documents(project) WHERE type='roadmap';`,
 	},
 }
 

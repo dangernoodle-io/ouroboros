@@ -15,18 +15,23 @@ const (
 	descFilterCats     = "Filter by categories (kb only)"
 	descLimit          = "Limit, default 10, max 500"
 	descVerbose        = "Include notes (default: false)"
-	descDomain         = `Required: "kb" or "backlog"`
+	descDomain         = `Required: "kb", "backlog", or "roadmap"`
 	descPriorityMin    = "Min priority P0-P6 (backlog only)"
 	descPriorityMax    = "Max priority P0-P6 (backlog only)"
 	descStatus         = "open or done (backlog only)"
 	descComponent      = "Component tag (subproject/plugin) filter (backlog only)"
+	descFormat         = "structured or md, default structured (roadmap only)"
+	descRoadmapOp      = `Required: "add", "update", "move", "done", or "remove"`
+	descRoadmapProject = "Project name (roadmap singleton)"
+	descRoadmapSection = "now|next|parked|done"
 )
 
 const serverInstructions = `Persist decisions and track work items across conversations.
-get/search are reads (required domain: kb|backlog); kb/backlog are writes.
+get/search are reads (required domain: kb|backlog|roadmap); kb/backlog/roadmap are writes.
 
 - Search before writing — avoid duplicates; kb upserts by type+project+category+title.
 - Default response is summary; verbose=true only when full content/notes are needed.
+- roadmap is a per-project singleton (now/next/parked/done lanes); get format=md renders Markdown.
 - Checkpoint after multi-step tasks; persist non-obvious decisions, update or delete stale ones.`
 
 // buildServer creates a new MCP server with all tools registered at startup.
@@ -51,6 +56,7 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 		mcp.WithString("component", mcp.Description(descComponent)),
 		mcp.WithNumber("limit", mcp.Description(descLimit)),
 		mcp.WithBoolean("verbose", mcp.Description(descVerbose)),
+		mcp.WithString("format", mcp.Description(descFormat)),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleGet(db)))
 
@@ -82,6 +88,24 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 		mcp.WithArray("delete_ids", mcp.Description("Item IDs to delete")),
 		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
 	), withRecover(handleBacklog(db, bk)))
+
+	s.AddTool(mcp.NewTool("roadmap",
+		mcp.WithDescription("Mutate the per-project roadmap singleton (now/next/parked/done lanes) via op=add|update|move|done|remove. Reads live under get/search domain=roadmap."),
+		mcp.WithString("op", mcp.Required(), mcp.Description(descRoadmapOp)),
+		mcp.WithString("project", mcp.Required(), mcp.Description(descRoadmapProject)),
+		mcp.WithString("section", mcp.Description(descRoadmapSection+" (add only)")),
+		mcp.WithString("to", mcp.Description(descRoadmapSection+" (move only)")),
+		mcp.WithNumber("id", mcp.Description("Item ID (update/move/done/remove)")),
+		mcp.WithString("title", mcp.Description("Item title (add/update)")),
+		mcp.WithString("body", mcp.Description("Item body (add/update)")),
+		mcp.WithString("component", mcp.Description("Component tag (add/update)")),
+		mcp.WithString("why", mcp.Description("Why parked (add/update)")),
+		mcp.WithString("resume_trigger", mcp.Description("Resume trigger (add/update)")),
+		mcp.WithArray("kb", mcp.Description("Related KB doc IDs (add/update)")),
+		mcp.WithArray("ticket", mcp.Description("Ticket refs (add/update)")),
+		mcp.WithArray("blocked_by", mcp.Description("Cross-project blockers: {project,ref,note} (add/update)")),
+		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
+	), withRecover(handleRoadmap(db, bk)))
 
 	return s
 }

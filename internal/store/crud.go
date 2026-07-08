@@ -237,16 +237,34 @@ func UpsertDocumentTx(tx *sql.Tx, doc Document) (*UpsertResult, error) {
 
 // GetDocument returns a full Document by ID. Returns nil, nil if not found.
 func GetDocument(db *sql.DB, id int64) (*Document, error) {
+	return getDocumentExec(db, "id = ?", id)
+}
+
+// GetDocumentByKey returns a full Document by its natural key
+// (type, project, category, title). Returns nil, nil if not found.
+func GetDocumentByKey(db *sql.DB, docType, project, category, title string) (*Document, error) {
+	return getDocumentExec(db, "type = ? AND project = ? AND category = ? AND title = ?", docType, project, category, title)
+}
+
+// GetDocumentByKeyTx is GetDocumentByKey scoped to an existing transaction,
+// for callers that need the read to participate in a caller-owned tx (e.g.
+// a serialized load-mutate-save cycle).
+func GetDocumentByKeyTx(tx *sql.Tx, docType, project, category, title string) (*Document, error) {
+	return getDocumentExec(tx, "type = ? AND project = ? AND category = ? AND title = ?", docType, project, category, title)
+}
+
+// getDocumentExec contains the shared scan logic for GetDocument and
+// GetDocumentByKey(Tx), operating on any sqlExecutor (db or tx).
+func getDocumentExec(q sqlExecutor, whereClause string, args ...interface{}) (*Document, error) {
 	var doc Document
 	var metadataJSON sql.NullString
 	var tagsJSON sql.NullString
 	var notes sql.NullString
 	var sessionID sql.NullString
 
-	err := db.QueryRow(`
+	err := q.QueryRow(`
 		SELECT id, type, project, category, title, content, notes, session_id, metadata, tags, created_at, updated_at
-		FROM documents WHERE id = ?
-	`, id).Scan(&doc.ID, &doc.Type, &doc.Project, &doc.Category, &doc.Title, &doc.Content, &notes, &sessionID, &metadataJSON, &tagsJSON, &doc.CreatedAt, &doc.UpdatedAt)
+		FROM documents WHERE `+whereClause, args...).Scan(&doc.ID, &doc.Type, &doc.Project, &doc.Category, &doc.Title, &doc.Content, &notes, &sessionID, &metadataJSON, &tagsJSON, &doc.CreatedAt, &doc.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, nil

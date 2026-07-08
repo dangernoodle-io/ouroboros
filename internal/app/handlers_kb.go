@@ -84,8 +84,10 @@ func handleGet(db *sql.DB) server.ToolHandlerFunc {
 			return getDocuments(db, req)
 		case "backlog":
 			return getBacklogItems(db, req)
+		case "roadmap":
+			return getRoadmap(db, req)
 		default:
-			return mcp.NewToolResultError(`domain is required: must be "kb" or "backlog"`), nil //nolint:nilerr
+			return mcp.NewToolResultError(`domain is required: must be "kb", "backlog", or "roadmap"`), nil //nolint:nilerr
 		}
 	}
 }
@@ -149,8 +151,10 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 			return searchDocuments(db, req)
 		case "backlog":
 			return searchBacklogItems(db, req)
+		case "roadmap":
+			return searchRoadmap(db, req)
 		default:
-			return mcp.NewToolResultError(`domain is required: must be "kb" or "backlog"`), nil //nolint:nilerr
+			return mcp.NewToolResultError(`domain is required: must be "kb", "backlog", or "roadmap"`), nil //nolint:nilerr
 		}
 	}
 }

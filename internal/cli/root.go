@@ -44,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(kbCmd)
 	rootCmd.AddCommand(exportCmd)
+	rootCmd.AddCommand(roadmapCmd)
 }
 
 // Execute runs the root command.
