@@ -10,8 +10,8 @@ model: sonnet
 2. **Query.** Use args as the search query (e.g. `/recall auth middleware`). If no args, do a broad project dump.
 
 3. **Query both sources:**
-   - KB: `search` with query + `projects: ["<project>"]`; if no query, `get` with `projects: ["<project>"]` for summaries
-   - Backlog: `item` with `projects: ["<project>"]` (add `status: "open"` for broad queries); narrow to a sub-area with `component="plugin"` (e.g. `item projects=["ouroboros"] component="plugin"`)
+   - KB: `search` with `domain: "kb"` + query + `projects: ["<project>"]`; if no query, `get` with `domain: "kb"` + `projects: ["<project>"]` for summaries
+   - Backlog: `search`/`get` with `domain: "backlog"` + `projects: ["<project>"]` (add `status: "open"` for broad queries); narrow to a sub-area with `component="plugin"` (e.g. `search domain="backlog" projects=["ouroboros"] component="plugin"`)
 
 4. **Present** grouped by source:
    - **Knowledge Base** — decisions, facts, notes, relations (summaries only)

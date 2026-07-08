@@ -1,5 +1,6 @@
 Persist decisions and track work items across conversations.
-- Search before put/create — avoid duplicates; upsert by type+project+category+title.
+get/search are reads (required domain: kb|backlog); kb/backlog are writes.
+
+- Search before writing — avoid duplicates; kb upserts by type+project+category+title.
 - Default response is summary; verbose=true only when full content/notes are needed.
-- Checkpoint after multi-step tasks; persist non-obvious decisions.
-- Update or delete stale entries.
+- Checkpoint after multi-step tasks; persist non-obvious decisions, update or delete stale ones.

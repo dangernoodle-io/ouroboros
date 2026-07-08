@@ -96,10 +96,10 @@ func TestToolsListFootprint(t *testing.T) {
 	// Per-tool: validate annotation structure per OU-75.
 	// Each tool should have only the expected annotation fields set.
 	expectedAnnotations := map[string]map[string]any{
-		"get":    {"readOnlyHint": true},
-		"search": {"readOnlyHint": true},
-		"put":    {"idempotentHint": true},
-		"item":   {"destructiveHint": true},
+		"get":     {"readOnlyHint": true},
+		"search":  {"readOnlyHint": true},
+		"kb":      {"idempotentHint": true},
+		"backlog": {"destructiveHint": true},
 	}
 	t.Logf("  per-tool annotation structure (OU-75):")
 	for _, tool := range tools {
@@ -166,7 +166,7 @@ func TestAllToolsRegisteredAtStartup(t *testing.T) {
 	allTools := srv.ListTools()
 	t.Logf("startup: %d total tools (expected 4)", len(allTools))
 	require.Equal(t, 4, len(allTools), "should have exactly 4 tools at startup")
-	assertToolsPresent(t, allTools, []string{"get", "search", "put", "item"})
+	assertToolsPresent(t, allTools, []string{"get", "search", "kb", "backlog"})
 }
 
 // assertToolsPresent verifies that all named tools exist in the server tool map.

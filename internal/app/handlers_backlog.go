@@ -50,7 +50,126 @@ func backupCommit(bk *backup.Backup, msg string) {
 	}
 }
 
-func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
+// parseItemFilter builds a backlog.ItemFilter from projects/priority_min/priority_max/status/component
+// arguments, shared by domain=backlog reads (get list mode, search).
+func parseItemFilter(d *sql.DB, req mcp.CallToolRequest) (backlog.ItemFilter, error) {
+	var f backlog.ItemFilter
+
+	projectNames := parseStringSlice(req.GetArguments(), "projects")
+	if len(projectNames) > 0 {
+		ids, err := resolveProjects(d, projectNames)
+		if err != nil {
+			return f, err
+		}
+		f.ProjectIDs = ids
+	}
+	if v, ok := req.GetArguments()["priority_min"].(string); ok && v != "" {
+		n, err := parsePriority(v)
+		if err != nil {
+			return f, err
+		}
+		f.PriorityMin = &n
+	}
+	if v, ok := req.GetArguments()["priority_max"].(string); ok && v != "" {
+		n, err := parsePriority(v)
+		if err != nil {
+			return f, err
+		}
+		f.PriorityMax = &n
+	}
+	if v, ok := req.GetArguments()["status"].(string); ok && v != "" {
+		f.Status = &v
+	}
+	if v, ok := req.GetArguments()["component"].(string); ok {
+		f.Component = &v
+	}
+	if v, ok := req.GetArguments()["limit"].(float64); ok {
+		f.Limit = int(v)
+	}
+	return f, nil
+}
+
+// itemLinesResult renders a compact one-line-per-item text result (or "no items").
+func itemLinesResult(items []backlog.Item) (*mcp.CallToolResult, error) {
+	if len(items) == 0 {
+		return mcp.NewToolResultText("no items"), nil
+	}
+
+	var lines []string
+	for _, item := range items {
+		componentStr := ""
+		if item.Component != "" {
+			componentStr = fmt.Sprintf("(%s) ", item.Component)
+		}
+		lines = append(lines, fmt.Sprintf("%s %s [%s] %s%s", item.ID, item.Priority, item.Status, componentStr, item.Title))
+	}
+	return mcp.NewToolResultText(strings.Join(lines, "\n")), nil
+}
+
+// getBacklogItems handles domain=backlog reads for the get tool: ids[] fetch, or filters list.
+func getBacklogItems(d *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	ids := parseStringSlice(req.GetArguments(), "ids")
+	if len(ids) > 0 {
+		verbose, _ := req.GetArguments()["verbose"].(bool)
+		items := make([]interface{}, 0, len(ids))
+
+		for _, id := range ids {
+			item, err := backlog.GetItem(d, id)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if item == nil {
+				// Omit misses
+				continue
+			}
+
+			if !verbose {
+				item.Notes = ""
+			}
+			item.ProjectID = 0
+			items = append(items, item)
+		}
+
+		return jsonResult(items)
+	}
+
+	f, err := parseItemFilter(d, req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	items, err := backlog.ListItems(d, f)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return itemLinesResult(items)
+}
+
+// searchBacklogItems handles domain=backlog search: FTS query over title/description/notes,
+// honoring the same filters as get domain=backlog list mode.
+func searchBacklogItems(d *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	query, _ := req.GetArguments()["query"].(string)
+	if query == "" {
+		return mcp.NewToolResultError("query is required"), nil //nolint:nilerr
+	}
+
+	f, err := parseItemFilter(d, req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	items, err := backlog.SearchItems(d, query, f)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return itemLinesResult(items)
+}
+
+// handleBacklog is the backlog write tool (destructive): delete_ids[] batch delete,
+// or entries[] batch create/update. Reads live under get/search domain=backlog.
+func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Check for delete_ids[] batch delete
 		deleteIDs := parseStringSlice(req.GetArguments(), "delete_ids")
@@ -65,36 +184,9 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 			})
 		}
 
-		// Check for ids[] batch fetch
-		ids := parseStringSlice(req.GetArguments(), "ids")
-		if len(ids) > 0 {
-			verbose, _ := req.GetArguments()["verbose"].(bool)
-			items := make([]interface{}, 0, len(ids))
-
-			for _, id := range ids {
-				item, err := backlog.GetItem(d, id)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				if item == nil {
-					// Omit misses
-					continue
-				}
-
-				if !verbose {
-					item.Notes = ""
-				}
-				item.ProjectID = 0
-				items = append(items, item)
-			}
-
-			return jsonResult(items)
-		}
-
 		// Check for entries[] batch write (mixed create/update)
 		entries := parseEntriesArray(req.GetArguments(), "entries")
 		if len(entries) > 0 {
-			verbose, _ := req.GetArguments()["verbose"].(bool)
 			results := make([]interface{}, 0, len(entries))
 			writeCount := 0
 
@@ -123,10 +215,6 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 						}
 
 						writeCount++
-
-						if !verbose {
-							item.Notes = ""
-						}
 
 						results = append(results, map[string]interface{}{
 							"id":     item.ID,
@@ -191,55 +279,6 @@ func handleItem(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 			return jsonResult(results)
 		}
 
-		// List mode — apply filters
-		var f backlog.ItemFilter
-
-		projectNames := parseStringSlice(req.GetArguments(), "projects")
-		if len(projectNames) > 0 {
-			ids, err := resolveProjects(d, projectNames)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			f.ProjectIDs = ids
-		}
-		if v, ok := req.GetArguments()["priority_min"].(string); ok && v != "" {
-			n, err := parsePriority(v)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			f.PriorityMin = &n
-		}
-		if v, ok := req.GetArguments()["priority_max"].(string); ok && v != "" {
-			n, err := parsePriority(v)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			f.PriorityMax = &n
-		}
-		if v, ok := req.GetArguments()["status"].(string); ok && v != "" {
-			f.Status = &v
-		}
-		if v, ok := req.GetArguments()["component"].(string); ok {
-			f.Component = &v
-		}
-
-		items, err := backlog.ListItems(d, f)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		if len(items) == 0 {
-			return mcp.NewToolResultText("no items"), nil
-		}
-
-		var lines []string
-		for _, item := range items {
-			componentStr := ""
-			if item.Component != "" {
-				componentStr = fmt.Sprintf("(%s) ", item.Component)
-			}
-			lines = append(lines, fmt.Sprintf("%s %s [%s] %s%s", item.ID, item.Priority, item.Status, componentStr, item.Title))
-		}
-		return mcp.NewToolResultText(strings.Join(lines, "\n")), nil
+		return mcp.NewToolResultError("delete_ids or entries is required"), nil //nolint:nilerr
 	}
 }

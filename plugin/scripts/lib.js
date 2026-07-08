@@ -154,7 +154,7 @@ function matchesAnyPattern(message, patterns) {
 // Tier-2: patterns indicating the context already persisted via tool/MCP
 const ALREADY_PERSISTED_PATTERNS = [
   /\[ouroboros\][^\n]*persisted \d+ entr/i,         // server stderr echo
-  /mcp__[^"]*__put[^"]*"action":\s*"(create|update)"/i, // tool_result payload
+  /mcp__[^"]*__kb[^"]*"action":\s*"(create|update)"/i, // tool_result payload
 ];
 
 // Tier-1: decision language patterns that warrant a nudge
@@ -555,15 +555,15 @@ function persistKbBlock(message, ctx) {
     });
     const injectedJson = JSON.stringify(entries);
 
-    const cmd = `"${binary}" put --stdin --project "${project}"`;
+    const cmd = `"${binary}" kb --stdin --project "${project}"`;
     const result = execSync(cmd, { input: injectedJson, timeout: 3000, encoding: 'utf-8' });
-    const putResult = JSON.parse(result);
-    const resultEntries = Array.isArray(putResult) ? putResult : [putResult];
+    const kbResult = JSON.parse(result);
+    const resultEntries = Array.isArray(kbResult) ? kbResult : [kbResult];
     const ids = resultEntries.map(e => e.id).filter(id => id !== undefined);
     console.error(`[ouroboros] ${label} ${idShort}: persisted ${resultEntries.length} entries to ${project} [ids: ${ids.join(',')}]`);
     logHookEvent({ hook: hookName, kind: 'persist', session_id: sessionId, project, entries: resultEntries.length, ids });
   } catch (execErr) {
-    console.error(`[ouroboros] ${label} ${idShort}: put failed: ${execErr.message}`);
+    console.error(`[ouroboros] ${label} ${idShort}: kb failed: ${execErr.message}`);
     logHookEvent({ hook: hookName, kind: 'error', detail: execErr.message, session_id: sessionId, project });
   }
 

@@ -10,7 +10,7 @@ case "$1" in
     fi
     exit 0
     ;;
-  put)
+  kb)
     if [ "$OUROBOROS_STUB_PUT_FAIL" = "1" ]; then
       echo "stub failure" >&2
       exit 1
@@ -18,11 +18,14 @@ case "$1" in
     echo '[{"id":1,"action":"created","title":"hook smoke"}]'
     exit 0
     ;;
-  items)
-    if [ "$OUROBOROS_STUB_ITEMS_EMPTY" = "1" ]; then
-      echo "[]"
-    else
-      echo '[{"id":"OU-1","title":"test item","priority":"P2","status":"open","project":"test-project"}]'
+  ls)
+    if [ "$2" = "backlog" ]; then
+      if [ "$OUROBOROS_STUB_ITEMS_EMPTY" = "1" ]; then
+        echo "[]"
+      else
+        echo '[{"id":"OU-1","title":"test item","priority":"P2","status":"open","project":"test-project"}]'
+      fi
+      exit 0
     fi
     exit 0
     ;;

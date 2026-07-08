@@ -11,11 +11,7 @@ import (
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-var kbCmd = &cobra.Command{
-	Use:   "kb",
-	Short: "Manage knowledge base documents",
-}
-
+// kbCmd is declared in kb.go, which also attaches kbDeleteCmd as a subcommand.
 var kbDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a knowledge base document by ID",
@@ -25,10 +21,6 @@ var kbDeleteCmd = &cobra.Command{
 			return runKBDelete(cmd.OutOrStdout(), db, args[0])
 		})
 	},
-}
-
-func init() {
-	kbCmd.AddCommand(kbDeleteCmd)
 }
 
 func runKBDelete(out io.Writer, db *sql.DB, idStr string) error {

@@ -140,7 +140,7 @@ async function main() {
     // For resume intent, also query backlog items
     if (intent === 'resume') {
       try {
-        const itemsCmd = `"${binary}" items --project "${project}" --status open --limit 10`;
+        const itemsCmd = `"${binary}" ls backlog --project "${project}" --status open --limit 10 --json`;
         const itemsOut = execSync(itemsCmd, { timeout: 3000, encoding: 'utf-8' });
         const items = JSON.parse(itemsOut);
         if (items && items.length > 0) {

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"dangernoodle.io/ouroboros/internal/store"
 )
 
 // Size caps for item fields.
@@ -179,12 +181,14 @@ type ItemFilter struct {
 	Limit       int
 }
 
-func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
-	query := "SELECT id, project_id, priority, title, component, description, status, created, updated FROM items WHERE 1=1"
+// buildItemFilterWhere renders the shared ItemFilter predicates (project/priority/status/component)
+// as SQL fragments, using colPrefix for column references (e.g. "" or "items.").
+func buildItemFilterWhere(f ItemFilter, colPrefix string) (string, []interface{}) {
+	var clause strings.Builder
 	var args []interface{}
 
 	if len(f.ProjectIDs) == 1 {
-		query += " AND project_id = ?"
+		clause.WriteString(" AND " + colPrefix + "project_id = ?")
 		args = append(args, f.ProjectIDs[0])
 	} else if len(f.ProjectIDs) > 1 {
 		placeholders := make([]string, len(f.ProjectIDs))
@@ -192,38 +196,31 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 			placeholders[i] = "?"
 			args = append(args, id)
 		}
-		query += " AND project_id IN (" + strings.Join(placeholders, ",") + ")"
+		clause.WriteString(" AND " + colPrefix + "project_id IN (" + strings.Join(placeholders, ",") + ")")
 	}
 	if f.PriorityMin != nil {
-		query += " AND CAST(SUBSTR(priority, 2) AS INTEGER) >= ?"
+		clause.WriteString(" AND CAST(SUBSTR(" + colPrefix + "priority, 2) AS INTEGER) >= ?")
 		args = append(args, *f.PriorityMin)
 	}
 	if f.PriorityMax != nil {
-		query += " AND CAST(SUBSTR(priority, 2) AS INTEGER) <= ?"
+		clause.WriteString(" AND CAST(SUBSTR(" + colPrefix + "priority, 2) AS INTEGER) <= ?")
 		args = append(args, *f.PriorityMax)
 	}
 	if f.Status != nil {
-		query += " AND status = ?"
+		clause.WriteString(" AND " + colPrefix + "status = ?")
 		args = append(args, *f.Status)
 	}
 	if f.Component != nil {
-		query += " AND component = ?"
+		clause.WriteString(" AND " + colPrefix + "component = ?")
 		args = append(args, *f.Component)
 	}
 
-	query += " ORDER BY CAST(SUBSTR(priority, 2) AS INTEGER), id"
+	return clause.String(), args
+}
 
-	if f.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, f.Limit)
-	}
-
-	rows, err := d.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close() //nolint:errcheck
-
+// scanItems drains rows produced by the shared item column list (id, project_id,
+// priority, title, component, description, status, created, updated).
+func scanItems(rows *sql.Rows) ([]Item, error) {
 	var items []Item
 	for rows.Next() {
 		var item Item
@@ -233,6 +230,57 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
+	query := "SELECT id, project_id, priority, title, component, description, status, created, updated FROM items WHERE 1=1"
+	whereClause, args := buildItemFilterWhere(f, "")
+	query += whereClause
+
+	query += " ORDER BY CAST(SUBSTR(priority, 2) AS INTEGER), id"
+
+	query += " LIMIT ?"
+	args = append(args, store.ClampLimit(f.Limit, 10, 500))
+
+	rows, err := d.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return scanItems(rows)
+}
+
+// SearchItems performs an FTS5 search over backlog items (title, description,
+// notes), honoring the same ItemFilter as ListItems, ordered by relevance (bm25).
+func SearchItems(d *sql.DB, query string, f ItemFilter) ([]Item, error) {
+	ftsQuery := store.FtsEscape(query)
+	if ftsQuery == "" {
+		return nil, nil
+	}
+
+	q := `SELECT items.id, items.project_id, items.priority, items.title, items.component, items.description, items.status, items.created, items.updated
+		FROM items
+		JOIN items_fts ON items.rowid = items_fts.rowid
+		WHERE items_fts MATCH ?`
+	args := []interface{}{ftsQuery}
+
+	whereClause, filterArgs := buildItemFilterWhere(f, "items.")
+	q += whereClause
+	args = append(args, filterArgs...)
+
+	q += " ORDER BY bm25(items_fts)"
+
+	q += " LIMIT ?"
+	args = append(args, store.ClampLimit(f.Limit, 10, 500))
+
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search items: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return scanItems(rows)
 }
 
 // PriorityCount holds a priority level and its count.

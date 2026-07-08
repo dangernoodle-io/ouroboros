@@ -12,9 +12,9 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
    - `relation` — dependencies between components, projects, or systems
    - `plan` — implementation plans discussed or deferred; terse step list in `content`, narrative in `notes`
 
-3. **Search before put.** Collect all candidate titles, then call `search` once with `queries: [title1, title2, ...]` and `projects: ["<project>"]`. The response is positional — `results[i]` corresponds to `queries[i]`. If a matching entry exists for the same project, reuse its title verbatim — the server upserts on `type+project+category+title`. Only skip if existing content is already identical.
+3. **Search before kb.** Collect all candidate titles, then call `search` once with `queries: [title1, title2, ...]` and `projects: ["<project>"]`. The response is positional — `results[i]` corresponds to `queries[i]`. If a matching entry exists for the same project, reuse its title verbatim — the server upserts on `type+project+category+title`. Only skip if existing content is already identical.
 
-4. **Store via `put`** with these fields:
+4. **Store via `kb`** with these fields:
    - `type`, `project`, `title` (concise, searchable — used as the upsert key)
    - `content` — terse, ≤300 chars target / 500 hard cap. Structured:
      ```
@@ -33,7 +33,7 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
    - Stored: `[type] title — project`
    - Skipped: `[type] title — already identical`
 
-6. **Emit KB block.** After storing, emit a summary ```kb``` fenced block listing all persisted entries (JSON array with `"_persisted_by": "persist-skill"` at the top level or on the first entry). This sentinel prevents stop.js from re-persisting the same entries. Do not run `put` twice.
+6. **Emit KB block.** After storing, emit a summary ```kb``` fenced block listing all persisted entries (JSON array with `"_persisted_by": "persist-skill"` at the top level or on the first entry). This sentinel prevents stop.js from re-persisting the same entries. Do not run `kb` twice.
 
 ## Be selective
 

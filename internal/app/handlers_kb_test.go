@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
@@ -44,8 +45,8 @@ func makeRequest(args map[string]interface{}) mcp.CallToolRequest {
 	}
 }
 
-// TestHandlePutBatch tests batch put with single entry.
-func TestHandlePutBatch(t *testing.T) {
+// TestHandleKBBatch tests batch kb write with single entry.
+func TestHandleKBBatch(t *testing.T) {
 	resetDB(t)
 
 	req := makeRequest(map[string]interface{}{
@@ -60,7 +61,7 @@ func TestHandlePutBatch(t *testing.T) {
 		},
 	})
 
-	result, err := handlePut(db)(context.TODO(), req)
+	result, err := handleKB(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -74,8 +75,8 @@ func TestHandlePutBatch(t *testing.T) {
 	assert.Equal(t, "Use PostgreSQL", resp[0]["title"])
 }
 
-// TestHandlePutBatchMultiple tests batch put with multiple entries.
-func TestHandlePutBatchMultiple(t *testing.T) {
+// TestHandleKBBatchMultiple tests batch kb write with multiple entries.
+func TestHandleKBBatchMultiple(t *testing.T) {
 	resetDB(t)
 
 	req := makeRequest(map[string]interface{}{
@@ -101,7 +102,7 @@ func TestHandlePutBatchMultiple(t *testing.T) {
 		},
 	})
 
-	result, err := handlePut(db)(context.TODO(), req)
+	result, err := handleKB(db)(context.TODO(), req)
 	require.NoError(t, err)
 
 	var resp []map[string]interface{}
@@ -117,15 +118,15 @@ func TestHandlePutBatchMultiple(t *testing.T) {
 	}
 }
 
-// TestHandlePutBatchEmpty tests batch put with empty array.
-func TestHandlePutBatchEmpty(t *testing.T) {
+// TestHandleKBBatchEmpty tests batch kb write with empty array.
+func TestHandleKBBatchEmpty(t *testing.T) {
 	resetDB(t)
 
 	req := makeRequest(map[string]interface{}{
 		"entries": []interface{}{},
 	})
 
-	result, err := handlePut(db)(context.TODO(), req)
+	result, err := handleKB(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -133,7 +134,7 @@ func TestHandlePutBatchEmpty(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
-// TestHandleGetBatch tests batch get with ids.
+// TestHandleGetBatch tests domain=kb batch get with ids.
 func TestHandleGetBatch(t *testing.T) {
 	resetDB(t)
 
@@ -155,7 +156,7 @@ func TestHandleGetBatch(t *testing.T) {
 		},
 	})
 
-	putResult, err := handlePut(db)(context.TODO(), putReq)
+	putResult, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	var putResp []map[string]interface{}
@@ -170,7 +171,8 @@ func TestHandleGetBatch(t *testing.T) {
 
 	// Fetch both by id
 	getReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{id1, id2},
+		"domain": "kb",
+		"ids":    []interface{}{id1, id2},
 	})
 
 	getResult, err := handleGet(db)(context.TODO(), getReq)
@@ -185,7 +187,7 @@ func TestHandleGetBatch(t *testing.T) {
 	assert.Equal(t, "Fact 1", docs[1]["title"])
 }
 
-// TestHandleGetBatchWithMiss tests batch get with missing IDs (should omit).
+// TestHandleGetBatchWithMiss tests domain=kb batch get with missing IDs (should omit).
 func TestHandleGetBatchWithMiss(t *testing.T) {
 	resetDB(t)
 
@@ -201,7 +203,7 @@ func TestHandleGetBatchWithMiss(t *testing.T) {
 		},
 	})
 
-	putResult, err := handlePut(db)(context.TODO(), putReq)
+	putResult, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	var putResp []map[string]interface{}
@@ -213,7 +215,8 @@ func TestHandleGetBatchWithMiss(t *testing.T) {
 
 	// Fetch with existing and non-existing IDs
 	getReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{id1, 9999.0}, // 9999 doesn't exist
+		"domain": "kb",
+		"ids":    []interface{}{id1, 9999.0}, // 9999 doesn't exist
 	})
 
 	getResult, err := handleGet(db)(context.TODO(), getReq)
@@ -226,8 +229,8 @@ func TestHandleGetBatchWithMiss(t *testing.T) {
 	assert.Equal(t, "Decision 1", docs[0]["title"])
 }
 
-// TestHandlePutValidationAbortsEntireBatch tests that validation failure aborts whole batch.
-func TestHandlePutValidationAbortsEntireBatch(t *testing.T) {
+// TestHandleKBValidationAbortsEntireBatch tests that validation failure aborts whole batch.
+func TestHandleKBValidationAbortsEntireBatch(t *testing.T) {
 	resetDB(t)
 
 	// Entry 2 has missing "type" field (invalid)
@@ -247,7 +250,7 @@ func TestHandlePutValidationAbortsEntireBatch(t *testing.T) {
 		},
 	})
 
-	result, err := handlePut(db)(context.TODO(), req)
+	result, err := handleKB(db)(context.TODO(), req)
 	require.NoError(t, err)
 
 	// Should have validation error
@@ -255,7 +258,8 @@ func TestHandlePutValidationAbortsEntireBatch(t *testing.T) {
 
 	// Verify no entries were written
 	getListReq := makeRequest(map[string]interface{}{
-		"types": []interface{}{"decision"},
+		"domain": "kb",
+		"types":  []interface{}{"decision"},
 	})
 	getResult, err := handleGet(db)(context.TODO(), getListReq)
 	require.NoError(t, err)
@@ -265,8 +269,8 @@ func TestHandlePutValidationAbortsEntireBatch(t *testing.T) {
 	require.Len(t, docs, 0, "batch validation failure should prevent all writes")
 }
 
-// TestHandlePutBatch50Entries tests large batch performance.
-func TestHandlePutBatch50Entries(t *testing.T) {
+// TestHandleKBBatch50Entries tests large batch performance.
+func TestHandleKBBatch50Entries(t *testing.T) {
 	resetDB(t)
 
 	entries := make([]interface{}, 50)
@@ -285,7 +289,7 @@ func TestHandlePutBatch50Entries(t *testing.T) {
 		"entries": entries,
 	})
 
-	result, err := handlePut(db)(context.TODO(), req)
+	result, err := handleKB(db)(context.TODO(), req)
 	require.NoError(t, err)
 
 	var resp []map[string]interface{}
@@ -310,7 +314,7 @@ func unmarshalResult(result *mcp.CallToolResult, v interface{}) error {
 	return json.Unmarshal([]byte(textContent.Text), v)
 }
 
-// TestHandleSearch_SingleQuery_BackwardsCompat tests single-query mode returns flat []DocumentSummary.
+// TestHandleSearch_SingleQuery_BackwardsCompat tests domain=kb single-query mode returns flat []DocumentSummary.
 func TestHandleSearch_SingleQuery_BackwardsCompat(t *testing.T) {
 	resetDB(t)
 
@@ -326,12 +330,13 @@ func TestHandleSearch_SingleQuery_BackwardsCompat(t *testing.T) {
 		},
 	})
 
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	// Search with single query
 	searchReq := makeRequest(map[string]interface{}{
-		"query": "tiktoken",
+		"domain": "kb",
+		"query":  "tiktoken",
 	})
 
 	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
@@ -347,7 +352,7 @@ func TestHandleSearch_SingleQuery_BackwardsCompat(t *testing.T) {
 	assert.Zero(t, summaries[0].Score)
 }
 
-// TestHandleSearch_Batch_PositionalResults tests batch mode returns [][]DocumentSummary in input order.
+// TestHandleSearch_Batch_PositionalResults tests domain=kb batch mode returns [][]DocumentSummary in input order.
 func TestHandleSearch_Batch_PositionalResults(t *testing.T) {
 	resetDB(t)
 
@@ -375,11 +380,12 @@ func TestHandleSearch_Batch_PositionalResults(t *testing.T) {
 		},
 	})
 
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	// Search with batch queries
 	searchReq := makeRequest(map[string]interface{}{
+		"domain":  "kb",
 		"queries": []interface{}{"alpha", "beta", "gamma"},
 	})
 
@@ -417,11 +423,12 @@ func TestHandleSearch_Batch_EmptyResultSetsAreEmptyNotNil(t *testing.T) {
 		},
 	})
 
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	// Search with one matching and one non-matching query
 	searchReq := makeRequest(map[string]interface{}{
+		"domain":  "kb",
 		"queries": []interface{}{"matches", "nothing-will-match-xyz123"},
 	})
 
@@ -474,11 +481,12 @@ func TestHandleSearch_Batch_SharedFilters(t *testing.T) {
 		},
 	})
 
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	// Search with batch queries and project filter
 	searchReq := makeRequest(map[string]interface{}{
+		"domain":   "kb",
 		"queries":  []interface{}{"alpha", "beta"},
 		"projects": []interface{}{"ouroboros"},
 	})
@@ -506,7 +514,7 @@ func TestHandleSearch_NeitherQueryNorQueries_Errors(t *testing.T) {
 	resetDB(t)
 
 	// Request with neither query nor queries
-	searchReq := makeRequest(map[string]interface{}{})
+	searchReq := makeRequest(map[string]interface{}{"domain": "kb"})
 
 	searchResult, err := handleSearch(db)(context.TODO(), searchReq)
 	require.NoError(t, err)
@@ -540,11 +548,12 @@ func TestHandleSearch_BothProvided_QueriesWins(t *testing.T) {
 		},
 	})
 
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	// Request with both query and queries; queries should win
 	searchReq := makeRequest(map[string]interface{}{
+		"domain":  "kb",
 		"query":   "alpha",
 		"queries": []interface{}{"beta", "alpha"},
 	})
@@ -578,12 +587,13 @@ func TestHandleSearch_ReturnsResults(t *testing.T) {
 			},
 		},
 	})
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	handler := handleSearch(db)
 	searchReq := makeRequest(map[string]interface{}{
-		"query": "SQLite",
+		"domain": "kb",
+		"query":  "SQLite",
 	})
 	result, err := handler(context.TODO(), searchReq)
 	require.NoError(t, err)
@@ -625,11 +635,12 @@ func TestHandleSearch_MultiProject(t *testing.T) {
 		},
 	})
 
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	// Search with multiple project filters
 	searchReq := makeRequest(map[string]interface{}{
+		"domain":   "kb",
 		"query":    "keyword",
 		"projects": []interface{}{"project-a", "project-b"},
 	})
@@ -652,8 +663,8 @@ func TestHandleSearch_MultiProject(t *testing.T) {
 	assert.False(t, projects["project-c"])
 }
 
-// TestHandlePutBatch_CategoryNotesMetadata tests that category, notes, and metadata fields are stored.
-func TestHandlePutBatch_CategoryNotesMetadata(t *testing.T) {
+// TestHandleKBBatch_CategoryNotesMetadata tests that category, notes, and metadata fields are stored.
+func TestHandleKBBatch_CategoryNotesMetadata(t *testing.T) {
 	resetDB(t)
 
 	req := makeRequest(map[string]interface{}{
@@ -673,7 +684,7 @@ func TestHandlePutBatch_CategoryNotesMetadata(t *testing.T) {
 		},
 	})
 
-	result, err := handlePut(db)(context.TODO(), req)
+	result, err := handleKB(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.False(t, result.IsError)
@@ -697,13 +708,14 @@ func TestHandleGet_Limit(t *testing.T) {
 			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "Doc 3", "content": "c3"},
 		},
 	})
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	// Request with limit=2
 	req := makeRequest(map[string]interface{}{
-		"types": []interface{}{"fact"},
-		"limit": float64(2),
+		"domain": "kb",
+		"types":  []interface{}{"fact"},
+		"limit":  float64(2),
 	})
 	result, err := handleGet(db)(context.TODO(), req)
 	require.NoError(t, err)
@@ -731,7 +743,7 @@ func TestHandleGet_BatchVerbose(t *testing.T) {
 			},
 		},
 	})
-	putResult, err := handlePut(db)(context.TODO(), putReq)
+	putResult, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	var putResp []map[string]interface{}
@@ -742,6 +754,7 @@ func TestHandleGet_BatchVerbose(t *testing.T) {
 
 	// Non-verbose: notes should be empty
 	req := makeRequest(map[string]interface{}{
+		"domain":  "kb",
 		"ids":     []interface{}{id},
 		"verbose": false,
 	})
@@ -761,12 +774,13 @@ func TestHandleSearch_SingleQuery_WithLimit(t *testing.T) {
 			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "alpha three", "content": "alpha content three"},
 		},
 	})
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
-		"query": "alpha",
-		"limit": float64(1),
+		"domain": "kb",
+		"query":  "alpha",
+		"limit":  float64(1),
 	})
 	result, err := handleSearch(db)(context.TODO(), req)
 	require.NoError(t, err)
@@ -796,7 +810,7 @@ func TestHandleGet_IdsNoSessionID(t *testing.T) {
 			},
 		},
 	})
-	putResult, err := handlePut(db)(context.TODO(), putReq)
+	putResult, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	var putResp []map[string]interface{}
@@ -806,7 +820,8 @@ func TestHandleGet_IdsNoSessionID(t *testing.T) {
 
 	// Fetch by id
 	getReq := makeRequest(map[string]interface{}{
-		"ids": []interface{}{id},
+		"domain": "kb",
+		"ids":    []interface{}{id},
 	})
 	result, err := handleGet(db)(context.TODO(), getReq)
 	require.NoError(t, err)
@@ -833,10 +848,11 @@ func TestHandleSearch_Batch_WithLimit(t *testing.T) {
 			map[string]interface{}{"type": "fact", "project": "acme-corp", "title": "beta two", "content": "beta content two"},
 		},
 	})
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
+		"domain":  "kb",
 		"queries": []interface{}{"beta"},
 		"limit":   float64(1),
 	})
@@ -862,11 +878,12 @@ func TestHandleGet_MultiTypes(t *testing.T) {
 			map[string]interface{}{"type": "note", "project": "acme-corp", "title": "A note", "content": "c3"},
 		},
 	})
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
-		"types": []interface{}{"decision", "fact"},
+		"domain": "kb",
+		"types":  []interface{}{"decision", "fact"},
 	})
 	result, err := handleGet(db)(context.TODO(), req)
 	require.NoError(t, err)
@@ -899,10 +916,11 @@ func TestHandleGet_MultiCategories(t *testing.T) {
 			map[string]interface{}{"type": "fact", "project": "acme-corp", "category": "ops", "title": "Ops fact", "content": "c3"},
 		},
 	})
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
+		"domain":     "kb",
 		"categories": []interface{}{"architecture", "config"},
 	})
 	result, err := handleGet(db)(context.TODO(), req)
@@ -925,9 +943,9 @@ func TestHandleGet_MultiCategories(t *testing.T) {
 	assert.False(t, cats["ops"])
 }
 
-// TestHandlePutBatch_ConflictDetected verifies that overwriting with different content
+// TestHandleKBBatch_ConflictDetected verifies that overwriting with different content
 // returns conflict=true on the affected entry.
-func TestHandlePutBatch_ConflictDetected(t *testing.T) {
+func TestHandleKBBatch_ConflictDetected(t *testing.T) {
 	resetDB(t)
 
 	putFirst := makeRequest(map[string]interface{}{
@@ -940,7 +958,7 @@ func TestHandlePutBatch_ConflictDetected(t *testing.T) {
 			},
 		},
 	})
-	_, err := handlePut(db)(context.TODO(), putFirst)
+	_, err := handleKB(db)(context.TODO(), putFirst)
 	require.NoError(t, err)
 
 	putSecond := makeRequest(map[string]interface{}{
@@ -953,7 +971,7 @@ func TestHandlePutBatch_ConflictDetected(t *testing.T) {
 			},
 		},
 	})
-	result, err := handlePut(db)(context.TODO(), putSecond)
+	result, err := handleKB(db)(context.TODO(), putSecond)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -964,8 +982,8 @@ func TestHandlePutBatch_ConflictDetected(t *testing.T) {
 	assert.NotEmpty(t, resp[0]["previous_excerpt"])
 }
 
-// TestHandlePutBatch_NoConflictSameContent verifies conflict is absent when content unchanged.
-func TestHandlePutBatch_NoConflictSameContent(t *testing.T) {
+// TestHandleKBBatch_NoConflictSameContent verifies conflict is absent when content unchanged.
+func TestHandleKBBatch_NoConflictSameContent(t *testing.T) {
 	resetDB(t)
 
 	req := makeRequest(map[string]interface{}{
@@ -979,10 +997,10 @@ func TestHandlePutBatch_NoConflictSameContent(t *testing.T) {
 		},
 	})
 
-	_, err := handlePut(db)(context.TODO(), req)
+	_, err := handleKB(db)(context.TODO(), req)
 	require.NoError(t, err)
 
-	result, err := handlePut(db)(context.TODO(), req)
+	result, err := handleKB(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -1003,10 +1021,11 @@ func TestHandleSearch_CategoriesFilter(t *testing.T) {
 			map[string]interface{}{"type": "fact", "project": "acme-corp", "category": "ops", "title": "ops fact", "content": "postgres deployment"},
 		},
 	})
-	_, err := handlePut(db)(context.TODO(), putReq)
+	_, err := handleKB(db)(context.TODO(), putReq)
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
+		"domain":     "kb",
 		"query":      "postgres",
 		"categories": []interface{}{"arch"},
 	})
@@ -1019,4 +1038,336 @@ func TestHandleSearch_CategoriesFilter(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, summaries, 1)
 	assert.Equal(t, "arch", summaries[0].Category)
+}
+
+// ---- domain dispatch tests (OU: read/write surface split) ----
+
+// TestHandleGet_MissingDomain_Errors verifies get requires a domain.
+func TestHandleGet_MissingDomain_Errors(t *testing.T) {
+	resetDB(t)
+
+	result, err := handleGet(db)(context.TODO(), makeRequest(map[string]interface{}{}))
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, `must be "kb" or "backlog"`)
+}
+
+// TestHandleGet_InvalidDomain_Errors verifies get rejects an unrecognized domain.
+func TestHandleGet_InvalidDomain_Errors(t *testing.T) {
+	resetDB(t)
+
+	result, err := handleGet(db)(context.TODO(), makeRequest(map[string]interface{}{"domain": "bogus"}))
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleSearch_MissingDomain_Errors verifies search requires a domain.
+func TestHandleSearch_MissingDomain_Errors(t *testing.T) {
+	resetDB(t)
+
+	result, err := handleSearch(db)(context.TODO(), makeRequest(map[string]interface{}{"query": "anything"}))
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, `must be "kb" or "backlog"`)
+}
+
+// TestHandleGet_DomainBacklog_IdsFetch verifies get domain=backlog fetches items by id.
+func TestHandleGet_DomainBacklog_IdsFetch(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Domain get task", "desc", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"ids":    []interface{}{item.ID},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var items []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &items))
+	require.Len(t, items, 1)
+	assert.Equal(t, "Domain get task", items[0]["title"])
+}
+
+// TestHandleGet_DomainBacklog_FilteredList verifies get domain=backlog lists with filters.
+func TestHandleGet_DomainBacklog_FilteredList(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"acme-corp"},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Open task")
+}
+
+// TestHandleSearch_DomainBacklog_ReturnsMatches verifies search domain=backlog uses FTS over items.
+func TestHandleSearch_DomainBacklog_ReturnsMatches(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "findableterm task", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "unrelated task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"query":  "findableterm",
+	})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "findableterm task")
+	assert.NotContains(t, textContent.Text, "unrelated task")
+}
+
+// TestHandleSearch_DomainBacklog_MissingQuery_Errors verifies search domain=backlog requires query.
+func TestHandleSearch_DomainBacklog_MissingQuery_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{"domain": "backlog"})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleGet_DomainBacklog_IdsFetchVerbose tests ids fetch with verbose=true (notes included).
+func TestHandleGet_DomainBacklog_IdsFetchVerbose(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Verbose task", "", "secret notes", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":  "backlog",
+		"ids":     []interface{}{item.ID},
+		"verbose": true,
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var items []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &items))
+	require.Len(t, items, 1)
+	assert.Equal(t, "secret notes", items[0]["notes"])
+}
+
+// TestHandleGet_DomainBacklog_IdsFetchMiss tests ids fetch where an ID doesn't exist returns an error.
+func TestHandleGet_DomainBacklog_IdsFetchMiss(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"ids":    []interface{}{"AC-9999"},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError, "fetching nonexistent item should return error result")
+}
+
+// TestHandleGet_DomainBacklog_IdsFetchOmitsProjectID tests that ids-fetch response omits project_id/component (omitempty).
+func TestHandleGet_DomainBacklog_IdsFetchOmitsProjectID(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "test-project", "TP")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, "TP", "P1", "No-ProjID Task", "desc", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"ids":    []interface{}{item.ID},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var items []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &items))
+	require.Len(t, items, 1)
+
+	_, hasKey := items[0]["project_id"]
+	assert.False(t, hasKey, "project_id must be omitted from MCP response")
+	_, hasComponent := items[0]["component"]
+	assert.False(t, hasComponent, "component must be omitted when empty")
+}
+
+// TestHandleGet_DomainBacklog_NoItems_ReturnsNoItemsText verifies list mode with no matches.
+func TestHandleGet_DomainBacklog_NoItems_ReturnsNoItemsText(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"acme-corp"},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+// TestHandleGet_DomainBacklog_PriorityFilter tests listing with priority_min and priority_max.
+func TestHandleGet_DomainBacklog_PriorityFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Critical", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Normal", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P5", "Low", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":       "backlog",
+		"projects":     []interface{}{"acme-corp"},
+		"priority_min": "P1",
+		"priority_max": "P3",
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Normal")
+	assert.NotContains(t, textContent.Text, "Critical")
+	assert.NotContains(t, textContent.Text, "Low")
+}
+
+// TestHandleGet_DomainBacklog_PriorityMinInvalid_Errors verifies error on bad priority_min.
+func TestHandleGet_DomainBacklog_PriorityMinInvalid_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":       "backlog",
+		"priority_min": "X9",
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleGet_DomainBacklog_StatusFilter tests filtering by status.
+func TestHandleGet_DomainBacklog_StatusFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open task", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Another task", "", "", "")
+	require.NoError(t, err)
+	err = backlog.MarkDone(db, item.ID)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"acme-corp"},
+		"status":   "open",
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Another task")
+	assert.NotContains(t, textContent.Text, "Open task")
+}
+
+// TestHandleGet_DomainBacklog_ComponentFilter tests filtering by component.
+func TestHandleGet_DomainBacklog_ComponentFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "API task", "", "", "api")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "UI task", "", "", "ui")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":    "backlog",
+		"projects":  []interface{}{"acme-corp"},
+		"component": "api",
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "api")
+	assert.Contains(t, textContent.Text, "API task")
+}
+
+// TestHandleGet_DomainBacklog_NonexistentProject_Errors verifies error when filtering by bad project.
+func TestHandleGet_DomainBacklog_NonexistentProject_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"no-such-project"},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleGet_DomainBacklog_MultiProject tests listing across two projects.
+func TestHandleGet_DomainBacklog_MultiProject(t *testing.T) {
+	resetAllDB(t)
+
+	proj1, err := backlog.CreateProject(db, "project-alpha", "PA")
+	require.NoError(t, err)
+	proj2, err := backlog.CreateProject(db, "project-beta", "PB")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj1.ID, proj1.Prefix, "P1", "Alpha task", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj2.ID, proj2.Prefix, "P2", "Beta task", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"project-alpha", "project-beta"},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "Alpha task")
+	assert.Contains(t, textContent.Text, "Beta task")
 }

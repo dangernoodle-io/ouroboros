@@ -88,7 +88,7 @@ test('stop: short message (<80 chars) → exit 0, no stdout', () => {
   assert.strictEqual(result.stdout.trim(), '');
 });
 
-test('stop: kb block + stub put succeeds → log includes count, project, ids, session', () => {
+test('stop: kb block + stub kb succeeds → log includes count, project, ids, session', () => {
   const transcript = writeTranscript([{
     text: 'This is a long main-context message with enough content to pass the minimum length check and a kb block at the end:\n```kb\n[{"type":"decision","title":"adopt cobra"}]\n```',
   }]);
@@ -101,14 +101,14 @@ test('stop: kb block + stub put succeeds → log includes count, project, ids, s
   assert(result.stderr.includes('main'));
 });
 
-test('stop: kb block + stub put fails → log says put failed', () => {
+test('stop: kb block + stub kb fails → log says kb failed', () => {
   const transcript = writeTranscript([{
     text: 'This is a long main-context message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"fact"}]\n```',
   }]);
   const input = JSON.stringify({ session_id: 'sessXYZ12345', transcript_path: transcript, cwd: projectDir });
   const result = runScript(input, { OUROBOROS_STUB_PUT_FAIL: '1' });
   assert.strictEqual(result.status, 0);
-  assert.match(result.stderr, /put failed/);
+  assert.match(result.stderr, /kb failed/);
   assert(result.stderr.includes('sessXYZ1'));
 });
 
@@ -249,7 +249,7 @@ test('stop: hook fire event logged with hook:stop and session_id', () => {
   }
 });
 
-test('stop: persist event logged when kb block present and put succeeds', () => {
+test('stop: persist event logged when kb block present and kb succeeds', () => {
   const transcript = writeTranscript([{
     text: 'This is a long main-context message with enough content to pass the minimum length check and includes a kb block:\n```kb\n[{"type":"decision","title":"test decision"}]\n```',
   }]);
@@ -360,7 +360,7 @@ test('stop: cwd hint resolves project for git repo', () => {
   }
 });
 
-test('stop: kb block with _persisted_by sentinel → no put fired (skipped)', () => {
+test('stop: kb block with _persisted_by sentinel → no kb fired (skipped)', () => {
   const captureFile = path.join(tempDir, `capture-sentinel-${Date.now()}.json`);
   const sentinelBlock = JSON.stringify([{
     type: 'decision',
@@ -374,12 +374,12 @@ test('stop: kb block with _persisted_by sentinel → no put fired (skipped)', ()
   const input = JSON.stringify({ session_id: 'sess-sentinel-test', transcript_path: transcript, cwd: projectDir });
   const result = runScript(input, { OUROBOROS_PUT_CAPTURE_FILE: captureFile });
   assert.strictEqual(result.status, 0);
-  // put should NOT have been called — capture file should not exist
-  assert(!fs.existsSync(captureFile), 'capture file should not exist: put was not called for sentinel block');
+  // kb should NOT have been called — capture file should not exist
+  assert(!fs.existsSync(captureFile), 'capture file should not exist: kb was not called for sentinel block');
   assert(!result.stderr.includes('persisted'), 'persisted log should not appear for sentinel block');
 });
 
-test('stop: kb block without sentinel → put fires normally', () => {
+test('stop: kb block without sentinel → kb fires normally', () => {
   const captureFile = path.join(tempDir, `capture-no-sentinel-${Date.now()}.json`);
   const noSentinelBlock = JSON.stringify([{
     type: 'decision',
@@ -392,7 +392,7 @@ test('stop: kb block without sentinel → put fires normally', () => {
   const input = JSON.stringify({ session_id: 'sess-no-sentinel-test', transcript_path: transcript, cwd: projectDir });
   const result = runScript(input, { OUROBOROS_PUT_CAPTURE_FILE: captureFile });
   assert.strictEqual(result.status, 0);
-  assert(fs.existsSync(captureFile), 'capture file should exist: put was called for block without sentinel');
+  assert(fs.existsSync(captureFile), 'capture file should exist: kb was called for block without sentinel');
   assert.match(result.stderr, /persisted 1 entries/);
 });
 

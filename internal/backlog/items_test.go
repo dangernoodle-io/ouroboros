@@ -543,3 +543,107 @@ func TestUpdateItemNotesTooBig(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "notes exceeds")
 }
+
+func TestSearchItemsByTitle(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "alphaqrx title", "desc", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "other item", "desc", "", "")
+	require.NoError(t, err)
+
+	items, err := backlog.SearchItems(d, "alphaqrx", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "AC-1", items[0].ID)
+}
+
+func TestSearchItemsByDescriptionAndNotes(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "task one", "matchingdescterm", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "task two", "", "matchingnotesterm", "")
+	require.NoError(t, err)
+
+	byDesc, err := backlog.SearchItems(d, "matchingdescterm", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, byDesc, 1)
+	assert.Equal(t, "AC-1", byDesc[0].ID)
+
+	byNotes, err := backlog.SearchItems(d, "matchingnotesterm", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, byNotes, 1)
+	assert.Equal(t, "AC-2", byNotes[0].ID)
+}
+
+func TestSearchItemsReflectsUpdates(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "staletermtitle", "desc", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.UpdateItem(d, item.ID, map[string]string{"title": "freshtermtitle"})
+	require.NoError(t, err)
+
+	stale, err := backlog.SearchItems(d, "staletermtitle", backlog.ItemFilter{})
+	require.NoError(t, err)
+	assert.Empty(t, stale, "search index must not return stale pre-update title")
+
+	fresh, err := backlog.SearchItems(d, "freshtermtitle", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, fresh, 1)
+	assert.Equal(t, item.ID, fresh[0].ID)
+}
+
+func TestSearchItemsExcludesDeleted(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "deletemetermtitle", "desc", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.DeleteItems(d, []string{item.ID})
+	require.NoError(t, err)
+
+	items, err := backlog.SearchItems(d, "deletemetermtitle", backlog.ItemFilter{})
+	require.NoError(t, err)
+	assert.Empty(t, items)
+}
+
+func TestSearchItemsWithFilters(t *testing.T) {
+	d := testDB(t)
+	p1 := createTestProject(t, d)
+	p2, err := backlog.CreateProject(d, "other-corp", "OC")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "sharedterm apionly", "", "", "api")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "sharedterm apitwo", "", "", "api")
+	require.NoError(t, err)
+
+	items, err := backlog.SearchItems(d, "sharedterm", backlog.ItemFilter{ProjectIDs: []int64{p1.ID}})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "AC-1", items[0].ID)
+
+	component := "api"
+	items, err = backlog.SearchItems(d, "sharedterm", backlog.ItemFilter{Component: &component})
+	require.NoError(t, err)
+	assert.Len(t, items, 2)
+}
+
+func TestSearchItemsEmptyQuery(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "some title", "", "", "")
+	require.NoError(t, err)
+
+	items, err := backlog.SearchItems(d, "", backlog.ItemFilter{})
+	require.NoError(t, err)
+	assert.Empty(t, items)
+}

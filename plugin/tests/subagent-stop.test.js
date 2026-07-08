@@ -100,7 +100,7 @@ test('subagent-stop: short message (<80 chars) → exit 0, no stdout, but fire+s
   }
 });
 
-test('subagent-stop: kb block + stub put succeeds → log includes count, project, ids, agent_id', () => {
+test('subagent-stop: kb block + stub kb succeeds → log includes count, project, ids, agent_id', () => {
   const input = JSON.stringify({
     cwd: projectDir,
     agent_type: 'general',
@@ -114,7 +114,7 @@ test('subagent-stop: kb block + stub put succeeds → log includes count, projec
   assert(result.stderr.includes('abc12345'));
 });
 
-test('subagent-stop: kb block + stub put fails → log says put failed', () => {
+test('subagent-stop: kb block + stub kb fails → log says kb failed', () => {
   const input = JSON.stringify({
     cwd: projectDir,
     agent_type: 'general',
@@ -123,7 +123,7 @@ test('subagent-stop: kb block + stub put fails → log says put failed', () => {
   });
   const result = runScript(input, { OUROBOROS_STUB_PUT_FAIL: '1' });
   assert.strictEqual(result.status, 0);
-  assert.match(result.stderr, /put failed/);
+  assert.match(result.stderr, /kb failed/);
   assert(result.stderr.includes('def87654'));
 });
 

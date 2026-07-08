@@ -22,8 +22,10 @@ var (
 	putStdinFlag    bool
 )
 
-var putCmd = &cobra.Command{
-	Use:   "put",
+// kbCmd is the KB write command (default action); kbDeleteCmd (kb_delete.go)
+// is attached as a subcommand below.
+var kbCmd = &cobra.Command{
+	Use:   "kb",
 	Short: "Create or update KB documents (CLI for hook integration)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDB(func(db *sql.DB) error {
@@ -33,14 +35,15 @@ var putCmd = &cobra.Command{
 }
 
 func init() {
-	putCmd.Flags().StringVar(&putProjectFlag, "project", "", "Project name (required for flags mode)")
-	putCmd.Flags().StringVar(&putTypeFlag, "type", "", "Document type: decision, fact, note, plan, relation (required for flags mode)")
-	putCmd.Flags().StringVar(&putTitleFlag, "title", "", "Document title (required for flags mode)")
-	putCmd.Flags().StringVar(&putContentFlag, "content", "", "Document content up to 500 chars (required for flags mode)")
-	putCmd.Flags().StringVar(&putNotesFlag, "notes", "", "Document notes (optional)")
-	putCmd.Flags().StringVar(&putCategoryFlag, "category", "", "Document category (optional)")
-	putCmd.Flags().StringSliceVar(&putTagsFlag, "tags", []string{}, "Document tags (optional, repeatable)")
-	putCmd.Flags().BoolVar(&putStdinFlag, "stdin", false, "Read JSON array or {documents:[...]} from stdin (batch mode)")
+	kbCmd.Flags().StringVar(&putProjectFlag, "project", "", "Project name (required for flags mode)")
+	kbCmd.Flags().StringVar(&putTypeFlag, "type", "", "Document type: decision, fact, note, plan, relation (required for flags mode)")
+	kbCmd.Flags().StringVar(&putTitleFlag, "title", "", "Document title (required for flags mode)")
+	kbCmd.Flags().StringVar(&putContentFlag, "content", "", "Document content up to 500 chars (required for flags mode)")
+	kbCmd.Flags().StringVar(&putNotesFlag, "notes", "", "Document notes (optional)")
+	kbCmd.Flags().StringVar(&putCategoryFlag, "category", "", "Document category (optional)")
+	kbCmd.Flags().StringSliceVar(&putTagsFlag, "tags", []string{}, "Document tags (optional, repeatable)")
+	kbCmd.Flags().BoolVar(&putStdinFlag, "stdin", false, "Read JSON array or {documents:[...]} from stdin (batch mode)")
+	kbCmd.AddCommand(kbDeleteCmd)
 }
 
 type kbBatch struct {

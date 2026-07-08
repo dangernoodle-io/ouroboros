@@ -504,6 +504,100 @@ func TestApplySchemaCreatesAllTables(t *testing.T) {
 	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'").Scan(&result)
 	require.NoError(t, err)
 	assert.Equal(t, "schema_migrations", result)
+
+	// Check that items_fts table exists
+	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='items_fts'").Scan(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "items_fts", result)
+}
+
+func TestItemsFTSTriggers(t *testing.T) {
+	db := testDB(t)
+
+	_, err := db.Exec("INSERT INTO projects (id, name, prefix, created) VALUES (1, 'acme-corp', 'AC', '2024-01-01T00:00:00Z')")
+	require.NoError(t, err)
+
+	_, err = db.Exec(`INSERT INTO items (id, project_id, seq, priority, title, description, notes, component, status, created, updated)
+		VALUES ('AC-1', 1, 1, 'P1', 'searchable title', 'uniquedescxyz', '', '', 'open', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'uniquedescxyz'").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "insert trigger should index new item")
+
+	_, err = db.Exec("UPDATE items SET description = 'renameddescabc' WHERE id = 'AC-1'")
+	require.NoError(t, err)
+
+	err = db.QueryRow("SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'uniquedescxyz'").Scan(&count)
+	require.NoError(t, err)
+	assert.Zero(t, count, "update trigger should remove stale index entry")
+
+	err = db.QueryRow("SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'renameddescabc'").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "update trigger should index new content")
+
+	_, err = db.Exec("DELETE FROM items WHERE id = 'AC-1'")
+	require.NoError(t, err)
+
+	err = db.QueryRow("SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'renameddescabc'").Scan(&count)
+	require.NoError(t, err)
+	assert.Zero(t, count, "delete trigger should remove index entry")
+}
+
+func TestItemsFTSBackfillOnMigration(t *testing.T) {
+	// Simulate a database at migration 9 (before items_fts existed), insert an
+	// item, then apply migration 10 and verify the backfill indexed the row.
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { db.Close() })
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY,
+		applied_at TEXT NOT NULL
+	)`)
+	require.NoError(t, err)
+
+	migrations9 := []string{
+		`CREATE TABLE IF NOT EXISTS documents (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, project TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', metadata TEXT, tags TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			UNIQUE(type, project, category, title));
+		CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(title, content, tags, content=documents, content_rowid=id);`,
+		`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, prefix TEXT NOT NULL UNIQUE, created TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id), seq INTEGER NOT NULL, priority TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open', created TEXT NOT NULL, updated TEXT NOT NULL, UNIQUE(project_id, seq));
+		CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER REFERENCES projects(id), item_id TEXT REFERENCES items(id), title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft', created TEXT NOT NULL, updated TEXT NOT NULL);`,
+		`ALTER TABLE documents ADD COLUMN project_id INTEGER REFERENCES projects(id);`,
+		`ALTER TABLE documents ADD COLUMN notes TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE items ADD COLUMN notes TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE items ADD COLUMN component TEXT NOT NULL DEFAULT '';`,
+		`ALTER TABLE documents ADD COLUMN session_id TEXT;
+		CREATE INDEX IF NOT EXISTS idx_documents_session_id ON documents(session_id) WHERE session_id IS NOT NULL;`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_ci ON projects(LOWER(name));`,
+		`CREATE TABLE IF NOT EXISTS item_id_aliases (old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL REFERENCES items(id) ON UPDATE CASCADE ON DELETE CASCADE, renamed_at TEXT NOT NULL);`,
+	}
+	for i, sqlStmt := range migrations9 {
+		_, err := db.Exec(sqlStmt)
+		require.NoError(t, err)
+		_, err = db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, '2024-01-01T00:00:00Z')", i+1)
+		require.NoError(t, err)
+	}
+
+	// Insert a project + item pre-migration-10 (no items_fts yet).
+	_, err = db.Exec("INSERT INTO projects (id, name, prefix, created) VALUES (1, 'acme-corp', 'AC', '2024-01-01T00:00:00Z')")
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO items (id, project_id, seq, priority, title, description, notes, component, status, created, updated)
+		VALUES ('AC-1', 1, 1, 'P1', 'preexisting title', 'preexistinguniqueterm', '', '', 'open', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+
+	// Apply migration 10 (items_fts + triggers + backfill).
+	require.NoError(t, store.ApplySchema(db))
+
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH 'preexistinguniqueterm'").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "migration 10 must backfill pre-existing items into items_fts")
 }
 
 func TestApplySchemaIdempotent(t *testing.T) {
@@ -533,8 +627,8 @@ func TestMigrationVersionTracking(t *testing.T) {
 		versions = append(versions, v)
 	}
 
-	// Should have recorded migrations 1 through 9
-	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9}, versions)
+	// Should have recorded migrations 1 through 10
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, versions)
 
 	// Verify applied_at is set (not NULL)
 	var appliedAt string
