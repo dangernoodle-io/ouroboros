@@ -40,7 +40,11 @@
             "type": "string"
           },
           "domain": {
-            "description": "Required: \"kb\" or \"backlog\"",
+            "description": "Required: \"kb\", \"backlog\", or \"roadmap\"",
+            "type": "string"
+          },
+          "format": {
+            "description": "structured or md, default structured (roadmap only)",
             "type": "string"
           },
           "ids": {
@@ -115,6 +119,74 @@
     },
     {
       "annotations": {
+        "destructiveHint": true
+      },
+      "description": "Mutate the per-project roadmap singleton (now/next/parked/done lanes) via op=add|update|move|done|remove. Reads live under get/search domain=roadmap.",
+      "inputSchema": {
+        "properties": {
+          "blocked_by": {
+            "description": "Cross-project blockers: {project,ref,note} (add/update)",
+            "type": "array"
+          },
+          "body": {
+            "description": "Item body (add/update)",
+            "type": "string"
+          },
+          "component": {
+            "description": "Component tag (add/update)",
+            "type": "string"
+          },
+          "id": {
+            "description": "Item ID (update/move/done/remove)",
+            "type": "number"
+          },
+          "kb": {
+            "description": "Related KB doc IDs (add/update)",
+            "type": "array"
+          },
+          "op": {
+            "description": "Required: \"add\", \"update\", \"move\", \"done\", or \"remove\"",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project name (roadmap singleton)",
+            "type": "string"
+          },
+          "resume_trigger": {
+            "description": "Resume trigger (add/update)",
+            "type": "string"
+          },
+          "section": {
+            "description": "now|next|parked|done (add only)",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "Ticket refs (add/update)",
+            "type": "array"
+          },
+          "title": {
+            "description": "Item title (add/update)",
+            "type": "string"
+          },
+          "to": {
+            "description": "now|next|parked|done (move only)",
+            "type": "string"
+          },
+          "why": {
+            "description": "Why parked (add/update)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "project"
+        ],
+        "type": "object"
+      },
+      "name": "roadmap"
+    },
+    {
+      "annotations": {
         "readOnlyHint": true
       },
       "description": "Full-text search over entries (required domain: kb|backlog). domain=kb supports query or a batched queries[]; domain=backlog takes a single query over title/description/notes.",
@@ -132,7 +204,7 @@
             "type": "string"
           },
           "domain": {
-            "description": "Required: \"kb\" or \"backlog\"",
+            "description": "Required: \"kb\", \"backlog\", or \"roadmap\"",
             "type": "string"
           },
           "limit": {

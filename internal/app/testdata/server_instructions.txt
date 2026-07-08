@@ -1,6 +1,7 @@
 Persist decisions and track work items across conversations.
-get/search are reads (required domain: kb|backlog); kb/backlog are writes.
+get/search are reads (required domain: kb|backlog|roadmap); kb/backlog/roadmap are writes.
 
 - Search before writing — avoid duplicates; kb upserts by type+project+category+title.
 - Default response is summary; verbose=true only when full content/notes are needed.
+- roadmap is a per-project singleton (now/next/parked/done lanes); get format=md renders Markdown.
 - Checkpoint after multi-step tasks; persist non-obvious decisions, update or delete stale ones.

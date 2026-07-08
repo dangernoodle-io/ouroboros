@@ -15,10 +15,10 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 
 | Namespace | Tools | Docs |
 |-----------|-------|------|
-| Read | `get`, `search` (domain: kb\|backlog) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog) |
-| Write | `kb` (KB entries), `backlog` (items) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog) |
+| Read | `get`, `search` (domain: kb\|backlog\|roadmap) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog), [Wiki](../../wiki/Roadmap) |
+| Write | `kb` (KB entries), `backlog` (items), `roadmap` (per-project lanes) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog), [Wiki](../../wiki/Roadmap) |
 
-Operator-style ops (`project`, `plan`, `config`, `kb delete`, `export`, `import`) are CLI-only — see `ouroboros --help`.
+Operator-style ops (`project`, `plan`, `config`, `kb delete`, `export`, `import`, `roadmap`) are CLI-only — see `ouroboros --help`.
 
 ## Use with Claude Code
 
@@ -66,9 +66,9 @@ claude mcp add --scope user ouroboros /absolute/path/to/ouroboros
 
 This gives you the 10 MCP tools but none of the auto-context injection or persistence hooks that the plugin provides.
 
-## Browse with `ls`
+## Browse with `ls` and `roadmap show`
 
-When you're not using the MCP server, the `ls` subcommands provide a read-only CLI for browsing. All commands support tabular output and `--json` for scripting.
+When you're not using the MCP server, the `ls` subcommands provide a read-only CLI for browsing. All commands support tabular output and `--json` for scripting. The `roadmap show` command renders a per-project roadmap as Markdown.
 
 ```bash
 ouroboros ls projects                              # list all projects
@@ -77,9 +77,10 @@ ouroboros ls items AC-1                            # show item detail
 ouroboros ls kb --search caching                   # search knowledge base
 ouroboros ls kb 42 --json                          # fetch document as JSON
 ouroboros ls plans --status active                 # list active plans
+ouroboros roadmap show acme-corp                   # print roadmap as Markdown
 ```
 
-Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. All subcommands: `--json`.
+Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. All subcommands: `--json`. Roadmap: `show`, `add`, `update`, `move`, `done`, `remove` — see `ouroboros roadmap --help`.
 
 ## Configuration
 

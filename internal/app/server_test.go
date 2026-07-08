@@ -100,6 +100,7 @@ func TestToolsListFootprint(t *testing.T) {
 		"search":  {"readOnlyHint": true},
 		"kb":      {"idempotentHint": true},
 		"backlog": {"destructiveHint": true},
+		"roadmap": {"destructiveHint": true},
 	}
 	t.Logf("  per-tool annotation structure (OU-75):")
 	for _, tool := range tools {
@@ -164,9 +165,9 @@ func TestAllToolsRegisteredAtStartup(t *testing.T) {
 	srv := buildServer(db, nil, "test")
 
 	allTools := srv.ListTools()
-	t.Logf("startup: %d total tools (expected 4)", len(allTools))
-	require.Equal(t, 4, len(allTools), "should have exactly 4 tools at startup")
-	assertToolsPresent(t, allTools, []string{"get", "search", "kb", "backlog"})
+	t.Logf("startup: %d total tools (expected 5)", len(allTools))
+	require.Equal(t, 5, len(allTools), "should have exactly 5 tools at startup")
+	assertToolsPresent(t, allTools, []string{"get", "search", "kb", "backlog", "roadmap"})
 }
 
 // assertToolsPresent verifies that all named tools exist in the server tool map.
