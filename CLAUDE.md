@@ -76,7 +76,7 @@ When in doubt: the caller can always ask for more. They cannot un-spend tokens o
 
 - `plugin/.claude-plugin/plugin.json` — manifest; `mcpServers.ouroboros.command` points at `${CLAUDE_PLUGIN_DATA}/bin/ouroboros`
 - `plugin/hooks/hooks.json` — hooks for SessionStart (install), PostToolUse, SubagentStart, SubagentStop, Stop, UserPromptSubmit
-- `plugin/scripts/install.sh` — downloads the GitHub release archive, verifies SHA256, installs to plugin data dir
+- `plugin/scripts/bootstrap.js` — single pure-Node SessionStart installer + validator (no npm deps): installs the binary (dev path, local Homebrew, or GitHub release archive, verified via SHA256), then checks the binary and every hook script are on disk, repairing the binary when missing/broken; fail-open, always exits 0
 - `plugin/scripts/lib.js` — shared hook utilities (stdin, project resolution, cooldown, KB formatting)
 - `plugin/scripts/*.js` — hook scripts for KB persistence nudges, context injection, staleness warnings
 - `plugin/skills/` — persist, recall, triage skills
