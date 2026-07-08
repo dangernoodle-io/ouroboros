@@ -11,7 +11,7 @@ import (
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-func handlePut(db *sql.DB) server.ToolHandlerFunc {
+func handleKB(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Batch-only: entries array required
 		entries := parseEntriesArray(req.GetArguments(), "entries")
@@ -75,91 +75,91 @@ func handlePut(db *sql.DB) server.ToolHandlerFunc {
 	}
 }
 
+// handleGet dispatches the read tool by required domain (kb|backlog).
 func handleGet(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// If ids provided, return full documents (omit misses)
-		ids := parseInt64Slice(req.GetArguments(), "ids")
-		if len(ids) > 0 {
-			verbose, _ := req.GetArguments()["verbose"].(bool)
-			docs := make([]interface{}, 0, len(ids))
-
-			for _, id := range ids {
-				doc, err := store.GetDocument(db, id)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				if doc == nil {
-					// Omit misses
-					continue
-				}
-
-				if !verbose {
-					doc.Notes = ""
-				}
-				doc.SessionID = ""
-
-				docs = append(docs, doc)
-			}
-
-			return jsonResult(docs)
+		domain, _ := req.GetArguments()["domain"].(string)
+		switch domain {
+		case "kb":
+			return getDocuments(db, req)
+		case "backlog":
+			return getBacklogItems(db, req)
+		default:
+			return mcp.NewToolResultError(`domain is required: must be "kb" or "backlog"`), nil //nolint:nilerr
 		}
-
-		// Filter/list mode
-		types := parseStringSlice(req.GetArguments(), "types")
-		projects := parseStringSlice(req.GetArguments(), "projects")
-		categories := parseStringSlice(req.GetArguments(), "categories")
-		query, _ := req.GetArguments()["query"].(string)
-
-		tags := parseStringSlice(req.GetArguments(), "tags")
-
-		limit := 0
-		if v, ok := req.GetArguments()["limit"].(float64); ok {
-			limit = int(v)
-		}
-
-		summaries, err := store.QueryDocuments(db, types, projects, categories, query, tags, limit)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		return jsonResult(summaries)
 	}
 }
 
+// getDocuments handles domain=kb reads: ids[] fetch, or filters list.
+func getDocuments(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// If ids provided, return full documents (omit misses)
+	ids := parseInt64Slice(req.GetArguments(), "ids")
+	if len(ids) > 0 {
+		verbose, _ := req.GetArguments()["verbose"].(bool)
+		docs := make([]interface{}, 0, len(ids))
+
+		for _, id := range ids {
+			doc, err := store.GetDocument(db, id)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if doc == nil {
+				// Omit misses
+				continue
+			}
+
+			if !verbose {
+				doc.Notes = ""
+			}
+			doc.SessionID = ""
+
+			docs = append(docs, doc)
+		}
+
+		return jsonResult(docs)
+	}
+
+	// Filter/list mode
+	types := parseStringSlice(req.GetArguments(), "types")
+	projects := parseStringSlice(req.GetArguments(), "projects")
+	categories := parseStringSlice(req.GetArguments(), "categories")
+	query, _ := req.GetArguments()["query"].(string)
+
+	tags := parseStringSlice(req.GetArguments(), "tags")
+
+	limit := 0
+	if v, ok := req.GetArguments()["limit"].(float64); ok {
+		limit = int(v)
+	}
+
+	summaries, err := store.QueryDocuments(db, types, projects, categories, query, tags, limit)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(summaries)
+}
+
+// handleSearch dispatches the search tool by required domain (kb|backlog).
 func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Batch mode: if queries[] is provided, loop over all queries with shared filters
-		queries := parseStringSlice(req.GetArguments(), "queries")
-		if len(queries) > 0 {
-			types := parseStringSlice(req.GetArguments(), "types")
-			projects := parseStringSlice(req.GetArguments(), "projects")
-			categories := parseStringSlice(req.GetArguments(), "categories")
-
-			limit := 0
-			if v, ok := req.GetArguments()["limit"].(float64); ok {
-				limit = int(v)
-			}
-
-			resultSets := make([][]store.DocumentSummary, 0, len(queries))
-			for _, q := range queries {
-				rs, err := store.SearchDocuments(db, q, types, projects, categories, limit)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				if rs == nil {
-					rs = []store.DocumentSummary{} // empty-not-nil invariant
-				}
-				resultSets = append(resultSets, rs)
-			}
-			return jsonResult(resultSets)
+		domain, _ := req.GetArguments()["domain"].(string)
+		switch domain {
+		case "kb":
+			return searchDocuments(db, req)
+		case "backlog":
+			return searchBacklogItems(db, req)
+		default:
+			return mcp.NewToolResultError(`domain is required: must be "kb" or "backlog"`), nil //nolint:nilerr
 		}
+	}
+}
 
-		// Single-query mode
-		query, _ := req.GetArguments()["query"].(string)
-		if query == "" {
-			return mcp.NewToolResultError("query or queries is required"), nil //nolint:nilerr
-		}
-
+// searchDocuments handles domain=kb search: single query or queries[] batch.
+func searchDocuments(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// Batch mode: if queries[] is provided, loop over all queries with shared filters
+	queries := parseStringSlice(req.GetArguments(), "queries")
+	if len(queries) > 0 {
 		types := parseStringSlice(req.GetArguments(), "types")
 		projects := parseStringSlice(req.GetArguments(), "projects")
 		categories := parseStringSlice(req.GetArguments(), "categories")
@@ -169,11 +169,39 @@ func handleSearch(db *sql.DB) server.ToolHandlerFunc {
 			limit = int(v)
 		}
 
-		summaries, err := store.SearchDocuments(db, query, types, projects, categories, limit)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		resultSets := make([][]store.DocumentSummary, 0, len(queries))
+		for _, q := range queries {
+			rs, err := store.SearchDocuments(db, q, types, projects, categories, limit)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if rs == nil {
+				rs = []store.DocumentSummary{} // empty-not-nil invariant
+			}
+			resultSets = append(resultSets, rs)
 		}
-
-		return jsonResult(summaries)
+		return jsonResult(resultSets)
 	}
+
+	// Single-query mode
+	query, _ := req.GetArguments()["query"].(string)
+	if query == "" {
+		return mcp.NewToolResultError("query or queries is required"), nil //nolint:nilerr
+	}
+
+	types := parseStringSlice(req.GetArguments(), "types")
+	projects := parseStringSlice(req.GetArguments(), "projects")
+	categories := parseStringSlice(req.GetArguments(), "categories")
+
+	limit := 0
+	if v, ok := req.GetArguments()["limit"].(float64); ok {
+		limit = int(v)
+	}
+
+	summaries, err := store.SearchDocuments(db, query, types, projects, categories, limit)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(summaries)
 }

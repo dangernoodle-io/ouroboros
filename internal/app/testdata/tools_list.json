@@ -2,66 +2,11 @@
   "tools": [
     {
       "annotations": {
-        "readOnlyHint": true
-      },
-      "description": "Get documents: ids array for fetch, or filters for list.",
-      "inputSchema": {
-        "properties": {
-          "categories": {
-            "description": "Filter by categories",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "ids": {
-            "description": "Document IDs (batch fetch)",
-            "type": "array"
-          },
-          "limit": {
-            "description": "Limit, default 10, max 500",
-            "type": "number"
-          },
-          "projects": {
-            "description": "Filter by project names",
-            "type": "array"
-          },
-          "query": {
-            "description": "Full-text search",
-            "type": "string"
-          },
-          "tags": {
-            "description": "Filter by tags (all match)",
-            "type": "array"
-          },
-          "types": {
-            "description": "Filter by types",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "verbose": {
-            "description": "Include notes (default: false)",
-            "type": "boolean"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "name": "get"
-    },
-    {
-      "annotations": {
         "destructiveHint": true
       },
-      "description": "Manage backlog items: ids fetch, entries create/update, or filters list.",
+      "description": "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. Reads live under get/search domain=backlog.",
       "inputSchema": {
         "properties": {
-          "component": {
-            "description": "Component tag (subproject/plugin); filter or set",
-            "type": "string"
-          },
           "delete_ids": {
             "description": "Item IDs to delete",
             "type": "array"
@@ -69,42 +14,91 @@
           "entries": {
             "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, status?",
             "type": "array"
-          },
-          "ids": {
-            "description": "Item IDs to fetch",
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "backlog"
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Fetch entries by ID or filters (required domain: kb|backlog). ids[] returns exact matches; omit ids for a filtered list.",
+      "inputSchema": {
+        "properties": {
+          "categories": {
+            "description": "Filter by categories (kb only)",
+            "items": {
+              "type": "string"
+            },
             "type": "array"
           },
+          "component": {
+            "description": "Component tag (subproject/plugin) filter (backlog only)",
+            "type": "string"
+          },
+          "domain": {
+            "description": "Required: \"kb\" or \"backlog\"",
+            "type": "string"
+          },
+          "ids": {
+            "description": "IDs to fetch (kb: document IDs, backlog: item IDs)",
+            "type": "array"
+          },
+          "limit": {
+            "description": "Limit, default 10, max 500",
+            "type": "number"
+          },
           "priority_max": {
-            "description": "Max priority (P0–P6)",
+            "description": "Max priority P0-P6 (backlog only)",
             "type": "string"
           },
           "priority_min": {
-            "description": "Min priority (P0–P6)",
+            "description": "Min priority P0-P6 (backlog only)",
             "type": "string"
           },
           "projects": {
             "description": "Filter by project names",
             "type": "array"
           },
-          "status": {
-            "description": "open or done",
+          "query": {
+            "description": "Full-text search (kb only)",
             "type": "string"
+          },
+          "status": {
+            "description": "open or done (backlog only)",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Filter by tags, all match (kb only)",
+            "type": "array"
+          },
+          "types": {
+            "description": "Filter by types (kb only)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "verbose": {
             "description": "Include notes (default: false)",
             "type": "boolean"
           }
         },
-        "required": [],
+        "required": [
+          "domain"
+        ],
         "type": "object"
       },
-      "name": "item"
+      "name": "get"
     },
     {
       "annotations": {
         "idempotentHint": true
       },
-      "description": "Create/update KB documents (batch). Each: type, project, title, content, notes?, category?, tags?, metadata?",
+      "description": "Create or update knowledge entries via entries[], upserting by type+project+category+title. Reads live under get/search domain=kb.",
       "inputSchema": {
         "properties": {
           "entries": {
@@ -117,47 +111,69 @@
         ],
         "type": "object"
       },
-      "name": "put"
+      "name": "kb"
     },
     {
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Keyword search (FTS5). Single query or queries[] batch. Multi-word = AND.",
+      "description": "Full-text search over entries (required domain: kb|backlog). domain=kb supports query or a batched queries[]; domain=backlog takes a single query over title/description/notes.",
       "inputSchema": {
         "properties": {
           "categories": {
-            "description": "Filter by categories",
+            "description": "Filter by categories (kb only)",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
+          "component": {
+            "description": "Component tag (subproject/plugin) filter (backlog only)",
+            "type": "string"
+          },
+          "domain": {
+            "description": "Required: \"kb\" or \"backlog\"",
+            "type": "string"
+          },
           "limit": {
             "description": "Limit, default 10, max 500",
             "type": "number"
+          },
+          "priority_max": {
+            "description": "Max priority P0-P6 (backlog only)",
+            "type": "string"
+          },
+          "priority_min": {
+            "description": "Min priority P0-P6 (backlog only)",
+            "type": "string"
           },
           "projects": {
             "description": "Filter by project names",
             "type": "array"
           },
           "queries": {
-            "description": "Batch queries sharing filters; response is positional [[...], [...]]",
+            "description": "Batch queries sharing filters, kb only; response is positional [[...], [...]]",
             "type": "array"
           },
           "query": {
             "description": "Single query",
             "type": "string"
           },
+          "status": {
+            "description": "open or done (backlog only)",
+            "type": "string"
+          },
           "types": {
-            "description": "Filter by types",
+            "description": "Filter by types (kb only)",
             "items": {
               "type": "string"
             },
             "type": "array"
           }
         },
-        "required": [],
+        "required": [
+          "domain"
+        ],
         "type": "object"
       },
       "name": "search"

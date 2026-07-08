@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestLSItemsList(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "", "", "", false)
+	err = runLSItems(&buf, db, "", "", "", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -42,7 +43,7 @@ func TestLSItemsListJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "", "", "", true)
+	err = runLSItems(&buf, db, "", "", "", "", 20, true)
 	require.NoError(t, err)
 
 	var items []backlog.Item
@@ -66,7 +67,7 @@ func TestLSItemsProjectFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "acme-corp", "", "", "", false)
+	err = runLSItems(&buf, db, "acme-corp", "", "", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -88,7 +89,7 @@ func TestLSItemsStatusFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "done", "", "", false)
+	err = runLSItems(&buf, db, "", "done", "", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -107,7 +108,7 @@ func TestLSItemsPriorityFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "", "P0", "", false)
+	err = runLSItems(&buf, db, "", "", "P0", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -126,7 +127,7 @@ func TestLSItemsComponentFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "", "", "auth", false)
+	err = runLSItems(&buf, db, "", "", "", "auth", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -180,11 +181,29 @@ func TestLSItemsProjectNotFound(t *testing.T) {
 	db := newTestDB(t)
 
 	var buf bytes.Buffer
-	err := runLSItems(&buf, db, "nonexistent", "", "", "", false)
+	err := runLSItems(&buf, db, "nonexistent", "", "", "", 20, false)
 	require.NoError(t, err)
 
 	output := strings.TrimSpace(buf.String())
 	// Empty table (header only or minimal content)
 	lines := strings.Split(output, "\n")
 	assert.LessOrEqual(t, len(lines), 2)
+}
+
+func TestLSItemsLimit(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	for i := range 5 {
+		_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", fmt.Sprintf("Item %d", i+1), "", "", "")
+		require.NoError(t, err)
+	}
+
+	var buf bytes.Buffer
+	err = runLSItems(&buf, db, "acme-corp", "open", "", "", 3, true)
+	require.NoError(t, err)
+
+	var items []backlog.Item
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &items))
+	assert.Len(t, items, 3)
 }

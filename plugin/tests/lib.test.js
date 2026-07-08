@@ -1195,12 +1195,12 @@ test('ALREADY_PERSISTED_PATTERNS - true confirm: persisted 1 entry (singular) sh
 });
 
 test('ALREADY_PERSISTED_PATTERNS - true confirm: tool_result payload create should match', () => {
-  const msg = 'mcp__ouroboros-mcp__put {"action": "create", "id": 5, "title": "some decision"}';
+  const msg = 'mcp__ouroboros-mcp__kb {"action": "create", "id": 5, "title": "some decision"}';
   assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), true);
 });
 
 test('ALREADY_PERSISTED_PATTERNS - true confirm: tool_result payload update should match', () => {
-  const msg = 'mcp__plugin__put_entry {"action": "update", "title": "decision updated"}';
+  const msg = 'mcp__plugin__kb_entry {"action": "update", "title": "decision updated"}';
   assert.strictEqual(matchesAnyPattern(msg, ALREADY_PERSISTED_PATTERNS), true);
 });
 

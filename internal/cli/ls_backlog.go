@@ -16,11 +16,12 @@ var (
 	lsItemsStatusFlag    string
 	lsItemsPriorityFlag  string
 	lsItemsComponentFlag string
+	lsItemsLimitFlag     int
 	lsItemsJSONFlag      bool
 )
 
 var lsItemsCmd = &cobra.Command{
-	Use:   "items [ID]",
+	Use:   "backlog [ID]",
 	Short: "List backlog items",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -28,7 +29,7 @@ var lsItemsCmd = &cobra.Command{
 			if len(args) == 1 {
 				return runLSItemDetail(cmd.OutOrStdout(), db, args[0], lsItemsJSONFlag)
 			}
-			return runLSItems(cmd.OutOrStdout(), db, lsItemsProjectFlag, lsItemsStatusFlag, lsItemsPriorityFlag, lsItemsComponentFlag, lsItemsJSONFlag)
+			return runLSItems(cmd.OutOrStdout(), db, lsItemsProjectFlag, lsItemsStatusFlag, lsItemsPriorityFlag, lsItemsComponentFlag, lsItemsLimitFlag, lsItemsJSONFlag)
 		})
 	},
 }
@@ -38,10 +39,11 @@ func init() {
 	lsItemsCmd.Flags().StringVar(&lsItemsStatusFlag, "status", "", "Status filter (open or done)")
 	lsItemsCmd.Flags().StringVar(&lsItemsPriorityFlag, "priority", "", "Priority filter (P0-P6)")
 	lsItemsCmd.Flags().StringVar(&lsItemsComponentFlag, "component", "", "Component filter")
+	lsItemsCmd.Flags().IntVar(&lsItemsLimitFlag, "limit", 20, "Maximum number of results")
 	lsItemsCmd.Flags().BoolVar(&lsItemsJSONFlag, "json", false, "Output as JSON")
 }
 
-func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, component string, asJSON bool) error {
+func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, component string, limit int, asJSON bool) error {
 	// Build project filter
 	var projectIDs []int64
 	if projectName != "" {
@@ -58,7 +60,7 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 		// All projects
 		projects, err := backlog.ListProjects(db)
 		if err != nil {
-			return fmt.Errorf("ls items: list projects: %w", err)
+			return fmt.Errorf("ls backlog: list projects: %w", err)
 		}
 		for _, p := range projects {
 			projectIDs = append(projectIDs, p.ID)
@@ -66,7 +68,7 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 	}
 
 	// Build filter
-	filter := backlog.ItemFilter{ProjectIDs: projectIDs}
+	filter := backlog.ItemFilter{ProjectIDs: projectIDs, Limit: limit}
 	if status != "" {
 		filter.Status = &status
 	}
@@ -85,7 +87,7 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 
 	items, err := backlog.ListItems(db, filter)
 	if err != nil {
-		return fmt.Errorf("ls items: list failed: %w", err)
+		return fmt.Errorf("ls backlog: list failed: %w", err)
 	}
 
 	if asJSON {
@@ -96,7 +98,7 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 	projectMap := make(map[int64]string)
 	projects, err := backlog.ListProjects(db)
 	if err != nil {
-		return fmt.Errorf("ls items: list projects: %w", err)
+		return fmt.Errorf("ls backlog: list projects: %w", err)
 	}
 	for _, p := range projects {
 		projectMap[p.ID] = p.Name
@@ -121,7 +123,7 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 func runLSItemDetail(out io.Writer, db *sql.DB, id string, asJSON bool) error {
 	item, err := backlog.GetItem(db, id)
 	if err != nil {
-		return fmt.Errorf("ls items: get item: %w", err)
+		return fmt.Errorf("ls backlog: get item: %w", err)
 	}
 
 	if asJSON {

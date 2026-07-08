@@ -35,7 +35,7 @@ function touchCooldown(cooldownPath) {
 
 function queryItems(binary, project) {
   try {
-    const cmd = `"${binary}" items --project "${project}" --status open --limit ${MAX_ITEMS}`;
+    const cmd = `"${binary}" ls backlog --project "${project}" --status open --limit ${MAX_ITEMS} --json`;
     const out = execSync(cmd, { timeout: 3000, encoding: 'utf-8' });
     const items = JSON.parse(out);
     if (!Array.isArray(items)) return null;

@@ -191,6 +191,28 @@ UPDATE documents SET session_id = json_extract(metadata, '$.session_id') WHERE s
     renamed_at TEXT NOT NULL
 );`,
 	},
+	{
+		version: 10,
+		sql: `CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+    title, description, notes,
+    content=items, content_rowid=rowid
+);
+
+CREATE TRIGGER IF NOT EXISTS items_ai AFTER INSERT ON items BEGIN
+    INSERT INTO items_fts(rowid, title, description, notes) VALUES (new.rowid, new.title, new.description, new.notes);
+END;
+
+CREATE TRIGGER IF NOT EXISTS items_ad AFTER DELETE ON items BEGIN
+    INSERT INTO items_fts(items_fts, rowid, title, description, notes) VALUES ('delete', old.rowid, old.title, old.description, old.notes);
+END;
+
+CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE ON items BEGIN
+    INSERT INTO items_fts(items_fts, rowid, title, description, notes) VALUES ('delete', old.rowid, old.title, old.description, old.notes);
+    INSERT INTO items_fts(rowid, title, description, notes) VALUES (new.rowid, new.title, new.description, new.notes);
+END;
+
+INSERT INTO items_fts(rowid, title, description, notes) SELECT rowid, title, description, notes FROM items;`,
+	},
 }
 
 // ApplySchema applies all pending migrations to the database.

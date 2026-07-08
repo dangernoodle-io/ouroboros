@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stub ouroboros binary that captures put stdin to a file
+# Stub ouroboros binary that captures kb stdin to a file
 
 case "$1" in
   query)
@@ -10,7 +10,7 @@ case "$1" in
     fi
     exit 0
     ;;
-  put)
+  kb)
     if [ "$OUROBOROS_STUB_PUT_FAIL" = "1" ]; then
       echo "stub failure" >&2
       exit 1

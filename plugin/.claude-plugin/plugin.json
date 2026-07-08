@@ -12,7 +12,7 @@
   "mcpServers": {
     "ouroboros": {
       "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros",
-      "instructions": "Use put/get/search for KB entries and item for backlog; project/plan/config/delete/export/import are CLI-only (run `ouroboros <cmd> --help`). get and search return summaries by default — pass verbose: true only when full content is needed."
+      "instructions": "Read/write axis: reads (get/search) require domain (kb|backlog); writes are kb (KB entries) and backlog (items). Project/plan/config/delete/export/import are CLI-only (run `ouroboros <cmd> --help`). get and search return summaries by default — pass verbose: true only when full content is needed."
     }
   }
 }

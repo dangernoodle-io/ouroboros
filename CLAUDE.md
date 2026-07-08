@@ -17,7 +17,7 @@ make lint     # golangci-lint run
 ## Project layout
 
 - `main.go` — thin wrapper, delegates to `internal/cli.Execute`
-- `internal/cli/` — cobra root + CLI subcommands (query, items, put, ls)
+- `internal/cli/` — cobra root + CLI subcommands (query, kb, ls)
 - `internal/app/` — MCP server setup, tool handlers
 - `internal/store/` — SQLite schema, migrations, KB CRUD, FTS5 search
 - `internal/backlog/` — backlog CRUD (projects, items, plans, config)
@@ -27,16 +27,16 @@ make lint     # golangci-lint run
 
 ## Tools
 
-MCP surface is intentionally narrow (4 tools); operator-style ops are CLI-only.
+MCP surface is intentionally narrow (4 tools); operator-style ops are CLI-only. The 4 tools follow a clean read/write axis: reads (`get`/`search`) are parameterized by `domain` (kb|backlog); writes are concept-named (`kb` for knowledge entries, `backlog` for items). This design reduces tool mis-selection.
 
-| Tool | Domain | Description |
-|------|--------|-------------|
-| put | KB | Create or update a knowledge entry (upserts by type+project+category+title) |
-| get | KB | Get entries — by id for full content, or summaries with filters |
-| search | KB | Full-text search across knowledge entries |
-| item | Backlog | Create, get, update, list, or delete backlog items (mode by inputs) |
+| Tool | Type | Description |
+|------|------|-------------|
+| get | Read | Fetch entries by ID or filters (requires `domain`: kb\|backlog) |
+| search | Read | Full-text search (requires `domain`: kb\|backlog) |
+| kb | Write | Create or update knowledge entries (upserts by type+project+category+title) |
+| backlog | Write | Create, update, or delete backlog items |
 
-CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`.
+CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`. Browse with `ls items`, `ls kb`, `ls plans`, `ls projects`.
 
 ## Configuration
 
