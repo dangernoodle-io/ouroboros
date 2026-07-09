@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { readStdin, projectFromPath, checkNudgePatterns, logHookEvent, isSkippedAgentType, persistKbBlock } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, logHookEvent, isSkippedAgentType, persistKbBlock } = require(__dirname + '/lib');
 
 async function main() {
   try {
@@ -64,17 +64,13 @@ async function main() {
       process.exit(kbResult.exitCode);
     }
 
-    const nudge = checkNudgePatterns(message, {
-      label: 'subagent',
-      idShort: agent_id_short,
-      sessionId: session_id,
-      project,
-      hookName: 'subagent_stop',
-    });
-    if (nudge) {
-      process.stdout.write(JSON.stringify(nudge) + '\n');
-      process.exit(2);
-    }
+    // No decision-language nudge here (unlike stop.js): a subagent's final
+    // message IS its return value to the orchestrator. A blocking (exit 2)
+    // nudge forces the subagent to take another turn to address it, and that
+    // meta-acknowledgement turn overwrites the real report as the "final"
+    // message — destroying the report the caller actually needs (OU-222).
+    // Persistence nudging is the main session's job (see stop.js); a subagent
+    // that deliberately emits a ```kb block still gets it persisted above.
 
     // Default: exit silently (exploratory output)
     logHookEvent({ hook: 'subagent_stop', kind: 'noop', session_id, project });

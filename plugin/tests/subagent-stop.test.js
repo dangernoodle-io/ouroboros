@@ -140,32 +140,26 @@ test('subagent-stop: kb block with malformed JSON → logs parse error, does NOT
   assert(!result.stderr.includes('persisted'));
 });
 
-test('subagent-stop: no kb block + tier-2 self-claim → decision:block JSON on stdout, exit 2', () => {
+test('subagent-stop: no kb block + tier-2 self-claim language → exit 0, no nudge on stdout (OU-222)', () => {
   const input = JSON.stringify({
     agent_type: 'general',
     agent_id: 'abc12345678',
     last_assistant_message: 'This is a long message. [ouroboros] subagent main: persisted 2 entries to my-project [ids: 1,2] — a tier-2 confirmation that should be detected as a self-claim',
   });
   const result = runScript(input);
-  assert.strictEqual(result.status, 2);
-  const outputJson = JSON.parse(result.stdout.trim());
-  assert.strictEqual(outputJson.decision, 'block');
-  assert.match(outputJson.reason, /tier-2/);
-  assert(outputJson.reason.includes('abc12345'));
+  assert.strictEqual(result.status, 0);
+  assert.strictEqual(result.stdout.trim(), '', 'subagent stop must never block the final turn with a nudge');
 });
 
-test('subagent-stop: no kb block + tier-1 decision language → decision:block JSON on stdout, exit 2', () => {
+test('subagent-stop: no kb block + tier-1 decision language → exit 0, no nudge on stdout (OU-222)', () => {
   const input = JSON.stringify({
     agent_type: 'general',
     agent_id: 'abc12345678',
     last_assistant_message: 'This is a long message with enough content where we decided to adopt a new architecture for the system',
   });
   const result = runScript(input);
-  assert.strictEqual(result.status, 2);
-  const outputJson = JSON.parse(result.stdout.trim());
-  assert.strictEqual(outputJson.decision, 'block');
-  assert.match(outputJson.reason, /tier-1/);
-  assert(outputJson.reason.includes('abc12345'));
+  assert.strictEqual(result.status, 0);
+  assert.strictEqual(result.stdout.trim(), '', 'subagent stop must never block the final turn with a nudge');
 });
 
 test('subagent-stop: message with no kb block + neutral content → exit 0, no stdout', () => {
