@@ -29,6 +29,7 @@ var (
 	dashboardViewSetOutput   string
 
 	dashboardProjectSetSegments string
+	dashboardProjectSetRepo     string
 )
 
 var dashboardCmd = &cobra.Command{
@@ -108,11 +109,16 @@ var dashboardProjectCmd = &cobra.Command{
 
 var dashboardProjectSetCmd = &cobra.Command{
 	Use:   "set <name>",
-	Short: "Set a project's segment overrides",
+	Short: "Set a project's segment overrides and/or repo path",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDB(func(db *sql.DB) error {
-			return runDashboardProjectSet(cmd.OutOrStdout(), db, args[0], dashboardProjectSetSegments)
+			return runDashboardProjectSet(cmd.OutOrStdout(), db, args[0], dashboardProjectSetOpts{
+				segmentsJSON:    dashboardProjectSetSegments,
+				repo:            dashboardProjectSetRepo,
+				segmentsChanged: cmd.Flags().Changed("segments"),
+				repoChanged:     cmd.Flags().Changed("repo"),
+			})
 		})
 	},
 }
@@ -138,7 +144,8 @@ func init() {
 	dashboardViewSetCmd.Flags().StringVar(&dashboardViewSetCooldown, "cooldown", "", "Per-view refresh cooldown override (e.g. 5m)")
 	dashboardViewSetCmd.Flags().StringVar(&dashboardViewSetOutput, "output", "", "Explicit output file path override")
 
-	dashboardProjectSetCmd.Flags().StringVar(&dashboardProjectSetSegments, "segments", "", "Segment specs as a JSON array (required)")
+	dashboardProjectSetCmd.Flags().StringVar(&dashboardProjectSetSegments, "segments", "", "Segment specs as a JSON array")
+	dashboardProjectSetCmd.Flags().StringVar(&dashboardProjectSetRepo, "repo", "", "On-disk repo path override for this project")
 
 	dashboardViewCmd.AddCommand(dashboardViewSetCmd)
 	dashboardViewCmd.AddCommand(dashboardViewListCmd)
@@ -233,18 +240,50 @@ func runDashboardViewRm(out io.Writer, db *sql.DB, name string) error {
 	return nil
 }
 
-// runDashboardProjectSet sets a project's segment overrides.
-func runDashboardProjectSet(out io.Writer, db *sql.DB, project, segmentsJSON string) error {
-	specs, err := dashboard.ParseSegments(segmentsJSON)
-	if err != nil {
-		return fmt.Errorf("dashboard project set: parse segments: %w", err)
+// dashboardProjectSetOpts bundles the `project set` command's flags plus
+// whether each was explicitly passed, so the handler can read-modify-write
+// without an unset flag wiping the other field.
+type dashboardProjectSetOpts struct {
+	segmentsJSON    string
+	repo            string
+	segmentsChanged bool
+	repoChanged     bool
+}
+
+// runDashboardProjectSet sets a project's segment overrides and/or repo path
+// override, read-modify-write: only the fields whose flags were explicitly
+// passed are updated, so `--repo` alone never clears existing segments and
+// vice versa.
+func runDashboardProjectSet(out io.Writer, db *sql.DB, project string, opts dashboardProjectSetOpts) error {
+	if !opts.segmentsChanged && !opts.repoChanged {
+		return fmt.Errorf("dashboard project set: nothing to set: pass --repo and/or --segments")
 	}
 
-	if err := dashboard.SetProjectConfig(db, project, dashboard.ProjectConfig{Segments: specs}); err != nil {
+	pc, err := dashboard.GetProjectConfig(db, project)
+	if err != nil {
 		return fmt.Errorf("dashboard project set: %w", err)
 	}
 
-	fmt.Fprintf(out, "set project %s (%d segments)\n", project, len(specs))
+	if opts.segmentsChanged {
+		specs, err := dashboard.ParseSegments(opts.segmentsJSON)
+		if err != nil {
+			return fmt.Errorf("dashboard project set: parse segments: %w", err)
+		}
+		pc.Segments = specs
+	}
+	if opts.repoChanged {
+		pc.Repo = opts.repo
+	}
+
+	if err := dashboard.SetProjectConfig(db, project, pc); err != nil {
+		return fmt.Errorf("dashboard project set: %w", err)
+	}
+
+	repoDisplay := pc.Repo
+	if repoDisplay == "" {
+		repoDisplay = "(unset)"
+	}
+	fmt.Fprintf(out, "set project %s (repo=%s, %d segments)\n", project, repoDisplay, len(pc.Segments))
 	return nil
 }
 
@@ -263,8 +302,14 @@ func runDashboardStatus(out io.Writer, db *sql.DB) error {
 	}
 	outputDir := dashboard.OutputDir(db, cfg.DBPath)
 
+	workspaceRoot, _ := backlog.GetConfig(db, dashboard.KeyWorkspaceRoot)
+	if workspaceRoot == "" {
+		workspaceRoot = "(unset)"
+	}
+
 	fmt.Fprintf(out, "dashboard.enabled: %s\n", enabled)
 	fmt.Fprintf(out, "output_dir: %s\n", outputDir)
+	fmt.Fprintf(out, "workspace_root: %s\n", workspaceRoot)
 
 	views, err := dashboard.ListViews(db)
 	if err != nil {
@@ -288,6 +333,17 @@ func runDashboardStatus(out io.Writer, db *sql.DB) error {
 		fmt.Fprintf(out, "warning: %s\n", monErr.Error())
 	}
 	fmt.Fprintf(out, "monitored projects (%d): %s\n", len(monitored), strings.Join(monitored, ", "))
+	for _, p := range monitored {
+		repo, err := dashboard.ResolveRepo(db, p)
+		if err != nil {
+			fmt.Fprintf(out, "  %s: repo=(error)\n", p)
+			continue
+		}
+		if repo == "" {
+			repo = "(unresolved)"
+		}
+		fmt.Fprintf(out, "  %s: repo=%s\n", p, repo)
+	}
 	return nil
 }
 
@@ -425,6 +481,16 @@ func refreshOneView(out io.Writer, db *sql.DB, dbPath string, v dashboard.View, 
 		ctx := resolveDashboardContext()
 		ctx.Project = project
 		ctx.Now = now.Format(time.RFC3339)
+
+		repo, err := dashboard.ResolveRepo(db, project)
+		if err != nil {
+			drops = append(drops, fmt.Sprintf("%s: resolve repo: %s", project, err.Error()))
+			continue
+		}
+		if repo != "" {
+			ctx.Repo = repo
+			ctx.Cwd = repo
+		}
 
 		for _, spec := range specs {
 			if !spec.IsEnabled() {

@@ -44,6 +44,13 @@ func resetDashboardFlags() {
 	dashboardViewSetCooldown = ""
 	dashboardViewSetOutput = ""
 	dashboardProjectSetSegments = ""
+	dashboardProjectSetRepo = ""
+	if f := dashboardProjectSetCmd.Flags().Lookup("segments"); f != nil {
+		f.Changed = false
+	}
+	if f := dashboardProjectSetCmd.Flags().Lookup("repo"); f != nil {
+		f.Changed = false
+	}
 }
 
 func enableDashboard(t *testing.T) {
@@ -188,27 +195,75 @@ func TestDashboardViewSet_WithCooldownAndOutput(t *testing.T) {
 func TestDashboardProjectSet(t *testing.T) {
 	resetDashboardFlags()
 	setupDashboardDB(t)
-
-	dashboardProjectSetSegments = `[{"id":"git","builtin":"git"}]`
 	defer resetDashboardFlags()
+
+	require.NoError(t, dashboardProjectSetCmd.Flags().Set("segments", `[{"id":"git","builtin":"git"}]`))
 
 	var buf bytes.Buffer
 	dashboardProjectSetCmd.SetOut(&buf)
 	require.NoError(t, dashboardProjectSetCmd.RunE(dashboardProjectSetCmd, []string{"breadboard"}))
-	assert.Contains(t, buf.String(), "set project breadboard (1 segments)")
+	assert.Contains(t, buf.String(), "set project breadboard (repo=(unset), 1 segments)")
 }
 
 func TestDashboardProjectSet_InvalidJSON(t *testing.T) {
 	resetDashboardFlags()
 	setupDashboardDB(t)
-
-	dashboardProjectSetSegments = `not json`
 	defer resetDashboardFlags()
+
+	require.NoError(t, dashboardProjectSetCmd.Flags().Set("segments", `not json`))
 
 	dashboardProjectSetCmd.SetOut(&bytes.Buffer{})
 	err := dashboardProjectSetCmd.RunE(dashboardProjectSetCmd, []string{"breadboard"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse segments")
+}
+
+func TestDashboardProjectSet_NothingToSet(t *testing.T) {
+	resetDashboardFlags()
+	setupDashboardDB(t)
+	defer resetDashboardFlags()
+
+	dashboardProjectSetCmd.SetOut(&bytes.Buffer{})
+	err := dashboardProjectSetCmd.RunE(dashboardProjectSetCmd, []string{"breadboard"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing to set")
+}
+
+func TestDashboardProjectSet_RepoAndSegmentsIndependent(t *testing.T) {
+	resetDashboardFlags()
+	setupDashboardDB(t)
+	defer resetDashboardFlags()
+
+	// Set --repo alone first.
+	require.NoError(t, dashboardProjectSetCmd.Flags().Set("repo", "/repos/breadboard"))
+	dashboardProjectSetCmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, dashboardProjectSetCmd.RunE(dashboardProjectSetCmd, []string{"breadboard"}))
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		pc, err := dashboard.GetProjectConfig(db, "breadboard")
+		require.NoError(t, err)
+		assert.Equal(t, "/repos/breadboard", pc.Repo)
+		assert.Empty(t, pc.Segments)
+		return nil
+	}))
+
+	resetDashboardFlags()
+
+	// Now set --segments alone; the earlier --repo must survive (RMW).
+	require.NoError(t, dashboardProjectSetCmd.Flags().Set("segments", `[{"id":"git","builtin":"git"}]`))
+	var buf bytes.Buffer
+	dashboardProjectSetCmd.SetOut(&buf)
+	require.NoError(t, dashboardProjectSetCmd.RunE(dashboardProjectSetCmd, []string{"breadboard"}))
+	assert.Contains(t, buf.String(), "set project breadboard (repo=/repos/breadboard, 1 segments)")
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		pc, err := dashboard.GetProjectConfig(db, "breadboard")
+		require.NoError(t, err)
+		assert.Equal(t, "/repos/breadboard", pc.Repo)
+		require.Len(t, pc.Segments, 1)
+		assert.Equal(t, "git", pc.Segments[0].ID)
+		return nil
+	}))
 }
 
 // ── dashboard status ─────────────────────────────────────────────────────────
@@ -221,8 +276,33 @@ func TestDashboardStatus_Empty(t *testing.T) {
 	dashboardStatusCmd.SetOut(&buf)
 	require.NoError(t, dashboardStatusCmd.RunE(dashboardStatusCmd, []string{}))
 	assert.Contains(t, buf.String(), "dashboard.enabled: false")
+	assert.Contains(t, buf.String(), "workspace_root: (unset)")
 	assert.Contains(t, buf.String(), "no views configured")
 	assert.Contains(t, buf.String(), "monitored projects (0)")
+}
+
+func TestDashboardStatus_WorkspaceRootAndResolvedRepos(t *testing.T) {
+	resetDashboardFlags()
+	setupDashboardDB(t)
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		if err := backlog.SetConfig(db, dashboard.KeyWorkspaceRoot, "/ws"); err != nil {
+			return err
+		}
+		if err := dashboard.SetView(db, dashboard.View{Name: "miner", Projects: []string{"breadboard", "TaipanMiner"}}); err != nil {
+			return err
+		}
+		return dashboard.SetProjectConfig(db, "TaipanMiner", dashboard.ProjectConfig{Repo: "/override/tm"})
+	}))
+
+	var buf bytes.Buffer
+	dashboardStatusCmd.SetOut(&buf)
+	require.NoError(t, dashboardStatusCmd.RunE(dashboardStatusCmd, []string{}))
+
+	out := buf.String()
+	assert.Contains(t, out, "workspace_root: /ws")
+	assert.Contains(t, out, "breadboard: repo="+filepath.Join("/ws", "breadboard"))
+	assert.Contains(t, out, "TaipanMiner: repo=/override/tm")
 }
 
 func TestDashboardStatus_WithSegmentOverrideNote(t *testing.T) {
@@ -497,6 +577,44 @@ func TestDashboardRefreshCmd_UnknownBuiltinSegmentDropped(t *testing.T) {
 	assert.Contains(t, buf.String(), "0 fragments (1 dropped)")
 }
 
+func TestDashboardRefreshCmd_ResolveRepoErrorSoftDegrades(t *testing.T) {
+	resetDashboardFlags()
+	dbPath := setupDashboardDB(t)
+	enableDashboard(t)
+
+	dir := t.TempDir()
+	runGitCmd(t, dir, "init")
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		if err := dashboard.SetView(db, dashboard.View{Name: "miner", Projects: []string{"bad-project", "breadboard"}}); err != nil {
+			return err
+		}
+		// A malformed project-config blob makes GetProjectConfig (and so
+		// ResolveRepo) error for "bad-project" only; "breadboard" resolves
+		// normally. The view must still write breadboard's fragments and
+		// record a drop for bad-project, rather than aborting the whole
+		// view (matching the EffectiveSegments soft-degrade above it).
+		return backlog.SetConfig(db, dashboard.ProjectKeyPrefix+"bad-project", "{not json")
+	}))
+
+	dashboardRefreshView = "miner"
+	dashboardRefreshForce = true
+	defer resetDashboardFlags()
+
+	var buf bytes.Buffer
+	dashboardRefreshCmd.SetOut(&buf)
+	err := dashboardRefreshCmd.RunE(dashboardRefreshCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "refreshed view miner")
+	assert.Contains(t, buf.String(), "1 dropped")
+
+	outPath := filepath.Join(filepath.Dir(dbPath), "dashboards", "miner.ndjson")
+	data, statErr := os.ReadFile(outPath)
+	require.NoError(t, statErr)
+	assert.Contains(t, string(data), `"project":"breadboard"`)
+	assert.NotContains(t, string(data), `"project":"bad-project"`)
+}
+
 func TestDashboardRefreshCmd_ExecSegmentUnsupported(t *testing.T) {
 	resetDashboardFlags()
 	setupDashboardDB(t)
@@ -577,6 +695,77 @@ func TestDashboardRefreshCmd_ProjectFragmentsCarryProject(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(line), &frag))
 		assert.Equal(t, "breadboard", frag["project"])
 	}
+}
+
+// initTestRepo creates a git repo on the given branch under dir, with one
+// commit, so gitSegment resolves a real branch name instead of degrading.
+func initTestRepo(t *testing.T, dir, branch string) {
+	t.Helper()
+	runGitCmd(t, dir, "init")
+	runGitCmd(t, dir, "config", "user.email", "test-user@example.com")
+	runGitCmd(t, dir, "config", "user.name", "Test User")
+	runGitCmd(t, dir, "config", "commit.gpgsign", "false")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644))
+	runGitCmd(t, dir, "add", "f.txt")
+	runGitCmd(t, dir, "commit", "-m", "init")
+	runGitCmd(t, dir, "checkout", "-b", branch)
+}
+
+// TestDashboardRefreshCmd_PerProjectRepoResolution proves refresh resolves a
+// DIFFERENT repo path per project (via dashboard.workspace_root), rather
+// than reading the CWD repo for every member project: two projects, each
+// its own git repo on its own branch, must each report their OWN branch in
+// the refreshed output.
+func TestDashboardRefreshCmd_PerProjectRepoResolution(t *testing.T) {
+	resetDashboardFlags()
+	dbPath := setupDashboardDB(t)
+	enableDashboard(t)
+
+	wsRoot := t.TempDir()
+	repoA := filepath.Join(wsRoot, "proj-a")
+	repoB := filepath.Join(wsRoot, "proj-b")
+	require.NoError(t, os.Mkdir(repoA, 0o755))
+	require.NoError(t, os.Mkdir(repoB, 0o755))
+	initTestRepo(t, repoA, "branch-a")
+	initTestRepo(t, repoB, "branch-b")
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		if err := backlog.SetConfig(db, dashboard.KeyWorkspaceRoot, wsRoot); err != nil {
+			return err
+		}
+		return dashboard.SetView(db, dashboard.View{Name: "multi", Projects: []string{"proj-a", "proj-b"}})
+	}))
+
+	dashboardRefreshView = "multi"
+	dashboardRefreshForce = true
+	defer resetDashboardFlags()
+
+	dashboardRefreshCmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, dashboardRefreshCmd.RunE(dashboardRefreshCmd, []string{}))
+
+	outPath := filepath.Join(filepath.Dir(dbPath), "dashboards", "multi.ndjson")
+	data, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+
+	branches := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var frag map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &frag))
+		if frag["type"] == "tile" && frag["section"] == "git" && frag["label"] == "branch" {
+			project, ok := frag["project"].(string)
+			require.True(t, ok)
+			value, ok := frag["value"].(string)
+			require.True(t, ok)
+			branches[project] = value
+		}
+	}
+
+	require.Len(t, branches, 2)
+	assert.Equal(t, "branch-a", branches["proj-a"])
+	assert.Equal(t, "branch-b", branches["proj-b"])
 }
 
 func TestResolveDashboardContext(t *testing.T) {

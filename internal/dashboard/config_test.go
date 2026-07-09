@@ -279,6 +279,76 @@ func TestEffectiveSegments_Precedence(t *testing.T) {
 	assert.Equal(t, "git", segs[0].ID)
 }
 
+func TestResolveRepo(t *testing.T) {
+	tests := []struct {
+		name    string
+		project string
+		repo    string
+		root    string
+		want    string
+	}{
+		{"override wins over workspace root", "proj", "/explicit/repo", "/ws", "/explicit/repo"},
+		{"no override, root set -> root/project", "proj", "", "/ws", filepath.Join("/ws", "proj")},
+		{"neither set -> empty", "proj", "", "", ""},
+		{"dotted project name joins under root", "notarizedbyape.com", "", "/ws", filepath.Join("/ws", "notarizedbyape.com")},
+		{"path traversal project name -> not joined", "../evil", "", "/ws", ""},
+		{"path separator project name -> not joined", "a/b", "", "/ws", ""},
+		{"backslash project name -> not joined", `a\b`, "", "/ws", ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDB(t)
+			if tc.repo != "" {
+				require.NoError(t, SetProjectConfig(db, tc.project, ProjectConfig{Repo: tc.repo}))
+			}
+			if tc.root != "" {
+				require.NoError(t, backlog.SetConfig(db, KeyWorkspaceRoot, tc.root))
+			}
+
+			got, err := ResolveRepo(db, tc.project)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolveRepo_NoWorkspaceRootConfigured(t *testing.T) {
+	db := newTestDB(t)
+
+	got, err := ResolveRepo(db, "proj")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestResolveRepo_WorkspaceRootExplicitlyEmpty(t *testing.T) {
+	db := newTestDB(t)
+	require.NoError(t, backlog.SetConfig(db, KeyWorkspaceRoot, ""))
+
+	got, err := ResolveRepo(db, "proj")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestSetProjectConfig_RepoAndSegmentsIndependent(t *testing.T) {
+	db := newTestDB(t)
+
+	require.NoError(t, SetProjectConfig(db, "proj", ProjectConfig{Segments: []SegmentSpec{{ID: "git", Builtin: "git"}}}))
+	got, err := GetProjectConfig(db, "proj")
+	require.NoError(t, err)
+	require.Len(t, got.Segments, 1)
+	assert.Empty(t, got.Repo)
+
+	got.Repo = "/repos/proj"
+	require.NoError(t, SetProjectConfig(db, "proj", got))
+
+	got, err = GetProjectConfig(db, "proj")
+	require.NoError(t, err)
+	assert.Equal(t, "/repos/proj", got.Repo)
+	require.Len(t, got.Segments, 1)
+	assert.Equal(t, "git", got.Segments[0].ID)
+}
+
 // ── output paths ─────────────────────────────────────────────────────────────
 
 func TestOutputDir_DefaultVsExplicit(t *testing.T) {
@@ -381,6 +451,14 @@ func TestSetProjectConfig_DBError(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	err := SetProjectConfig(db, "proj", ProjectConfig{})
+	require.Error(t, err)
+}
+
+func TestResolveRepo_DBError(t *testing.T) {
+	db := newTestDB(t)
+	require.NoError(t, db.Close())
+
+	_, err := ResolveRepo(db, "proj")
 	require.Error(t, err)
 }
 
