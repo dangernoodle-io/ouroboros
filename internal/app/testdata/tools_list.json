@@ -12,7 +12,7 @@
             "type": "array"
           },
           "entries": {
-            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?",
+            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id)",
             "type": "array"
           }
         },
@@ -110,7 +110,7 @@
       "annotations": {
         "idempotentHint": true
       },
-      "description": "Create or update knowledge entries via entries[], upserting by type+project+category+title. Reads live under get/search domain=kb.",
+      "description": "Create or update knowledge entries via entries[], upserting by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb.",
       "inputSchema": {
         "properties": {
           "entries": {

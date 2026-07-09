@@ -151,6 +151,15 @@ func TestEpicLabelsResolvesRenamedEpicViaAliasFallback(t *testing.T) {
 	assert.Equal(t, "renamed", labels["OLD-1"], "keyed by the requested (old) id, not the resolved current id")
 }
 
+// TestAddItemBeginError exercises AddItem's d.Begin() error path (closed DB).
+func TestAddItemBeginError(t *testing.T) {
+	d := testDB(t)
+	require.NoError(t, d.Close())
+
+	_, err := backlog.AddItem(d, 1, "AC", "P1", "x", "", "", "", "")
+	assert.Error(t, err)
+}
+
 func TestAddItemSequence(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
@@ -362,6 +371,16 @@ func TestDeleteItemsMixed(t *testing.T) {
 	affected, err := backlog.DeleteItems(d, []string{"AC-1", "NONEXISTENT"})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), affected)
+}
+
+// TestDeleteItemsBeginError exercises DeleteItems' d.Begin() error path
+// (closed DB).
+func TestDeleteItemsBeginError(t *testing.T) {
+	d := testDB(t)
+	require.NoError(t, d.Close())
+
+	_, err := backlog.DeleteItems(d, []string{"AC-1"})
+	assert.Error(t, err)
 }
 
 func TestDeleteItemsEmpty(t *testing.T) {

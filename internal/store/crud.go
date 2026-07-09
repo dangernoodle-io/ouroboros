@@ -476,14 +476,35 @@ func QueryDocuments(db *sql.DB, types []string, projects []string, categories []
 	return summaries, nil
 }
 
+// DeleteDocumentTx deletes a document by ID within an existing transaction.
+// The caller owns the transaction and is responsible for commit/rollback
+// and FTS rebuild (edge cascade cleanup is also the caller's job — see
+// internal/edges.CascadeDelete — to keep this package edges-agnostic).
+func DeleteDocumentTx(tx *sql.Tx, id int64) error {
+	_, err := tx.Exec("DELETE FROM documents WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete document: %w", err)
+	}
+	return nil
+}
+
 // DeleteDocument deletes a document by ID.
 func DeleteDocument(db *sql.DB, id int64) error {
 	dbMu.Lock()
 	defer dbMu.Unlock()
 
-	_, err := db.Exec("DELETE FROM documents WHERE id = ?", id)
+	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to delete document: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	if err := DeleteDocumentTx(tx, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
 	}
 
 	if err := RebuildFTS(db); err != nil {

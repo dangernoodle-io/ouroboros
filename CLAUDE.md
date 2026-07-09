@@ -22,6 +22,7 @@ make lint     # golangci-lint run
 - `internal/store/` — SQLite schema, migrations, KB CRUD, FTS5 search
 - `internal/backlog/` — backlog CRUD (projects, items, plans, config)
 - `internal/roadmap/` — roadmap CRUD (per-project singletons, item mutations)
+- `internal/edges/` — polymorphic cross-reference graph (item/kb, blocks\|relates\|explains); `[[Title]]` KB autolinking; cascade cleanup on item/kb delete
 - `internal/backup/` — git backup operations
 - `internal/config/` — bootstrap config file + env var loading
 - `internal/kb/` — KB export/import, validation
@@ -38,7 +39,9 @@ MCP surface is intentionally narrow (5 tools); operator-style ops are CLI-only. 
 | backlog | Write | Create, update, or delete backlog items |
 | roadmap | Write | Mutate per-project roadmap (now/next/deferred/parked/dropped/done sections; items carry two single-valued grouping axes, component + epic, plus optional position; via op=add\|update\|move\|reorder\|done\|remove) |
 
-CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`, `roadmap` (show/add/update/move/reorder/done/remove). Browse with `ls items`, `ls kb`, `ls plans`, `ls projects`.
+Cross-reference edges (`blocks`\|`relates`\|`explains`, item/kb endpoints) are not a 6th tool — they fold into the existing surface: `backlog` write entries[].edges[] (inline, primary path), `kb` write `[[Title]]` autolinks, `get` verbose=true edges sidecar. CLI `link`/`unlink`/`ls edges` are for retrofits. Epic membership stays a scalar field (`items.epic`), not an edge.
+
+CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`, `roadmap` (show/add/update/move/reorder/done/remove), `link`/`unlink` (edges). Browse with `ls items`, `ls kb`, `ls plans`, `ls projects`, `ls edges`.
 
 ## Configuration
 
@@ -52,7 +55,7 @@ CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/d
 
 ## Storage
 
-SQLite with WAL mode. Schema managed by versioned migrations. Tables: documents (KB), documents_fts (FTS5), projects, items, plans, config, schema_migrations.
+SQLite with WAL mode. Schema managed by versioned migrations. Tables: documents (KB), documents_fts (FTS5), projects, items, plans, edges (cross-reference graph, app-level integrity — no FK across the type-erased endpoint columns), config, schema_migrations.
 
 Default DB path: `~/.local/share/ouroboros/kb.db`
 

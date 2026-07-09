@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
@@ -29,6 +30,69 @@ func TestKBDeleteHappyPath(t *testing.T) {
 	doc, err := store.GetDocument(db, result.ID)
 	require.NoError(t, err)
 	assert.Nil(t, doc)
+}
+
+func TestKBDeleteCascadesEdges(t *testing.T) {
+	db := newTestDB(t)
+	result, err := store.UpsertDocument(db, store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+	})
+	require.NoError(t, err)
+	docID := fmt.Sprintf("%d", result.ID)
+
+	other, err := store.UpsertDocument(db, store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "Related note",
+	})
+	require.NoError(t, err)
+
+	_, err = edges.Link(db, edges.TypeKB, docID, "relates", edges.TypeKB, fmt.Sprintf("%d", other.ID), 0)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, runKBDelete(&buf, db, docID))
+
+	remaining, err := edges.EdgesFor(db, edges.TypeKB, fmt.Sprintf("%d", other.ID))
+	require.NoError(t, err)
+	assert.Empty(t, remaining, "deleting a kb doc must cascade-remove edges referencing it")
+}
+
+// TestKBDeleteCascadeIsAtomic proves the doc delete + edge cascade run in
+// one tx (both or neither): injecting a failure at the cascade step (an
+// invalid edge type — CascadeDelete's own validation) and rolling back must
+// leave the document delete un-committed too. This exercises exactly the
+// tx-based mechanism runKBDelete uses internally (DeleteDocumentTx +
+// CascadeDelete on one *sql.Tx), just with a deliberately-invalid second
+// call standing in for a real (untestable-without-fault-injection) DB
+// error, since production code always calls CascadeDelete with the valid
+// edges.TypeKB constant.
+func TestKBDeleteCascadeIsAtomic(t *testing.T) {
+	db := newTestDB(t)
+	result, err := store.UpsertDocument(db, store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Use PostgreSQL",
+	})
+	require.NoError(t, err)
+	docID := fmt.Sprintf("%d", result.ID)
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+
+	require.NoError(t, store.DeleteDocumentTx(tx, result.ID))
+
+	_, err = edges.CascadeDelete(tx, "bogus-type", docID)
+	require.Error(t, err, "cascade must fail on an invalid edge type")
+	require.NoError(t, tx.Rollback())
+
+	// The doc delete did not survive without its cascade completing —
+	// atomic, not partial.
+	doc, err := store.GetDocument(db, result.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, doc, "a failed cascade must roll back the whole delete")
 }
 
 func TestKBDeleteNonexistent(t *testing.T) {

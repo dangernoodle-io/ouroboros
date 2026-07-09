@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
@@ -16,6 +17,21 @@ const (
 
 // validItemStatuses is the allowed set for item status updates.
 var validItemStatuses = map[string]bool{"open": true, "done": true}
+
+// Executor is satisfied by both *sql.DB and *sql.Tx, letting the core
+// item-write/read logic run standalone or participate in a caller-owned
+// transaction (e.g. an item write plus its inline edge links committing
+// atomically — see internal/app.handleBacklog).
+//
+// Intentionally parallel to internal/edges.Executor rather than a shared
+// type: two tiny package-scoped 3-method interfaces don't justify the
+// cross-package coupling a shared home would add. Revisit if a third
+// package needs the same shape.
+type Executor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
 
 type Item struct {
 	ID        string `json:"id"`
@@ -34,7 +50,10 @@ type Item struct {
 	Updated     string `json:"updated"`
 }
 
-func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, notes, component, epic string) (*Item, error) {
+// addItemExec contains the core item-creation logic (seq compute + insert),
+// operating on any Executor (db or tx). Callers own the transaction
+// boundary (see AddItem / AddItemTx).
+func addItemExec(ex Executor, projectID int64, prefix, priority, title, description, notes, component, epic string) (*Item, error) {
 	if len(description) > MaxItemDescBytes {
 		return nil, fmt.Errorf("description exceeds %d byte cap (got %d)", MaxItemDescBytes, len(description))
 	}
@@ -42,14 +61,8 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 		return nil, fmt.Errorf("notes exceeds %d byte cap (got %d)", MaxItemNotesBytes, len(notes))
 	}
 
-	tx, err := d.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback() //nolint:errcheck
-
 	var seq int64
-	err = tx.QueryRow("SELECT COALESCE(MAX(seq), 0) + 1 FROM items WHERE project_id = ?", projectID).Scan(&seq)
+	err := ex.QueryRow("SELECT COALESCE(MAX(seq), 0) + 1 FROM items WHERE project_id = ?", projectID).Scan(&seq)
 	if err != nil {
 		return nil, err
 	}
@@ -57,16 +70,12 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 	id := fmt.Sprintf("%s-%d", prefix, seq)
 	now := nowRFC3339()
 
-	_, err = tx.Exec(
+	_, err = ex.Exec(
 		"INSERT INTO items (id, project_id, seq, priority, title, description, notes, component, epic, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
 		id, projectID, seq, priority, title, description, notes, component, epic, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("add item: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 
 	return &Item{
@@ -76,9 +85,37 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 	}, nil
 }
 
-func getItemDirect(d *sql.DB, id string) (*Item, error) {
+// AddItem inserts a new item, computing its sequence number within its own
+// (self-managed) transaction.
+func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, notes, component, epic string) (*Item, error) {
+	tx, err := d.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	item, err := addItemExec(tx, projectID, prefix, priority, title, description, notes, component, epic)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return item, nil
+}
+
+// AddItemTx is AddItem scoped to an existing transaction, for callers that
+// need item creation plus subsequent operations (e.g. inline edge links) to
+// commit atomically. The caller owns commit/rollback.
+func AddItemTx(tx *sql.Tx, projectID int64, prefix, priority, title, description, notes, component, epic string) (*Item, error) {
+	return addItemExec(tx, projectID, prefix, priority, title, description, notes, component, epic)
+}
+
+func getItemDirect(ex Executor, id string) (*Item, error) {
 	var item Item
-	err := d.QueryRow(
+	err := ex.QueryRow(
 		"SELECT id, project_id, priority, title, component, epic, description, notes, status, created, updated FROM items WHERE id = ?", id,
 	).Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Component, &item.Epic, &item.Description, &item.Notes, &item.Status, &item.Created, &item.Updated)
 	if err == sql.ErrNoRows {
@@ -90,8 +127,12 @@ func getItemDirect(d *sql.DB, id string) (*Item, error) {
 	return &item, nil
 }
 
-func GetItem(d *sql.DB, id string) (*Item, error) {
-	item, err := getItemDirect(d, id)
+// GetItem fetches an item by id, following one hop of item_id_aliases on a
+// miss. Accepts Executor so callers already inside a transaction (e.g. an
+// inline edge target-existence check) can reuse it without a second
+// connection.
+func GetItem(ex Executor, id string) (*Item, error) {
+	item, err := getItemDirect(ex, id)
 	if err == nil {
 		return item, nil
 	}
@@ -101,10 +142,10 @@ func GetItem(d *sql.DB, id string) (*Item, error) {
 	}
 	// ON UPDATE CASCADE keeps alias rows pointing at current IDs, so one level of indirection is sufficient.
 	var resolved string
-	if aerr := d.QueryRow("SELECT new_id FROM item_id_aliases WHERE old_id = ?", id).Scan(&resolved); aerr != nil {
+	if aerr := ex.QueryRow("SELECT new_id FROM item_id_aliases WHERE old_id = ?", id).Scan(&resolved); aerr != nil {
 		return nil, err // return original not-found
 	}
-	return getItemDirect(d, resolved)
+	return getItemDirect(ex, resolved)
 }
 
 // GetItemsByIDs fetches items by id in a single batched query (no
@@ -174,7 +215,10 @@ func EpicLabels(d *sql.DB, ids []string) map[string]string {
 	return labels
 }
 
-func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
+// updateItemExec contains the core field-update logic, operating on any
+// Executor (db or tx). Callers own the transaction boundary (see UpdateItem
+// / UpdateItemTx).
+func updateItemExec(ex Executor, id string, fields map[string]string) (*Item, error) {
 	allowed := map[string]bool{"priority": true, "title": true, "description": true, "notes": true, "status": true, "component": true, "epic": true}
 
 	var sets []string
@@ -196,7 +240,7 @@ func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
 		args = append(args, v)
 	}
 	if len(sets) == 0 {
-		return GetItem(d, id)
+		return GetItem(ex, id)
 	}
 
 	now := nowRFC3339()
@@ -204,11 +248,24 @@ func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
 	args = append(args, now)
 	args = append(args, id)
 
-	_, err := d.Exec("UPDATE items SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...)
+	_, err := ex.Exec("UPDATE items SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...)
 	if err != nil {
 		return nil, fmt.Errorf("update item: %w", err)
 	}
-	return GetItem(d, id)
+	return GetItem(ex, id)
+}
+
+// UpdateItem patches an item's fields via a single statement (no explicit
+// transaction needed — the update is already atomic).
+func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
+	return updateItemExec(d, id, fields)
+}
+
+// UpdateItemTx is UpdateItem scoped to an existing transaction, for callers
+// that need the field update plus subsequent operations (e.g. inline edge
+// links) to commit atomically. The caller owns commit/rollback.
+func UpdateItemTx(tx *sql.Tx, id string, fields map[string]string) (*Item, error) {
+	return updateItemExec(tx, id, fields)
 }
 
 func MarkDone(d *sql.DB, id string) error {
@@ -224,10 +281,19 @@ func MarkDone(d *sql.DB, id string) error {
 	return nil
 }
 
+// DeleteItems deletes items by id, cascading edge cleanup so a deleted item
+// never leaves an orphaned edge (source or target) behind. Runs in a single
+// transaction: item rows and their edges are removed together.
 func DeleteItems(d *sql.DB, ids []string) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
+
+	tx, err := d.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback() //nolint:errcheck
 
 	placeholders := make([]string, len(ids))
 	args := make([]interface{}, len(ids))
@@ -236,11 +302,27 @@ func DeleteItems(d *sql.DB, ids []string) (int64, error) {
 		args[i] = id
 	}
 
-	result, err := d.Exec("DELETE FROM items WHERE id IN ("+strings.Join(placeholders, ",")+") ", args...)
+	result, err := tx.Exec("DELETE FROM items WHERE id IN ("+strings.Join(placeholders, ",")+") ", args...)
 	if err != nil {
 		return 0, fmt.Errorf("delete items: %w", err)
 	}
-	return result.RowsAffected()
+
+	for _, id := range ids {
+		if _, err := edges.CascadeDelete(tx, edges.TypeItem, id); err != nil {
+			return 0, fmt.Errorf("delete items: cascade cleanup: %w", err)
+		}
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return affected, nil
 }
 
 type ItemFilter struct {

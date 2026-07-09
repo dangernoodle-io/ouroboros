@@ -34,6 +34,8 @@ func resetDB(t *testing.T) {
 	t.Helper()
 	_, err := db.Exec("DELETE FROM documents")
 	require.NoError(t, err)
+	_, err = db.Exec("DELETE FROM edges")
+	require.NoError(t, err)
 	require.NoError(t, store.RebuildFTS(db))
 }
 

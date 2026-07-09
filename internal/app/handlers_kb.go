@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"database/sql"
+	"strconv"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/kb"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -92,6 +94,13 @@ func handleGet(db *sql.DB) server.ToolHandlerFunc {
 	}
 }
 
+// docWithEdges wraps a KB document with its edges sidecar, only populated
+// on verbose=true reads (see getDocuments).
+type docWithEdges struct {
+	*store.Document
+	Edges []edges.Edge `json:"edges,omitempty"`
+}
+
 // getDocuments handles domain=kb reads: ids[] fetch, or filters list.
 func getDocuments(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// If ids provided, return full documents (omit misses)
@@ -112,10 +121,17 @@ func getDocuments(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, err
 
 			if !verbose {
 				doc.Notes = ""
+				doc.SessionID = ""
+				docs = append(docs, doc)
+				continue
 			}
 			doc.SessionID = ""
 
-			docs = append(docs, doc)
+			edgeList, err := edges.EdgesFor(db, edges.TypeKB, strconv.FormatInt(doc.ID, 10))
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			docs = append(docs, docWithEdges{Document: doc, Edges: edgeList})
 		}
 
 		return jsonResult(docs)
