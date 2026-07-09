@@ -47,6 +47,7 @@ func init() {
 	rootCmd.AddCommand(roadmapCmd)
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(unlinkCmd)
+	rootCmd.AddCommand(dashboardCmd)
 }
 
 // Execute runs the root command.
