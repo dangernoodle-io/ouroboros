@@ -65,7 +65,7 @@ async function main() {
     });
     if (nudge) {
       process.stdout.write(JSON.stringify(nudge) + '\n');
-      process.exit(2);
+      process.exit(0);
     }
 
     // Default: exit silently (exploratory output)

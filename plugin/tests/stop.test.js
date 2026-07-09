@@ -124,7 +124,7 @@ test('stop: kb block with malformed JSON → logs parse error, does NOT fall thr
   assert(!result.stderr.includes('persisted'));
 });
 
-test('stop: no kb block + tier-2 self-claim → exit 2, decision:block on stdout', () => {
+test('stop: no kb block + tier-2 self-claim → exit 0, decision:block on stdout (not a hook error)', () => {
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-tier2-clean-'));
   try {
     const transcript = writeTranscript([{
@@ -138,7 +138,7 @@ test('stop: no kb block + tier-2 self-claim → exit 2, decision:block on stdout
       env: envVars,
       cwd: path.join(__dirname, '..'),
     });
-    assert.strictEqual(result.status, 2);
+    assert.strictEqual(result.status, 0);
     const decision = JSON.parse(result.stdout.trim());
     assert.strictEqual(decision.decision, 'block');
     assert.match(decision.reason, /tier-2 self-claim/);
@@ -147,7 +147,7 @@ test('stop: no kb block + tier-2 self-claim → exit 2, decision:block on stdout
   }
 });
 
-test('stop: no kb block + tier-1 decision language → exit 2, decision:block on stdout', () => {
+test('stop: no kb block + tier-1 decision language → exit 0, decision:block on stdout (not a hook error)', () => {
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-tier1-clean-'));
   try {
     const transcript = writeTranscript([{
@@ -161,7 +161,7 @@ test('stop: no kb block + tier-1 decision language → exit 2, decision:block on
       env: envVars,
       cwd: path.join(__dirname, '..'),
     });
-    assert.strictEqual(result.status, 2);
+    assert.strictEqual(result.status, 0);
     const decision = JSON.parse(result.stdout.trim());
     assert.strictEqual(decision.decision, 'block');
     assert.match(decision.reason, /tier-1 nudge fired/);

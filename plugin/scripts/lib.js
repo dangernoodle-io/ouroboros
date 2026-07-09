@@ -173,8 +173,10 @@ const DECISION_PATTERNS = [
 
 // checkNudgePatterns runs the tier-2 and tier-1 checks on a message and returns
 // a {decision, reason} object if either fires, or null if neither matches. The
-// caller is responsible for writing the result to stdout and exiting 2. Logs the
-// nudge event as a side effect when matched.
+// caller is responsible for writing the result to stdout and exiting 0 (the
+// Stop-hook exit-0 JSON decision protocol: {decision:"block"} on stdout blocks
+// the stop and surfaces reason, without being flagged as a hook error). Logs
+// the nudge event as a side effect when matched.
 function checkNudgePatterns(message, ctx) {
   const { label, idShort, sessionId, project, hookName } = ctx;
   if (matchesAnyPattern(message, ALREADY_PERSISTED_PATTERNS)) {
