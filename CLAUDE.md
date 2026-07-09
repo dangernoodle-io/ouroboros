@@ -41,7 +41,7 @@ MCP surface is intentionally narrow (5 tools); operator-style ops are CLI-only. 
 
 Cross-reference edges (`blocks`\|`relates`\|`explains`, item/kb endpoints) are not a 6th tool — they fold into the existing surface: `backlog` write entries[].edges[] (inline, primary path), `kb` write `[[Title]]` autolinks, `get` verbose=true edges sidecar. CLI `link`/`unlink`/`ls edges` are for retrofits. Epic membership stays a scalar field (`items.epic`), not an edge.
 
-CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`, `roadmap` (show/add/update/move/reorder/done/remove), `link`/`unlink` (edges). Browse with `ls items`, `ls kb`, `ls plans`, `ls projects`, `ls edges`.
+CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`, `roadmap` (show/add/update/move/reorder/done/remove/seed), `link`/`unlink` (edges). Browse with `ls items`, `ls kb`, `ls plans`, `ls projects`, `ls edges`.
 
 ## Configuration
 

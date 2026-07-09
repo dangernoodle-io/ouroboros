@@ -415,6 +415,98 @@ func runRoadmapRemove(w io.Writer, db *sql.DB, project string, id int) error {
 	return nil
 }
 
+// seed
+
+var (
+	roadmapSeedBacklog   bool
+	roadmapSeedPriority  string
+	roadmapSeedComponent string
+	roadmapSeedStatus    string
+	roadmapSeedReplace   bool
+)
+
+var roadmapSeedCmd = &cobra.Command{
+	Use:   "seed <project>",
+	Short: "Seed the roadmap from filtered backlog items",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !roadmapSeedBacklog {
+			return errors.New("roadmap seed: --backlog is required")
+		}
+		return withDB(func(db *sql.DB) error {
+			return runRoadmapSeed(cmd.OutOrStdout(), db, args[0], roadmapSeedPriority, roadmapSeedComponent, roadmapSeedStatus, roadmapSeedReplace)
+		})
+	},
+}
+
+// validSeedStatuses mirrors backlog's allowed item statuses (unexported
+// there); kept local rather than exporting a single map across the package
+// boundary for one caller.
+var validSeedStatuses = map[string]bool{"open": true, "done": true}
+
+// maxPriorityNum parses a "P<n>" max-priority flag into n, erroring on a
+// malformed value (empty is allowed — means "no priority cap").
+func maxPriorityNum(priority string) (int, error) {
+	priority = strings.TrimSpace(priority)
+	if priority == "" {
+		return 0, nil
+	}
+	if len(priority) < 2 || (priority[0] != 'P' && priority[0] != 'p') {
+		return 0, fmt.Errorf("invalid --priority %q: want P0..P6", priority)
+	}
+	n, err := strconv.Atoi(priority[1:])
+	if err != nil {
+		return 0, fmt.Errorf("invalid --priority %q: want P0..P6", priority)
+	}
+	return n, nil
+}
+
+func runRoadmapSeed(w io.Writer, db *sql.DB, project, maxPriority, component, status string, replace bool) error {
+	proj, err := backlog.GetProjectByName(db, project)
+	if err != nil {
+		return fmt.Errorf("roadmap seed: %w", err)
+	}
+	if proj == nil {
+		return fmt.Errorf("roadmap seed: project %q not found", project)
+	}
+	if status == "" {
+		status = "open"
+	}
+	if !validSeedStatuses[status] {
+		return fmt.Errorf("roadmap seed: invalid --status %q: must be one of open, done", status)
+	}
+
+	filter := backlog.ItemFilter{ProjectIDs: []int64{proj.ID}, Status: &status, Limit: 500}
+	if component != "" {
+		filter.Component = &component
+	}
+	if maxPriority != "" {
+		n, err := maxPriorityNum(maxPriority)
+		if err != nil {
+			return fmt.Errorf("roadmap seed: %w", err)
+		}
+		filter.PriorityMax = &n
+	}
+
+	items, err := backlog.ListItems(db, filter)
+	if err != nil {
+		return fmt.Errorf("roadmap seed: list backlog: %w", err)
+	}
+
+	var res roadmap.SeedResult
+	err = roadmap.Mutate(db, project, func(rm *roadmap.Roadmap) error {
+		var seedErr error
+		res, seedErr = roadmap.Seed(rm, items, replace)
+		return seedErr
+	})
+	if err != nil {
+		return fmt.Errorf("roadmap seed: %w", err)
+	}
+
+	fmt.Fprintf(w, "seeded %s: added %d, skipped %d, replaced %d\n", project, res.Added, res.Skipped, res.Replaced)
+	return nil
+}
+
 const roadmapSectionsHelp = "now, next, deferred, parked, dropped, or done"
 
 func init() {
@@ -450,6 +542,12 @@ func init() {
 	roadmapShowCmd.Flags().StringVar(&roadmapShowComponent, "component", "", "Filter by component")
 	roadmapShowCmd.Flags().StringVar(&roadmapShowEpic, "epic", "", "Filter by epic backlog item id")
 
+	roadmapSeedCmd.Flags().BoolVar(&roadmapSeedBacklog, "backlog", false, "Seed from backlog items (required)")
+	roadmapSeedCmd.Flags().StringVar(&roadmapSeedPriority, "priority", "", "Max priority to include, e.g. P2 includes P0-P2 (cap, not exact match like ls items --priority; default: no cap)")
+	roadmapSeedCmd.Flags().StringVar(&roadmapSeedComponent, "component", "", "Filter by component")
+	roadmapSeedCmd.Flags().StringVar(&roadmapSeedStatus, "status", "open", "Backlog status filter: open or done")
+	roadmapSeedCmd.Flags().BoolVar(&roadmapSeedReplace, "replace", false, "Re-sync already-seeded items instead of skipping them")
+
 	roadmapCmd.AddCommand(roadmapShowCmd)
 	roadmapCmd.AddCommand(roadmapAddCmd)
 	roadmapCmd.AddCommand(roadmapUpdateCmd)
@@ -457,4 +555,5 @@ func init() {
 	roadmapCmd.AddCommand(roadmapReorderCmd)
 	roadmapCmd.AddCommand(roadmapDoneCmd)
 	roadmapCmd.AddCommand(roadmapRemoveCmd)
+	roadmapCmd.AddCommand(roadmapSeedCmd)
 }
