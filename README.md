@@ -70,7 +70,7 @@ This gives you the 10 MCP tools but none of the auto-context injection or persis
 
 ## Browse with `ls` and `roadmap show`
 
-When you're not using the MCP server, the `ls` subcommands provide a read-only CLI for browsing. All commands support tabular output and `--json` for scripting. The `roadmap show` command renders a per-project roadmap as Markdown.
+When you're not using the MCP server, the `ls` subcommands provide a read-only CLI for browsing. All commands support tabular output and `--json` for scripting. The `roadmap show` command renders a per-project roadmap as Markdown, or as a rich self-contained HTML fragment with `--html`.
 
 ```bash
 ouroboros ls projects                              # list all projects
@@ -80,11 +80,12 @@ ouroboros ls kb --search caching                   # search knowledge base
 ouroboros ls kb 42 --json                          # fetch document as JSON
 ouroboros ls plans --status active                 # list active plans
 ouroboros roadmap show acme-corp --by epic          # print roadmap grouped by epic
+ouroboros roadmap show acme-corp --html -o rm.html  # render a standalone HTML file
 ouroboros link item:BB-9 blocks item:TM-40          # create a cross-reference edge
 ouroboros ls edges --label blocks                   # list edges
 ```
 
-Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6, exact match), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. `ls edges`: `--label`, `--type item|kb` + `--id` (together). All subcommands: `--json`. Roadmap: `show` (`--by component|epic`, `--component`, `--epic`), `add`, `update`, `move`, `reorder`, `done`, `remove`, `seed` (`--backlog`, `--priority` — max cap, e.g. `P2` includes P0-P2, unlike `ls items --priority`'s exact match — `--component`, `--status`, `--replace` — resyncs only the current fetch's matches, leaving previously-seeded items outside the filter untouched) — see `ouroboros roadmap --help`. Edges: `link <src> <label> <dst>` / `unlink <src> <label> <dst>` where src/dst are `item:<id>` or `kb:<id>`.
+Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6, exact match), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. `ls edges`: `--label`, `--type item|kb` + `--id` (together). All subcommands: `--json`. Roadmap: `show` (`--by component|epic`, `--component`, `--epic`, `--html` for a self-contained HTML fragment/standalone doc instead of Markdown, `--output`/`-o <file>` to write it — without `-o` the bare embeddable fragment prints to stdout, with `-o` it's wrapped in a minimal standalone `<!doctype html>` document), `add`, `update`, `move`, `reorder`, `done`, `remove`, `seed` (`--backlog`, `--priority` — max cap, e.g. `P2` includes P0-P2, unlike `ls items --priority`'s exact match — `--component`, `--status`, `--replace` — resyncs only the current fetch's matches, leaving previously-seeded items outside the filter untouched) — see `ouroboros roadmap --help`. Edges: `link <src> <label> <dst>` / `unlink <src> <label> <dst>` where src/dst are `item:<id>` or `kb:<id>`.
 
 ## Configuration
 

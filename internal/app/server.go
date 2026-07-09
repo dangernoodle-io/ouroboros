@@ -21,8 +21,8 @@ const (
 	descStatus         = "open or done (backlog only)"
 	descComponent      = "Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)"
 	descEpic           = "Epic backlog item id filter (roadmap only; single-valued — an epic IS a backlog item, see the EPIC: convention)"
-	descRoadmapBy      = `Markdown grouping axis: "component" (default) or "epic"; the other axis renders as an inline chip (roadmap get format=md only)`
-	descFormat         = "structured or md, default structured (roadmap only)"
+	descRoadmapBy      = `Grouping axis: "component" (default) or "epic"; the other axis renders as an inline chip (roadmap get format=md|html only)`
+	descFormat         = "structured, md, or html, default structured (roadmap only)"
 	descRoadmapOp      = `Required: "add", "update", "move", "reorder", "done", or "remove"`
 	descRoadmapProject = "Project name (roadmap singleton)"
 	descRoadmapSection = "now|next|deferred|parked|dropped|done"
@@ -33,7 +33,7 @@ get/search are reads (required domain: kb|backlog|roadmap); kb/backlog/roadmap a
 
 - Search before writing — avoid duplicates; kb upserts by type+project+category+title when id is absent, or updates in place when id is present (use this to retitle).
 - Default response is summary; verbose=true only when full content/notes are needed.
-- roadmap is a per-project singleton (now/next/deferred/parked/dropped/done sections); items carry two single-valued grouping axes, component and epic (an epic is a backlog item); get format=md&by=component|epic renders Markdown grouped on that axis, filterable by component/epic.
+- roadmap is a per-project singleton (now/next/deferred/parked/dropped/done sections); items carry two single-valued grouping axes, component and epic (an epic is a backlog item); get format=md|html&by=component|epic renders Markdown/HTML grouped on that axis, filterable by component/epic.
 - Edges (blocks/relates/explains) link items/kb docs: backlog entries[].edges[] creates them inline at write time; kb content [[Title]] autolinks; get verbose=true surfaces an edges sidecar; CLI link/unlink/ls edges for retrofits.
 - Checkpoint after multi-step tasks; persist non-obvious decisions, update or delete stale ones.`
 
