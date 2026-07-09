@@ -12,7 +12,7 @@
             "type": "array"
           },
           "entries": {
-            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, status?",
+            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?",
             "type": "array"
           }
         },
@@ -28,6 +28,10 @@
       "description": "Fetch entries by ID or filters (required domain: kb|backlog). ids[] returns exact matches; omit ids for a filtered list.",
       "inputSchema": {
         "properties": {
+          "by": {
+            "description": "Markdown grouping axis: \"component\" (default) or \"epic\"; the other axis renders as an inline chip (roadmap get format=md only)",
+            "type": "string"
+          },
           "categories": {
             "description": "Filter by categories (kb only)",
             "items": {
@@ -36,11 +40,15 @@
             "type": "array"
           },
           "component": {
-            "description": "Component tag (subproject/plugin) filter (backlog only)",
+            "description": "Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)",
             "type": "string"
           },
           "domain": {
             "description": "Required: \"kb\", \"backlog\", or \"roadmap\"",
+            "type": "string"
+          },
+          "epic": {
+            "description": "Epic backlog item id filter (roadmap only; single-valued — an epic IS a backlog item, see the EPIC: convention)",
             "type": "string"
           },
           "format": {
@@ -121,7 +129,7 @@
       "annotations": {
         "destructiveHint": true
       },
-      "description": "Mutate the per-project roadmap singleton (now/next/parked/done lanes) via op=add|update|move|done|remove. Reads live under get/search domain=roadmap.",
+      "description": "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done sections) via op=add|update|move|reorder|done|remove. Items carry two single-valued grouping axes: component (structural) and epic (optional; an epic IS a backlog item). Reads live under get/search domain=roadmap.",
       "inputSchema": {
         "properties": {
           "blocked_by": {
@@ -133,11 +141,15 @@
             "type": "string"
           },
           "component": {
-            "description": "Component tag (add/update)",
+            "description": "Component tag, single-valued (add/update)",
+            "type": "string"
+          },
+          "epic": {
+            "description": "Epic backlog item id, single-valued (add/update)",
             "type": "string"
           },
           "id": {
-            "description": "Item ID (update/move/done/remove)",
+            "description": "Item ID (update/move/reorder/done/remove)",
             "type": "number"
           },
           "kb": {
@@ -145,8 +157,12 @@
             "type": "array"
           },
           "op": {
-            "description": "Required: \"add\", \"update\", \"move\", \"done\", or \"remove\"",
+            "description": "Required: \"add\", \"update\", \"move\", \"reorder\", \"done\", or \"remove\"",
             "type": "string"
+          },
+          "position": {
+            "description": "Sort position within the section (add/move/reorder; required for reorder)",
+            "type": "number"
           },
           "project": {
             "description": "Project name (roadmap singleton)",
@@ -157,7 +173,7 @@
             "type": "string"
           },
           "section": {
-            "description": "now|next|parked|done (add only)",
+            "description": "now|next|deferred|parked|dropped|done (add only)",
             "type": "string"
           },
           "ticket": {
@@ -169,7 +185,7 @@
             "type": "string"
           },
           "to": {
-            "description": "now|next|parked|done (move only)",
+            "description": "now|next|deferred|parked|dropped|done (move only)",
             "type": "string"
           },
           "why": {
@@ -200,7 +216,7 @@
             "type": "array"
           },
           "component": {
-            "description": "Component tag (subproject/plugin) filter (backlog only)",
+            "description": "Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)",
             "type": "string"
           },
           "domain": {

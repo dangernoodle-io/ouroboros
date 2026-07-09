@@ -49,7 +49,7 @@ func TestRunPlanCreateWithItemID(t *testing.T) {
 	db := newTestDB(t)
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer

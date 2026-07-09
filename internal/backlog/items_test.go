@@ -22,7 +22,7 @@ func TestAddItem(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "test description", "", "")
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "test description", "", "", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "AC-1", item.ID)
@@ -35,19 +35,135 @@ func TestAddItem(t *testing.T) {
 	assert.NotEmpty(t, item.Updated)
 }
 
+func TestAddItemWithEpic(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "child item", "", "", "widget", "AC-1")
+	require.NoError(t, err)
+	assert.Equal(t, "AC-1", item.Epic)
+
+	fetched, err := backlog.GetItem(d, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "AC-1", fetched.Epic)
+}
+
+func TestUpdateItemEpic(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "", "")
+	require.NoError(t, err)
+	assert.Empty(t, item.Epic)
+
+	updated, err := backlog.UpdateItem(d, item.ID, map[string]string{"epic": "AC-9"})
+	require.NoError(t, err)
+	assert.Equal(t, "AC-9", updated.Epic)
+}
+
+func TestListItemsSurfacesEpic(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "child item", "", "", "", "AC-1")
+	require.NoError(t, err)
+
+	items, err := backlog.ListItems(d, backlog.ItemFilter{ProjectIDs: []int64{p.ID}})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "AC-1", items[0].Epic)
+}
+
+func TestSearchItemsSurfacesEpic(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "findableepictitle", "", "", "", "AC-1")
+	require.NoError(t, err)
+
+	items, err := backlog.SearchItems(d, "findableepictitle", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "AC-1", items[0].Epic)
+}
+
+func TestGetItemsByIDsBatchesInOneQuery(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item1, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: one", "", "", "", "")
+	require.NoError(t, err)
+	item2, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: two", "", "", "", "")
+	require.NoError(t, err)
+
+	items, err := backlog.GetItemsByIDs(d, []string{item1.ID, item2.ID, "AC-999"})
+	require.NoError(t, err)
+	require.Len(t, items, 2, "a missing id is simply omitted, not an error")
+
+	byID := map[string]backlog.Item{}
+	for _, it := range items {
+		byID[it.ID] = it
+	}
+	assert.Equal(t, "EPIC: one", byID[item1.ID].Title)
+	assert.Equal(t, "EPIC: two", byID[item2.ID].Title)
+}
+
+func TestGetItemsByIDsEmpty(t *testing.T) {
+	d := testDB(t)
+	items, err := backlog.GetItemsByIDs(d, nil)
+	require.NoError(t, err)
+	assert.Empty(t, items)
+}
+
+func TestEpicLabelsStripsPrefixAndFallsBackOnMiss(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: WiFi map", "", "", "", "")
+	require.NoError(t, err)
+
+	labels := backlog.EpicLabels(d, []string{item.ID, "AC-999"})
+	assert.Equal(t, "WiFi map", labels[item.ID])
+	_, missing := labels["AC-999"]
+	assert.False(t, missing, "an id with no matching item is simply omitted")
+}
+
+func TestEpicLabelsEmpty(t *testing.T) {
+	d := testDB(t)
+	assert.Empty(t, backlog.EpicLabels(d, nil))
+}
+
+// TestEpicLabelsResolvesRenamedEpicViaAliasFallback verifies the rare
+// renamed-epic path: an id missed by the batched query still resolves via
+// the per-id GetItem alias fallback.
+func TestEpicLabelsResolvesRenamedEpicViaAliasFallback(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: renamed", "", "", "", "")
+	require.NoError(t, err)
+
+	_, err = d.Exec("INSERT INTO item_id_aliases (old_id, new_id, renamed_at) VALUES (?, ?, ?)",
+		"OLD-1", item.ID, "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	labels := backlog.EpicLabels(d, []string{"OLD-1"})
+	assert.Equal(t, "renamed", labels["OLD-1"], "keyed by the requested (old) id, not the resolved current id")
+}
+
 func TestAddItemSequence(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item1, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	item1, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "AC-1", item1.ID)
 
-	item2, err := backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
+	item2, err := backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "AC-2", item2.ID)
 
-	item3, err := backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "")
+	item3, err := backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "AC-3", item3.ID)
 }
@@ -56,7 +172,7 @@ func TestGetItem(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	created, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "desc", "", "")
+	created, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "desc", "", "", "")
 	require.NoError(t, err)
 
 	item, err := backlog.GetItem(d, "AC-1")
@@ -78,7 +194,7 @@ func TestUpdateItem(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "old-title", "old-desc", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "old-title", "old-desc", "", "", "")
 	require.NoError(t, err)
 
 	updated, err := backlog.UpdateItem(d, "AC-1", map[string]string{
@@ -96,7 +212,7 @@ func TestMarkDone(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "", "")
 	require.NoError(t, err)
 
 	err = backlog.MarkDone(d, "AC-1")
@@ -118,10 +234,10 @@ func TestListItems(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "", "")
 	require.NoError(t, err)
 
 	items, err := backlog.ListItems(d, backlog.ItemFilter{})
@@ -135,7 +251,7 @@ func TestListItemsWithLimit(t *testing.T) {
 	p := createTestProject(t, d)
 
 	for i := 1; i <= 5; i++ {
-		_, err := backlog.AddItem(d, p.ID, "AC", "P3", fmt.Sprintf("item%d", i), "", "", "")
+		_, err := backlog.AddItem(d, p.ID, "AC", "P3", fmt.Sprintf("item%d", i), "", "", "", "")
 		require.NoError(t, err)
 	}
 
@@ -151,10 +267,10 @@ func TestListItemsFilterProject(t *testing.T) {
 	p2, err := backlog.CreateProject(d, "other-corp", "OC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item1", "", "", "")
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "item2", "", "", "", "")
 	require.NoError(t, err)
 
 	items, err := backlog.ListItems(d, backlog.ItemFilter{ProjectIDs: []int64{p1.ID}})
@@ -172,11 +288,11 @@ func TestListItemsFilterMultiProject(t *testing.T) {
 	p3, err := backlog.CreateProject(d, "third-corp", "TC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item1", "", "", "")
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "item2", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, p3.ID, "TC", "P1", "item3", "", "", "")
+	_, err = backlog.AddItem(d, p3.ID, "TC", "P1", "item3", "", "", "", "")
 	require.NoError(t, err)
 
 	items, err := backlog.ListItems(d, backlog.ItemFilter{ProjectIDs: []int64{p1.ID, p2.ID}})
@@ -188,10 +304,10 @@ func TestDeleteItemsSingle(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "", "")
 	require.NoError(t, err)
 
 	affected, err := backlog.DeleteItems(d, []string{"AC-1"})
@@ -210,13 +326,13 @@ func TestDeleteItemsMultiple(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "", "")
 	require.NoError(t, err)
 
 	affected, err := backlog.DeleteItems(d, []string{"AC-1", "AC-2"})
@@ -240,7 +356,7 @@ func TestDeleteItemsMixed(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
 
 	affected, err := backlog.DeleteItems(d, []string{"AC-1", "NONEXISTENT"})
@@ -260,13 +376,13 @@ func TestListItemsFilterPriority(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "", "")
 	require.NoError(t, err)
 
 	minPriority := 2
@@ -282,10 +398,10 @@ func TestListItemsFilterStatus(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "", "")
 	require.NoError(t, err)
 
 	err = backlog.MarkDone(d, "AC-1")
@@ -303,7 +419,7 @@ func TestAddItemWithComponent(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "desc", "", "ouroboros-mcp")
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "test-item", "desc", "", "ouroboros-mcp", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, "ouroboros-mcp", item.Component)
@@ -319,13 +435,13 @@ func TestListItemsFilterComponent(t *testing.T) {
 	p := createTestProject(t, d)
 
 	// Seed 3 items across 2 components
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "plugin-a")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "plugin-a", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "plugin-b")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "plugin-b", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "plugin-a")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P3", "item3", "", "", "plugin-a", "")
 	require.NoError(t, err)
 
 	// Filter to plugin-a
@@ -342,7 +458,7 @@ func TestUpdateItemComponent(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "plugin-a")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "plugin-a", "")
 	require.NoError(t, err)
 
 	updated, err := backlog.UpdateItem(d, "AC-1", map[string]string{
@@ -357,16 +473,16 @@ func TestCountItemsByPriority(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P0", "item1", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P0", "item1", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P1", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P1", "item2", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P1", "item3", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P1", "item3", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item4", "", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item4", "", "", "", "")
 	require.NoError(t, err)
 
 	status := "open"
@@ -388,16 +504,16 @@ func TestCountItemsByPriorityFiltered(t *testing.T) {
 	p2, err := backlog.CreateProject(d, "test-project", "TP")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p1.ID, "AC", "P0", "item1", "", "", "")
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P0", "item1", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item2", "", "", "")
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "item2", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p2.ID, "TP", "P0", "item3", "", "", "")
+	_, err = backlog.AddItem(d, p2.ID, "TP", "P0", "item3", "", "", "", "")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p2.ID, "TP", "P0", "item4", "", "", "")
+	_, err = backlog.AddItem(d, p2.ID, "TP", "P0", "item4", "", "", "", "")
 	require.NoError(t, err)
 
 	counts, err := backlog.CountItemsByPriority(d, backlog.ItemFilter{ProjectIDs: []int64{p1.ID}})
@@ -425,7 +541,7 @@ func TestGetItemViaAlias(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "task", "", "", "")
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
 	// Manually insert alias row
@@ -451,7 +567,7 @@ func TestGetItemViaAliasAfterPrefixRename(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	originalItem, err := backlog.AddItem(d, p.ID, p.Prefix, "P1", "task", "", "", "")
+	originalItem, err := backlog.AddItem(d, p.ID, p.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 	originalID := originalItem.ID
 
@@ -469,7 +585,7 @@ func TestUpdateItemInvalidStatus(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "", "")
 	require.NoError(t, err)
 
 	_, err = backlog.UpdateItem(d, "AC-1", map[string]string{"status": "invalid-status"})
@@ -483,7 +599,7 @@ func TestUpdateItemValidStatuses(t *testing.T) {
 	p := createTestProject(t, d)
 
 	for _, status := range []string{"open", "done"} {
-		_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item-"+status, "", "", "")
+		_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item-"+status, "", "", "", "")
 		require.NoError(t, err)
 
 		item, err := backlog.GetItem(d, "AC-1")
@@ -503,7 +619,7 @@ func TestAddItemDescriptionTooBig(t *testing.T) {
 	p := createTestProject(t, d)
 
 	bigDesc := string(make([]byte, backlog.MaxItemDescBytes+1))
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", bigDesc, "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", bigDesc, "", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "description exceeds")
 }
@@ -513,7 +629,7 @@ func TestAddItemNotesTooBig(t *testing.T) {
 	p := createTestProject(t, d)
 
 	bigNotes := string(make([]byte, backlog.MaxItemNotesBytes+1))
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", bigNotes, "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", bigNotes, "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "notes exceeds")
 }
@@ -522,7 +638,7 @@ func TestUpdateItemDescriptionTooBig(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "", "")
 	require.NoError(t, err)
 
 	bigDesc := string(make([]byte, backlog.MaxItemDescBytes+1))
@@ -535,7 +651,7 @@ func TestUpdateItemNotesTooBig(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item", "", "", "", "")
 	require.NoError(t, err)
 
 	bigNotes := string(make([]byte, backlog.MaxItemNotesBytes+1))
@@ -548,9 +664,9 @@ func TestSearchItemsByTitle(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "alphaqrx title", "desc", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "alphaqrx title", "desc", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "other item", "desc", "", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "other item", "desc", "", "", "")
 	require.NoError(t, err)
 
 	items, err := backlog.SearchItems(d, "alphaqrx", backlog.ItemFilter{})
@@ -563,9 +679,9 @@ func TestSearchItemsByDescriptionAndNotes(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "task one", "matchingdescterm", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "task one", "matchingdescterm", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "task two", "", "matchingnotesterm", "")
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "task two", "", "matchingnotesterm", "", "")
 	require.NoError(t, err)
 
 	byDesc, err := backlog.SearchItems(d, "matchingdescterm", backlog.ItemFilter{})
@@ -583,7 +699,7 @@ func TestSearchItemsReflectsUpdates(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "staletermtitle", "desc", "", "")
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "staletermtitle", "desc", "", "", "")
 	require.NoError(t, err)
 
 	_, err = backlog.UpdateItem(d, item.ID, map[string]string{"title": "freshtermtitle"})
@@ -603,7 +719,7 @@ func TestSearchItemsExcludesDeleted(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "deletemetermtitle", "desc", "", "")
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "deletemetermtitle", "desc", "", "", "")
 	require.NoError(t, err)
 
 	_, err = backlog.DeleteItems(d, []string{item.ID})
@@ -620,9 +736,9 @@ func TestSearchItemsWithFilters(t *testing.T) {
 	p2, err := backlog.CreateProject(d, "other-corp", "OC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "sharedterm apionly", "", "", "api")
+	_, err = backlog.AddItem(d, p1.ID, "AC", "P1", "sharedterm apionly", "", "", "api", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "sharedterm apitwo", "", "", "api")
+	_, err = backlog.AddItem(d, p2.ID, "OC", "P1", "sharedterm apitwo", "", "", "api", "")
 	require.NoError(t, err)
 
 	items, err := backlog.SearchItems(d, "sharedterm", backlog.ItemFilter{ProjectIDs: []int64{p1.ID}})
@@ -640,7 +756,7 @@ func TestSearchItemsEmptyQuery(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)
 
-	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "some title", "", "", "")
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "some title", "", "", "", "")
 	require.NoError(t, err)
 
 	items, err := backlog.SearchItems(d, "", backlog.ItemFilter{})

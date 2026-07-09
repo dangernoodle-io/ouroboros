@@ -1081,7 +1081,7 @@ func TestHandleGet_DomainBacklog_IdsFetch(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Domain get task", "desc", "", "")
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Domain get task", "desc", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -1104,7 +1104,7 @@ func TestHandleGet_DomainBacklog_FilteredList(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open task", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open task", "", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -1126,9 +1126,9 @@ func TestHandleSearch_DomainBacklog_ReturnsMatches(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "findableterm task", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "findableterm task", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "unrelated task", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "unrelated task", "", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -1161,7 +1161,7 @@ func TestHandleGet_DomainBacklog_IdsFetchVerbose(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Verbose task", "", "secret notes", "")
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Verbose task", "", "secret notes", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -1198,7 +1198,7 @@ func TestHandleGet_DomainBacklog_IdsFetchOmitsProjectID(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "test-project", "TP")
 	require.NoError(t, err)
-	item, err := backlog.AddItem(db, proj.ID, "TP", "P1", "No-ProjID Task", "desc", "", "")
+	item, err := backlog.AddItem(db, proj.ID, "TP", "P1", "No-ProjID Task", "desc", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -1241,11 +1241,11 @@ func TestHandleGet_DomainBacklog_PriorityFilter(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Critical", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Critical", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Normal", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Normal", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P5", "Low", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P5", "Low", "", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -1284,9 +1284,9 @@ func TestHandleGet_DomainBacklog_StatusFilter(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open task", "", "", "")
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Open task", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Another task", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Another task", "", "", "", "")
 	require.NoError(t, err)
 	err = backlog.MarkDone(db, item.ID)
 	require.NoError(t, err)
@@ -1312,9 +1312,9 @@ func TestHandleGet_DomainBacklog_ComponentFilter(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "API task", "", "", "api")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "API task", "", "", "api", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "UI task", "", "", "ui")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "UI task", "", "", "ui", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -1353,9 +1353,9 @@ func TestHandleGet_DomainBacklog_MultiProject(t *testing.T) {
 	require.NoError(t, err)
 	proj2, err := backlog.CreateProject(db, "project-beta", "PB")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj1.ID, proj1.Prefix, "P1", "Alpha task", "", "", "")
+	_, err = backlog.AddItem(db, proj1.ID, proj1.Prefix, "P1", "Alpha task", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj2.ID, proj2.Prefix, "P2", "Beta task", "", "", "")
+	_, err = backlog.AddItem(db, proj2.ID, proj2.Prefix, "P2", "Beta task", "", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{

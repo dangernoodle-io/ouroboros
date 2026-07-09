@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -230,6 +231,48 @@ func TestMarkDone(t *testing.T) {
 	assert.Equal(t, id, rm.Sections.Done[0].ID)
 }
 
+// TestMarkDoneWithStalePositionLandsLastInDenseTarget verifies the fix for
+// the cross-section carry-over bug: an item's stale Position from its
+// SOURCE section must not misorder it into the middle of an already-DENSE
+// target section — it must land last, densely renumbered.
+func TestMarkDoneWithStalePositionLandsLastInDenseTarget(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+
+	// Done is already DENSE (1..2).
+	doneID1, err := roadmap.AddItem(rm, roadmap.SectionDone, roadmap.Item{Title: "done one"})
+	require.NoError(t, err)
+	doneID2, err := roadmap.AddItem(rm, roadmap.SectionDone, roadmap.Item{Title: "done two"})
+	require.NoError(t, err)
+	require.NoError(t, roadmap.ReorderItem(rm, doneID1, 0)) // densifies Done: 1, 2
+
+	// The item to finish carries a stale, LOW Position from its own
+	// (also dense) section -- simulating "was at the top of Now, then
+	// marked done".
+	id, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "finish me"})
+	require.NoError(t, err)
+	require.NoError(t, roadmap.ReorderItem(rm, id, 0)) // Now dense: Position 1
+
+	require.NoError(t, roadmap.MarkDone(rm, id))
+
+	require.Empty(t, rm.Sections.Now)
+	require.Len(t, rm.Sections.Done, 3)
+	assert.Equal(t, doneID1, rm.Sections.Done[0].ID)
+	assert.Equal(t, doneID2, rm.Sections.Done[1].ID)
+	assert.Equal(t, id, rm.Sections.Done[2].ID, "lands LAST despite a low stale Position, not misordered into the middle")
+	assert.Equal(t, 1, rm.Sections.Done[0].Position)
+	assert.Equal(t, 2, rm.Sections.Done[1].Position)
+	assert.Equal(t, 3, rm.Sections.Done[2].Position)
+
+	md := roadmap.RenderMarkdown(rm, "component", nil, nil)
+	idxOne := strings.Index(md, "### done one")
+	idxTwo := strings.Index(md, "### done two")
+	idxFinish := strings.Index(md, "### finish me")
+	require.NotEqual(t, -1, idxOne)
+	require.NotEqual(t, -1, idxTwo)
+	require.NotEqual(t, -1, idxFinish)
+	assert.Less(t, idxTwo, idxFinish, "finish me renders after both existing Done items")
+}
+
 func TestRemoveItem(t *testing.T) {
 	rm := &roadmap.Roadmap{}
 	id, err := roadmap.AddItem(rm, roadmap.SectionNext, roadmap.Item{Title: "gone"})
@@ -240,6 +283,42 @@ func TestRemoveItem(t *testing.T) {
 
 	err = roadmap.RemoveItem(rm, id)
 	assert.Error(t, err, "removing an already-removed item errors")
+}
+
+// TestRemoveItemClosesGapInDenseSection verifies removing an item from a
+// DENSE section closes the resulting gap in its 1..N numbering.
+func TestRemoveItemClosesGapInDenseSection(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	idA, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "a"})
+	require.NoError(t, err)
+	idB, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "b"})
+	require.NoError(t, err)
+	idC, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "c"})
+	require.NoError(t, err)
+	require.NoError(t, roadmap.ReorderItem(rm, idA, 0)) // densifies: a=1, b=2, c=3
+
+	require.NoError(t, roadmap.RemoveItem(rm, idB))
+
+	require.Len(t, rm.Sections.Now, 2)
+	assert.Equal(t, idA, rm.Sections.Now[0].ID)
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.Equal(t, idC, rm.Sections.Now[1].ID)
+	assert.Equal(t, 2, rm.Sections.Now[1].Position, "no gap left at the old position 3")
+}
+
+// TestRemoveItemLeavesLegacySectionUntouched verifies removing an item from
+// a LEGACY (all-0) section doesn't spuriously promote it to DENSE.
+func TestRemoveItemLeavesLegacySectionUntouched(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "a"})
+	require.NoError(t, err)
+	idB, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "b"})
+	require.NoError(t, err)
+
+	require.NoError(t, roadmap.RemoveItem(rm, idB))
+
+	require.Len(t, rm.Sections.Now, 1)
+	assert.Zero(t, rm.Sections.Now[0].Position)
 }
 
 func TestBlockedByRoundTrip(t *testing.T) {
@@ -283,14 +362,16 @@ func TestRenderMarkdown(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	md := roadmap.RenderMarkdown(rm)
+	md := roadmap.RenderMarkdown(rm, "component", nil, nil)
 
-	assert.Contains(t, md, "## Now")
+	assert.Contains(t, md, "## In flight")
 	assert.Contains(t, md, "## Next")
+	assert.Contains(t, md, "## Deferred")
 	assert.Contains(t, md, "## Parked")
-	assert.Contains(t, md, "## Recently done")
+	assert.Contains(t, md, "## Dropped")
+	assert.Contains(t, md, "## Shipped")
 	assert.Contains(t, md, "### active work")
-	assert.Contains(t, md, "`component: widget`")
+	assert.Contains(t, md, "#### component: widget")
 	assert.Contains(t, md, "kb: 1")
 	assert.Contains(t, md, "ticket: tk-test-000")
 	assert.Contains(t, md, "⛔ blocked by breadboard:B1-716")
@@ -300,8 +381,73 @@ func TestRenderMarkdown(t *testing.T) {
 }
 
 func TestRenderMarkdownEmptySections(t *testing.T) {
-	md := roadmap.RenderMarkdown(&roadmap.Roadmap{})
+	md := roadmap.RenderMarkdown(&roadmap.Roadmap{}, "component", nil, nil)
 	assert.Contains(t, md, "_none_")
+}
+
+func TestRenderMarkdownDefaultAxisIsComponent(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x", Component: "widget", Epic: "BB-1"})
+	require.NoError(t, err)
+
+	md := roadmap.RenderMarkdown(rm, "", nil, nil)
+	assert.Contains(t, md, "#### component: widget")
+	assert.Contains(t, md, "`epic: BB-1`")
+}
+
+func TestRenderMarkdownByEpicShowsComponentChipAndLabel(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x", Component: "widget", Epic: "BB-1"})
+	require.NoError(t, err)
+
+	md := roadmap.RenderMarkdown(rm, "epic", map[string]string{"BB-1": "WiFi map"}, nil)
+	assert.Contains(t, md, "#### epic: WiFi map")
+	assert.Contains(t, md, "`component: widget`")
+	assert.NotContains(t, md, "#### component: widget")
+}
+
+func TestRenderMarkdownByEpicFallsBackToRawIDWhenUnresolved(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x", Epic: "BB-9"})
+	require.NoError(t, err)
+
+	md := roadmap.RenderMarkdown(rm, "epic", nil, nil)
+	assert.Contains(t, md, "#### epic: BB-9")
+}
+
+// TestRenderMarkdownByComponentEpicChipShowsResolvedLabel verifies the
+// inline epic chip (rendered when grouping by component) shows the SAME
+// resolved epic label the epic-grouped header would show — not the raw
+// epic id — when epicLabels resolves it.
+func TestRenderMarkdownByComponentEpicChipShowsResolvedLabel(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x", Component: "widget", Epic: "BB-1"})
+	require.NoError(t, err)
+
+	md := roadmap.RenderMarkdown(rm, "component", map[string]string{"BB-1": "WiFi map"}, nil)
+	assert.Contains(t, md, "`epic: WiFi map`")
+	assert.NotContains(t, md, "`epic: BB-1`")
+}
+
+// TestRenderMarkdownByComponentEpicChipFallsBackToRawIDWhenUnresolved
+// verifies the inline epic chip falls back to the raw id, matching the
+// epic-grouped header's fallback, when epicLabels doesn't resolve it.
+func TestRenderMarkdownByComponentEpicChipFallsBackToRawIDWhenUnresolved(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x", Component: "widget", Epic: "BB-9"})
+	require.NoError(t, err)
+
+	md := roadmap.RenderMarkdown(rm, "component", nil, nil)
+	assert.Contains(t, md, "`epic: BB-9`")
+}
+
+func TestRenderMarkdownByEpicMarksBlockedEpic(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x", Epic: "BB-1"})
+	require.NoError(t, err)
+
+	md := roadmap.RenderMarkdown(rm, "epic", nil, map[string]bool{"BB-1": true})
+	assert.Contains(t, md, "#### epic: BB-1 ⛔")
 }
 
 // ── finding 5: empty sections marshal as [] not null ────────────────────────
@@ -488,6 +634,408 @@ func TestMutateRebuildFTSErrorPropagates(t *testing.T) {
 	assert.Contains(t, err.Error(), "rebuild fts")
 }
 
+// ── v2: deferred/dropped states, lane, position, reorder ────────────────────
+
+func TestValidSectionIncludesDeferredAndDropped(t *testing.T) {
+	assert.True(t, roadmap.ValidSection(roadmap.SectionDeferred))
+	assert.True(t, roadmap.ValidSection(roadmap.SectionDropped))
+}
+
+func TestAddItemToDeferredAndDropped(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	id1, err := roadmap.AddItem(rm, roadmap.SectionDeferred, roadmap.Item{Title: "deferred item"})
+	require.NoError(t, err)
+	id2, err := roadmap.AddItem(rm, roadmap.SectionDropped, roadmap.Item{Title: "dropped item"})
+	require.NoError(t, err)
+
+	require.Len(t, rm.Sections.Deferred, 1)
+	assert.Equal(t, id1, rm.Sections.Deferred[0].ID)
+	require.Len(t, rm.Sections.Dropped, 1)
+	assert.Equal(t, id2, rm.Sections.Dropped[0].ID)
+}
+
+func TestMoveItemToDeferredAndDropped(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	id, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "movable"})
+	require.NoError(t, err)
+
+	require.NoError(t, roadmap.MoveItem(rm, id, roadmap.SectionDeferred))
+	require.Len(t, rm.Sections.Deferred, 1)
+
+	require.NoError(t, roadmap.MoveItem(rm, id, roadmap.SectionDropped))
+	assert.Empty(t, rm.Sections.Deferred)
+	require.Len(t, rm.Sections.Dropped, 1)
+}
+
+func TestReorderItem(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	id, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x"})
+	require.NoError(t, err)
+
+	// A single item in the section: any target index clamps to 0, so its
+	// densely-renumbered Position is always 1.
+	require.NoError(t, roadmap.ReorderItem(rm, id, 5))
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.NotEmpty(t, rm.Sections.Now[0].UpdatedAt)
+}
+
+// TestReorderItemMovesToTopAmongDefaultPositionSiblings is the HIGH-severity
+// regression case: with ≥2 siblings still at the legacy/unset Position 0,
+// reorder(id, 0) must physically move the item to the top, not no-op
+// because "0 == 0" looked like a tie under the old raw-value semantics.
+func TestReorderItemMovesToTopAmongDefaultPositionSiblings(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	idA, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "a"})
+	require.NoError(t, err)
+	idB, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "b"})
+	require.NoError(t, err)
+	idC, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "c"})
+	require.NoError(t, err)
+	for _, it := range rm.Sections.Now {
+		require.Zero(t, it.Position, "siblings start at the legacy default")
+	}
+
+	// Move "c" (currently last) to the top.
+	require.NoError(t, roadmap.ReorderItem(rm, idC, 0))
+
+	require.Len(t, rm.Sections.Now, 3)
+	assert.Equal(t, idC, rm.Sections.Now[0].ID, "c physically moved to the top of the slice")
+	assert.Equal(t, idA, rm.Sections.Now[1].ID)
+	assert.Equal(t, idB, rm.Sections.Now[2].ID)
+	// Densely renumbered 1..N — no ties, no ambiguity for the next sort.
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.Equal(t, 2, rm.Sections.Now[1].Position)
+	assert.Equal(t, 3, rm.Sections.Now[2].Position)
+
+	md := roadmap.RenderMarkdown(rm, "component", nil, nil)
+	idxC := strings.Index(md, "### c")
+	idxA := strings.Index(md, "### a")
+	require.NotEqual(t, -1, idxC)
+	require.NotEqual(t, -1, idxA)
+	assert.Less(t, idxC, idxA, "c renders before a after reordering to the top")
+}
+
+func TestReorderItemNotFound(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	err := roadmap.ReorderItem(rm, 999, 1)
+	assert.Error(t, err)
+}
+
+// TestReorderItemNegativePositionClampsToTop verifies a negative target
+// index clamps to 0 (top) rather than panicking or being rejected.
+func TestReorderItemNegativePositionClampsToTop(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	idA, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "a"})
+	require.NoError(t, err)
+	idB, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "b"})
+	require.NoError(t, err)
+
+	require.NoError(t, roadmap.ReorderItem(rm, idB, -5))
+
+	require.Len(t, rm.Sections.Now, 2)
+	assert.Equal(t, idB, rm.Sections.Now[0].ID)
+	assert.Equal(t, idA, rm.Sections.Now[1].ID)
+}
+
+func TestMoveItemWithPosition(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	id, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x"})
+	require.NoError(t, err)
+
+	// A single item lands in an empty target section: any target index
+	// clamps to 0, so its densely-renumbered Position is always 1.
+	require.NoError(t, roadmap.MoveItem(rm, id, roadmap.SectionParked, 3))
+	require.Len(t, rm.Sections.Parked, 1)
+	assert.Equal(t, 1, rm.Sections.Parked[0].Position)
+}
+
+func TestMoveItemSameSectionWithPositionSplicesAndRenumbers(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	id1, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "first"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "second"})
+	require.NoError(t, err)
+
+	// Same section, but an explicit position is supplied: unlike the no-op
+	// same-section MoveItem call, this must still apply — position 7
+	// clamps to the end (index 1, after "second" is removed-and-reinserted
+	// ahead of it), so "first" ends up last, densely renumbered to 2.
+	require.NoError(t, roadmap.MoveItem(rm, id1, roadmap.SectionNow, 7))
+	require.Len(t, rm.Sections.Now, 2)
+	assert.Equal(t, "second", rm.Sections.Now[0].Title)
+	assert.Equal(t, "first", rm.Sections.Now[1].Title)
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.Equal(t, 2, rm.Sections.Now[1].Position)
+}
+
+func TestUpdateItemEpic(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	id, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x"})
+	require.NoError(t, err)
+
+	epic := "BB-707"
+	require.NoError(t, roadmap.UpdateItem(rm, id, roadmap.Patch{Epic: &epic}))
+	assert.Equal(t, "BB-707", rm.Sections.Now[0].Epic)
+}
+
+// TestAddItemWithEpicAndPosition verifies AddItem's optional position is a
+// 0-based target index (mirroring MoveItem/ReorderItem — presence, not
+// item.Position, signals intent): on a NON-empty section, index 0 splices
+// the new item to the front and densely renumbers the whole section.
+func TestAddItemWithEpicAndPosition(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	firstID, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "existing"})
+	require.NoError(t, err)
+
+	id, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x", Epic: "BB-707"}, 0)
+	require.NoError(t, err)
+
+	require.Len(t, rm.Sections.Now, 2)
+	assert.Equal(t, id, rm.Sections.Now[0].ID, "position 0 splices the new item to the front")
+	assert.Equal(t, "BB-707", rm.Sections.Now[0].Epic)
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.Equal(t, firstID, rm.Sections.Now[1].ID)
+	assert.Equal(t, 2, rm.Sections.Now[1].Position)
+}
+
+// TestAddItemNoPositionAppendsLast verifies AddItem with no position given
+// plain-appends: last in a legacy (all-0) section, and last (densely
+// renumbered) in an already-dense section.
+func TestAddItemNoPositionAppendsLast(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	idA, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "a"})
+	require.NoError(t, err)
+	idB, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "b"}, 0) // makes the section dense
+	require.NoError(t, err)
+	idC, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "c"})
+	require.NoError(t, err)
+
+	require.Len(t, rm.Sections.Now, 3)
+	assert.Equal(t, idB, rm.Sections.Now[0].ID)
+	assert.Equal(t, idA, rm.Sections.Now[1].ID)
+	assert.Equal(t, idC, rm.Sections.Now[2].ID, "no-position add lands last in a dense section")
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.Equal(t, 2, rm.Sections.Now[1].Position)
+	assert.Equal(t, 3, rm.Sections.Now[2].Position)
+}
+
+// TestAddItemIgnoresStaleItemPositionField verifies AddItem no longer
+// treats item.Position as an ordering input — only the variadic position
+// controls placement; a caller-set item.Position is reset.
+func TestAddItemIgnoresStaleItemPositionField(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "a"})
+	require.NoError(t, err)
+
+	id, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "b", Position: 99})
+	require.NoError(t, err)
+
+	require.Len(t, rm.Sections.Now, 2)
+	assert.Equal(t, id, rm.Sections.Now[1].ID, "stale item.Position isn't an ordering input -- still appends last")
+	assert.Zero(t, rm.Sections.Now[1].Position, "the section stays legacy/all-0; item.Position is reset, not carried through")
+}
+
+// ── render: axis grouping + position ordering ────────────────────────────────
+
+func TestRenderMarkdownGroupsByComponentAndOrdersByPosition(t *testing.T) {
+	db := testDB(t)
+
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "ungrouped"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "backend second", Component: "backend"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "backend first", Component: "backend"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "frontend only", Component: "frontend"})
+	require.NoError(t, err)
+	// Set the explicit sort order directly on the section slice -- AddItem
+	// no longer takes a raw Position value as ordering input (see
+	// TestAddItemIgnoresStaleItemPositionField); this test is exercising
+	// canonicalizeSections'/RenderMarkdown's Position-sort, not AddItem.
+	rm.Sections.Now[1].Position = 2 // backend second
+	rm.Sections.Now[2].Position = 1 // backend first
+
+	// Storage order is purely Position-sorted (see canonicalizeSections);
+	// RenderMarkdown does the axis grouping at render time (groupByAxis).
+	require.NoError(t, roadmap.Save(db, "acme-corp", rm))
+	loaded, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+
+	md := roadmap.RenderMarkdown(loaded, "component", nil, nil)
+
+	assert.Contains(t, md, "#### component: backend")
+	assert.Contains(t, md, "#### component: frontend")
+	ungroupedIdx := strings.Index(md, "### ungrouped")
+	backendHeadingIdx := strings.Index(md, "#### component: backend")
+	require.NotEqual(t, -1, ungroupedIdx)
+	require.NotEqual(t, -1, backendHeadingIdx)
+	assert.Less(t, ungroupedIdx, backendHeadingIdx, "ungrouped items render before named groups")
+
+	firstIdx := strings.Index(md, "### backend first")
+	secondIdx := strings.Index(md, "### backend second")
+	require.NotEqual(t, -1, firstIdx)
+	require.NotEqual(t, -1, secondIdx)
+	assert.Less(t, firstIdx, secondIdx, "position 1 renders before position 2 within the same group")
+}
+
+func TestRenderMarkdownDeferredAndDroppedSections(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionDeferred, roadmap.Item{Title: "deferred item", Why: "later"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionDropped, roadmap.Item{Title: "dropped item"})
+	require.NoError(t, err)
+
+	md := roadmap.RenderMarkdown(rm, "component", nil, nil)
+	assert.Contains(t, md, "### deferred item")
+	assert.Contains(t, md, "- Why: later")
+	assert.Contains(t, md, "### dropped item")
+}
+
+// ── back-compat: a v1 doc (no epic/position/schema_version/deferred/dropped)
+// still loads, and re-saves upgraded without losing data ───────────────────
+
+func TestLoadV1DocRoundTrips(t *testing.T) {
+	db := testDB(t)
+
+	v1JSON := `{"sections":{"now":[{"id":1,"title":"legacy item","body":"legacy body","created_at":"2024-01-01T00:00:00Z","updated_at":"2024-01-01T00:00:00Z"}],"next":[],"parked":[],"done":[]},"next_id":1}`
+	_, err := store.UpsertDocument(db, store.Document{
+		Type:     "roadmap",
+		Project:  "acme-corp",
+		Title:    "roadmap",
+		Content:  "# Roadmap",
+		Metadata: map[string]string{"data": v1JSON},
+	})
+	require.NoError(t, err)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	assert.Equal(t, 0, rm.SchemaVersion, "v1 doc loads with schema_version unset")
+	require.Len(t, rm.Sections.Now, 1)
+	assert.Equal(t, "legacy item", rm.Sections.Now[0].Title)
+	assert.Equal(t, "legacy body", rm.Sections.Now[0].Body)
+	assert.Empty(t, rm.Sections.Deferred)
+	assert.Empty(t, rm.Sections.Dropped)
+
+	require.NoError(t, roadmap.Save(db, "acme-corp", rm))
+
+	reloaded, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	assert.Equal(t, 2, reloaded.SchemaVersion, "re-save upgrades to the current schema version")
+	require.Len(t, reloaded.Sections.Now, 1)
+	assert.Equal(t, "legacy item", reloaded.Sections.Now[0].Title, "v1 data survives the upgrade")
+	assert.Equal(t, "legacy body", reloaded.Sections.Now[0].Body)
+	assert.Empty(t, reloaded.Sections.Now[0].Epic, "no epic on an upgraded v1 item")
+	assert.Zero(t, reloaded.Sections.Now[0].Position, "no position on an upgraded v1 item")
+}
+
+// ── canonical order on Save: storage carries pure Position order; render
+// groups on top of it (component vs epic can each regroup the same items) ──
+
+func TestSaveCanonicalizesToPositionOrderOnly(t *testing.T) {
+	db := testDB(t)
+
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "third"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "first", Component: "backend"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "second", Component: "frontend"})
+	require.NoError(t, err)
+	// Set the explicit sort order directly on the section slice -- AddItem
+	// no longer takes a raw Position value as ordering input.
+	rm.Sections.Now[0].Position = 3 // third
+	rm.Sections.Now[1].Position = 1 // first
+	rm.Sections.Now[2].Position = 2 // second
+
+	require.NoError(t, roadmap.Save(db, "acme-corp", rm))
+
+	loaded, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+
+	// Storage order is pure Position order — no axis grouping baked in, so
+	// the same stored order can be regrouped either way at render time.
+	wantTitles := make([]string, len(loaded.Sections.Now))
+	for i, it := range loaded.Sections.Now {
+		wantTitles[i] = it.Title
+	}
+	assert.Equal(t, []string{"first", "second", "third"}, wantTitles)
+
+	mdByComponent := roadmap.RenderMarkdown(loaded, "component", nil, nil)
+	assert.Contains(t, mdByComponent, "#### component: backend")
+	assert.Contains(t, mdByComponent, "#### component: frontend")
+}
+
+// ── finding 2: same-section MoveItem with a position doesn't re-append,
+// so it doesn't disturb same-Position tie-break order among siblings ───────
+
+// TestMoveItemSameSectionWithPositionTargetsIndexAmongSiblings verifies
+// that position is a literal 0-based target index within the OTHER
+// siblings (the item being moved is removed first, then reinserted) — not
+// a raw sort-key value compared against the siblings' existing Position.
+func TestMoveItemSameSectionWithPositionTargetsIndexAmongSiblings(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	idA, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "a"})
+	require.NoError(t, err)
+	idB, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "b"})
+	require.NoError(t, err)
+	idC, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "c"})
+	require.NoError(t, err)
+
+	// Move "a" to index 1 among the remaining siblings [b, c] -> b, a, c.
+	require.NoError(t, roadmap.MoveItem(rm, idA, roadmap.SectionNow, 1))
+
+	require.Len(t, rm.Sections.Now, 3)
+	assert.Equal(t, idB, rm.Sections.Now[0].ID)
+	assert.Equal(t, idA, rm.Sections.Now[1].ID)
+	assert.Equal(t, idC, rm.Sections.Now[2].ID)
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.Equal(t, 2, rm.Sections.Now[1].Position)
+	assert.Equal(t, 3, rm.Sections.Now[2].Position)
+
+	md := roadmap.RenderMarkdown(rm, "component", nil, nil)
+	idxB := strings.Index(md, "### b")
+	idxA := strings.Index(md, "### a")
+	idxC := strings.Index(md, "### c")
+	require.NotEqual(t, -1, idxA)
+	require.NotEqual(t, -1, idxB)
+	require.NotEqual(t, -1, idxC)
+	assert.Less(t, idxB, idxA, "b renders before a")
+	assert.Less(t, idxA, idxC, "a renders before c")
+}
+
+// ── canonicalization is deterministic and idempotent ────────────────────────
+
+func TestSaveCanonicalizationIsIdempotent(t *testing.T) {
+	db := testDB(t)
+
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "ungrouped"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "backend second", Component: "backend"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "backend first", Component: "backend"})
+	require.NoError(t, err)
+	rm.Sections.Now[1].Position = 2 // backend second
+	rm.Sections.Now[2].Position = 1 // backend first
+
+	require.NoError(t, roadmap.Save(db, "acme-corp", rm))
+	doc1, err := store.GetDocumentByKey(db, "roadmap", "acme-corp", "", "roadmap")
+	require.NoError(t, err)
+	data1 := doc1.Metadata["data"]
+
+	loaded, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.NoError(t, roadmap.Save(db, "acme-corp", loaded))
+
+	doc2, err := store.GetDocumentByKey(db, "roadmap", "acme-corp", "", "roadmap")
+	require.NoError(t, err)
+	data2 := doc2.Metadata["data"]
+
+	assert.JSONEq(t, data1, data2, "re-saving an already-canonical roadmap doesn't churn stored order")
+	assert.Equal(t, doc1.Content, doc2.Content, "markdown mirror is stable across a re-save")
+}
+
 func TestMutateConcurrentAddsAllSurvive(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "roadmap.db")
@@ -524,4 +1072,87 @@ func TestMutateConcurrentAddsAllSurvive(t *testing.T) {
 		ids[it.ID] = true
 	}
 	assert.Len(t, ids, n, "distinct ids, no duplicates")
+}
+
+// ── Filter: component/epic axis filtering ───────────────────────────────────
+
+func TestFilterNoFiltersReturnsSameRoadmap(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "x"})
+	require.NoError(t, err)
+
+	filtered := roadmap.Filter(rm, "", "")
+	assert.Same(t, rm, filtered, "no filters is a no-op returning the same pointer")
+}
+
+func TestFilterByComponent(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "widget item", Component: "widget"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "gadget item", Component: "gadget"})
+	require.NoError(t, err)
+
+	filtered := roadmap.Filter(rm, "widget", "")
+	require.Len(t, filtered.Sections.Now, 1)
+	assert.Equal(t, "widget item", filtered.Sections.Now[0].Title)
+}
+
+func TestFilterByEpic(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "epic item", Epic: "BB-707"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "other item", Epic: "BB-1"})
+	require.NoError(t, err)
+
+	filtered := roadmap.Filter(rm, "", "BB-707")
+	require.Len(t, filtered.Sections.Now, 1)
+	assert.Equal(t, "epic item", filtered.Sections.Now[0].Title)
+}
+
+func TestFilterByComponentAndEpicBothMustMatch(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "matches both", Component: "widget", Epic: "BB-707"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "component only", Component: "widget"})
+	require.NoError(t, err)
+
+	filtered := roadmap.Filter(rm, "widget", "BB-707")
+	require.Len(t, filtered.Sections.Now, 1)
+	assert.Equal(t, "matches both", filtered.Sections.Now[0].Title)
+}
+
+func TestFilterAcrossAllSections(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	for _, s := range []roadmap.Section{roadmap.SectionNow, roadmap.SectionNext, roadmap.SectionDeferred, roadmap.SectionParked, roadmap.SectionDropped, roadmap.SectionDone} {
+		_, err := roadmap.AddItem(rm, s, roadmap.Item{Title: string(s) + " item", Component: "widget"})
+		require.NoError(t, err)
+	}
+
+	filtered := roadmap.Filter(rm, "widget", "")
+	assert.Len(t, filtered.Sections.Now, 1)
+	assert.Len(t, filtered.Sections.Next, 1)
+	assert.Len(t, filtered.Sections.Deferred, 1)
+	assert.Len(t, filtered.Sections.Parked, 1)
+	assert.Len(t, filtered.Sections.Dropped, 1)
+	assert.Len(t, filtered.Sections.Done, 1)
+}
+
+// ── EpicIDs ──────────────────────────────────────────────────────────────────
+
+func TestEpicIDsDistinctFirstAppearanceOrder(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "a", Epic: "BB-2"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionNext, roadmap.Item{Title: "b", Epic: "BB-1"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionDone, roadmap.Item{Title: "c", Epic: "BB-2"})
+	require.NoError(t, err)
+	_, err = roadmap.AddItem(rm, roadmap.SectionDone, roadmap.Item{Title: "d"})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"BB-2", "BB-1"}, roadmap.EpicIDs(rm))
+}
+
+func TestEpicIDsEmptyRoadmap(t *testing.T) {
+	assert.Empty(t, roadmap.EpicIDs(&roadmap.Roadmap{}))
 }

@@ -17,9 +17,9 @@ func TestLSItemsList(t *testing.T) {
 	db := newTestDB(t)
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Critical bug", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Critical bug", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P3", "Feature", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P3", "Feature", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -39,7 +39,7 @@ func TestLSItemsListJSON(t *testing.T) {
 	db := newTestDB(t)
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -61,9 +61,9 @@ func TestLSItemsProjectFilter(t *testing.T) {
 	proj2, err := backlog.CreateProject(db, "other-project", "OP")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, proj1.ID, proj1.Prefix, "P0", "AC item", "", "", "")
+	_, err = backlog.AddItem(db, proj1.ID, proj1.Prefix, "P0", "AC item", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj2.ID, proj2.Prefix, "P0", "OP item", "", "", "")
+	_, err = backlog.AddItem(db, proj2.ID, proj2.Prefix, "P0", "OP item", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -80,9 +80,9 @@ func TestLSItemsStatusFilter(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Open", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Open", "", "", "", "")
 	require.NoError(t, err)
-	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Done", "", "", "")
+	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Done", "", "", "", "")
 	require.NoError(t, err)
 
 	_, err = backlog.UpdateItem(db, item2.ID, map[string]string{"status": "done"})
@@ -102,9 +102,9 @@ func TestLSItemsPriorityFilter(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Critical", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Critical", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P3", "Medium", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P3", "Medium", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -121,9 +121,9 @@ func TestLSItemsComponentFilter(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Auth task", "", "", "auth")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Auth task", "", "", "auth", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "DB task", "", "", "db")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "DB task", "", "", "db", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -140,7 +140,7 @@ func TestLSItemsDetailJSON(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task title", "This is a description", "Important note", "component-x")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task title", "This is a description", "Important note", "component-x", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -160,7 +160,7 @@ func TestLSItemsDetailPlain(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Task", "Description text", "Notes text", "auth")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Task", "Description text", "Notes text", "auth", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -195,7 +195,7 @@ func TestLSItemsLimit(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 	for i := range 5 {
-		_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", fmt.Sprintf("Item %d", i+1), "", "", "")
+		_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", fmt.Sprintf("Item %d", i+1), "", "", "", "")
 		require.NoError(t, err)
 	}
 

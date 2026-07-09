@@ -222,6 +222,10 @@ INSERT INTO items_fts(rowid, title, description, notes) SELECT rowid, title, des
 		version: 11,
 		sql:     `CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_roadmap_singleton ON documents(project) WHERE type='roadmap';`,
 	},
+	{
+		version: 12,
+		sql:     `ALTER TABLE items ADD COLUMN epic TEXT NOT NULL DEFAULT '';`,
+	},
 }
 
 // ApplySchema applies all pending migrations to the database.
