@@ -1,19 +1,280 @@
 package dashboard
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
+
+	"dangernoodle.io/ouroboros/internal/backlog"
 )
 
 // Config keys under which the dashboard layer stores its settings in the
 // backlog config table.
 const (
-	KeyEnabled     = "dashboard.enabled"
-	KeySegments    = "dashboard.segments"
-	KeyOutput      = "dashboard.output"
-	KeyCooldown    = "dashboard.cooldown"
-	KeyLastRefresh = "dashboard.last_refresh"
+	KeyEnabled   = "dashboard.enabled"
+	KeySegments  = "dashboard.segments"
+	KeyCooldown  = "dashboard.cooldown"
+	KeyOutputDir = "dashboard.output_dir"
+
+	// ViewKeyPrefix/ProjectKeyPrefix/RuntimeKeyPrefix key one JSON blob per
+	// entity: dashboard.view.<name>, dashboard.project.<name>,
+	// dashboard.rt.<view-name>. A single blob per entity avoids parsing
+	// dotted config-key tails, so project/view names containing dots (e.g.
+	// notarizedbyape.com) round-trip safely as the whole key remainder.
+	ViewKeyPrefix    = "dashboard.view."
+	ProjectKeyPrefix = "dashboard.project."
+	RuntimeKeyPrefix = "dashboard.rt."
 )
+
+// defaultOutputDirName names the subdirectory (next to the KB db file) used
+// when dashboard.output_dir is unset.
+const defaultOutputDirName = "dashboards"
+
+// View is a named set of projects that share one composed dashboard output.
+// A project may belong to several views; the union of every view's
+// Projects is what ouroboros considers monitored.
+type View struct {
+	Name     string   `json:"-"`
+	Projects []string `json:"projects"`
+	Cooldown string   `json:"cooldown,omitempty"`
+	Output   string   `json:"output,omitempty"`
+}
+
+// ProjectConfig holds per-project dashboard overrides.
+type ProjectConfig struct {
+	Segments []SegmentSpec `json:"segments,omitempty"`
+}
+
+// viewRuntime holds per-view runtime state (last_refresh), stored under a
+// separate key from the user-authored View blob so refreshing never
+// rewrites config the user wrote.
+type viewRuntime struct {
+	LastRefresh string `json:"last_refresh,omitempty"`
+}
+
+// ListViews returns every configured view, sorted by name. A malformed view
+// blob does not hide the other views: it is skipped and its parse error is
+// joined into the returned error, so the caller still gets every view that
+// parsed.
+func ListViews(db *sql.DB) ([]View, error) {
+	all, err := backlog.GetAllConfig(db)
+	if err != nil {
+		return nil, err
+	}
+
+	var views []View
+	var errs []error
+	for key, raw := range all {
+		if !strings.HasPrefix(key, ViewKeyPrefix) {
+			continue
+		}
+		name := key[len(ViewKeyPrefix):]
+		var v View
+		if err := json.Unmarshal([]byte(raw), &v); err != nil {
+			errs = append(errs, fmt.Errorf("view %s: %w", name, err))
+			continue
+		}
+		v.Name = name
+		views = append(views, v)
+	}
+
+	sort.Slice(views, func(i, j int) bool { return views[i].Name < views[j].Name })
+	return views, errors.Join(errs...)
+}
+
+// GetView looks up one view by name.
+func GetView(db *sql.DB, name string) (View, bool, error) {
+	all, err := backlog.GetAllConfig(db)
+	if err != nil {
+		return View{}, false, err
+	}
+	raw, ok := all[ViewKeyPrefix+name]
+	if !ok {
+		return View{}, false, nil
+	}
+	var v View
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return View{}, false, err
+	}
+	v.Name = name
+	return v, true, nil
+}
+
+// validViewName rejects view names that would let ViewOutputPath's default
+// "<output dir>/<name>.ndjson" escape output_dir (e.g. via a path-traversal
+// or path-separator name such as "../../tmp/evil").
+func validViewName(name string) error {
+	if name == "" {
+		return fmt.Errorf("dashboard: view name must not be empty")
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		return fmt.Errorf("dashboard: invalid view name %q: must not contain '/', '\\', or '..'", name)
+	}
+	return nil
+}
+
+// SetView creates or replaces a view. Enforced here (not just at the CLI
+// layer) so every caller gets the view-name safety check.
+func SetView(db *sql.DB, v View) error {
+	if err := validViewName(v.Name); err != nil {
+		return err
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return backlog.SetConfig(db, ViewKeyPrefix+v.Name, string(b))
+}
+
+// RemoveView deletes a view's config. It does not touch the view's runtime
+// state; callers that want a clean removal should also clear that (see
+// DeleteViewRuntime).
+func RemoveView(db *sql.DB, name string) error {
+	return backlog.DeleteConfig(db, ViewKeyPrefix+name)
+}
+
+// GetProjectConfig looks up per-project dashboard overrides. An absent
+// project config is not an error: it returns the zero value.
+func GetProjectConfig(db *sql.DB, project string) (ProjectConfig, error) {
+	all, err := backlog.GetAllConfig(db)
+	if err != nil {
+		return ProjectConfig{}, err
+	}
+	raw, ok := all[ProjectKeyPrefix+project]
+	if !ok {
+		return ProjectConfig{}, nil
+	}
+	var pc ProjectConfig
+	if err := json.Unmarshal([]byte(raw), &pc); err != nil {
+		return ProjectConfig{}, err
+	}
+	return pc, nil
+}
+
+// SetProjectConfig creates or replaces a project's dashboard overrides.
+func SetProjectConfig(db *sql.DB, project string, pc ProjectConfig) error {
+	b, err := json.Marshal(pc)
+	if err != nil {
+		return err
+	}
+	return backlog.SetConfig(db, ProjectKeyPrefix+project, string(b))
+}
+
+// EffectiveSegments resolves the segment list for one project: an explicit
+// per-project override wins, else the global dashboard.segments, else
+// DefaultSegments. It reads the config table once (rather than delegating
+// to GetProjectConfig, which would issue a second query) so there is a
+// single, testable GetAllConfig error path.
+func EffectiveSegments(db *sql.DB, project string) ([]SegmentSpec, error) {
+	all, err := backlog.GetAllConfig(db)
+	if err != nil {
+		return nil, err
+	}
+
+	if raw, ok := all[ProjectKeyPrefix+project]; ok {
+		var pc ProjectConfig
+		if err := json.Unmarshal([]byte(raw), &pc); err != nil {
+			return nil, err
+		}
+		if len(pc.Segments) > 0 {
+			return pc.Segments, nil
+		}
+	}
+
+	if raw, ok := all[KeySegments]; ok {
+		return ParseSegments(raw)
+	}
+	return DefaultSegments(), nil
+}
+
+// MonitoredProjects returns the distinct, sorted union of every view's
+// Projects — the answer to "what is ouroboros monitoring." A malformed
+// view is excluded from the union but does not block the rest; its parse
+// error is still returned (joined) for visibility.
+func MonitoredProjects(db *sql.DB) ([]string, error) {
+	views, err := ListViews(db)
+
+	set := make(map[string]struct{})
+	for _, v := range views {
+		for _, p := range v.Projects {
+			set[p] = struct{}{}
+		}
+	}
+	projects := make([]string, 0, len(set))
+	for p := range set {
+		projects = append(projects, p)
+	}
+	sort.Strings(projects)
+	return projects, err
+}
+
+// ViewCooldown resolves the refresh cooldown for a view: the view's own
+// Cooldown if set, else the global dashboard.cooldown, else the default
+// (ParseCooldown handles empty/invalid input).
+func ViewCooldown(db *sql.DB, v View) time.Duration {
+	if v.Cooldown != "" {
+		return ParseCooldown(v.Cooldown)
+	}
+	raw, _ := backlog.GetConfig(db, KeyCooldown)
+	return ParseCooldown(raw)
+}
+
+// GetViewRuntime looks up a view's runtime state. Absent runtime state is
+// not an error: it returns the zero value (no prior refresh).
+func GetViewRuntime(db *sql.DB, name string) (viewRuntime, error) {
+	all, err := backlog.GetAllConfig(db)
+	if err != nil {
+		return viewRuntime{}, err
+	}
+	raw, ok := all[RuntimeKeyPrefix+name]
+	if !ok {
+		return viewRuntime{}, nil
+	}
+	var rt viewRuntime
+	if err := json.Unmarshal([]byte(raw), &rt); err != nil {
+		return viewRuntime{}, err
+	}
+	return rt, nil
+}
+
+// SetViewLastRefresh records a view's last-refresh timestamp (RFC3339).
+func SetViewLastRefresh(db *sql.DB, name, ts string) error {
+	b, err := json.Marshal(viewRuntime{LastRefresh: ts})
+	if err != nil {
+		return err
+	}
+	return backlog.SetConfig(db, RuntimeKeyPrefix+name, string(b))
+}
+
+// DeleteViewRuntime clears a view's runtime state (used alongside
+// RemoveView when a view is deleted).
+func DeleteViewRuntime(db *sql.DB, name string) error {
+	return backlog.DeleteConfig(db, RuntimeKeyPrefix+name)
+}
+
+// OutputDir resolves the directory dashboard views write their NDJSON
+// output into: dashboard.output_dir if set, else a "dashboards" directory
+// next to the KB database file.
+func OutputDir(db *sql.DB, dbPath string) string {
+	if raw, err := backlog.GetConfig(db, KeyOutputDir); err == nil && raw != "" {
+		return raw
+	}
+	return filepath.Join(filepath.Dir(dbPath), defaultOutputDirName)
+}
+
+// ViewOutputPath resolves the file a view refreshes to: the view's own
+// Output override if set, else <output dir>/<view name>.ndjson.
+func ViewOutputPath(db *sql.DB, v View, dbPath string) string {
+	if v.Output != "" {
+		return v.Output
+	}
+	return filepath.Join(OutputDir(db, dbPath), v.Name+".ndjson")
+}
 
 // MinCooldown floors any configured refresh cooldown.
 const MinCooldown = 30 * time.Second

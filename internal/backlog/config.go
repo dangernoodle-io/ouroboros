@@ -19,6 +19,11 @@ func SetConfig(d *sql.DB, key, value string) error {
 	return err
 }
 
+func DeleteConfig(d *sql.DB, key string) error {
+	_, err := d.Exec("DELETE FROM config WHERE key = ?", key)
+	return err
+}
+
 func GetAllConfig(d *sql.DB) (map[string]string, error) {
 	rows, err := d.Query("SELECT key, value FROM config ORDER BY key")
 	if err != nil {

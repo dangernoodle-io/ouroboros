@@ -40,6 +40,7 @@ type Tile struct {
 	Value   string `json:"value"`
 	Sub     string `json:"sub,omitempty"`
 	Accent  string `json:"accent,omitempty"`
+	Project string `json:"project,omitempty"`
 }
 
 func (t Tile) kind() string { return t.Type }
@@ -59,6 +60,7 @@ type Bar struct {
 	Value   float64  `json:"value"`
 	Max     *float64 `json:"max,omitempty"`
 	Note    string   `json:"note,omitempty"`
+	Project string   `json:"project,omitempty"`
 }
 
 func (b Bar) kind() string { return b.Type }
@@ -71,6 +73,7 @@ type Group struct {
 	Section string `json:"section,omitempty"`
 	Title   string `json:"title,omitempty"`
 	Cards   []Card `json:"cards"`
+	Project string `json:"project,omitempty"`
 }
 
 func (g Group) kind() string { return g.Type }
@@ -82,6 +85,7 @@ type Note struct {
 	Type    string `json:"type"`
 	Section string `json:"section,omitempty"`
 	Text    string `json:"text"`
+	Project string `json:"project,omitempty"`
 }
 
 func (n Note) kind() string { return n.Type }
@@ -93,10 +97,40 @@ type HTML struct {
 	Type    string `json:"type"`
 	Section string `json:"section,omitempty"`
 	HTML    string `json:"html"`
+	Project string `json:"project,omitempty"`
 }
 
 func (h HTML) kind() string { return h.Type }
 func (h HTML) sec() string  { return h.Section }
+
+// StampProject sets the Project field on every fragment in frags, returning
+// a new slice (producers never set it themselves; the refresh path stamps
+// it once fragments are attributed to the project that produced them).
+func StampProject(frags []Fragment, project string) []Fragment {
+	stamped := make([]Fragment, len(frags))
+	for i, f := range frags {
+		switch v := f.(type) {
+		case Tile:
+			v.Project = project
+			stamped[i] = v
+		case Bar:
+			v.Project = project
+			stamped[i] = v
+		case Group:
+			v.Project = project
+			stamped[i] = v
+		case Note:
+			v.Project = project
+			stamped[i] = v
+		case HTML:
+			v.Project = project
+			stamped[i] = v
+		default:
+			stamped[i] = f
+		}
+	}
+	return stamped
+}
 
 // Emit writes each fragment as one compact NDJSON line to w.
 func Emit(w io.Writer, frags []Fragment) error {

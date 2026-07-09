@@ -18,11 +18,22 @@ import (
 	"dangernoodle.io/ouroboros/internal/dashboard"
 )
 
-var dashboardRefreshForce bool
+var (
+	dashboardRefreshForce    bool
+	dashboardRefreshView     string
+	dashboardRefreshAll      bool
+	dashboardRefreshProjects string
+
+	dashboardViewSetProjects string
+	dashboardViewSetCooldown string
+	dashboardViewSetOutput   string
+
+	dashboardProjectSetSegments string
+)
 
 var dashboardCmd = &cobra.Command{
 	Use:   "dashboard",
-	Short: "Dashboard data-capture: segment producers and NDJSON refresh",
+	Short: "Dashboard data-capture: segment producers, views, and NDJSON refresh",
 }
 
 var dashboardSegmentCmd = &cobra.Command{
@@ -38,20 +49,108 @@ var dashboardSegmentCmd = &cobra.Command{
 
 var dashboardRefreshCmd = &cobra.Command{
 	Use:   "refresh",
-	Short: "Run every enabled segment and write the collected NDJSON output",
+	Short: "Refresh one, several, or every dashboard view's NDJSON output",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDB(func(db *sql.DB) error {
-			return runDashboardRefresh(cmd.OutOrStdout(), db, dashboardRefreshForce)
+			return runDashboardRefresh(cmd.OutOrStdout(), db, dashboardRefreshOpts{
+				force:    dashboardRefreshForce,
+				view:     dashboardRefreshView,
+				all:      dashboardRefreshAll,
+				projects: dashboardRefreshProjects,
+			})
+		})
+	},
+}
+
+var dashboardViewCmd = &cobra.Command{
+	Use:   "view",
+	Short: "Manage dashboard views (named project sets)",
+}
+
+var dashboardViewSetCmd = &cobra.Command{
+	Use:   "set <name>",
+	Short: "Create or replace a view",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withDB(func(db *sql.DB) error {
+			return runDashboardViewSet(cmd.OutOrStdout(), db, args[0], dashboardViewSetProjects, dashboardViewSetCooldown, dashboardViewSetOutput)
+		})
+	},
+}
+
+var dashboardViewListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List every configured view",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withDB(func(db *sql.DB) error {
+			return runDashboardStatus(cmd.OutOrStdout(), db)
+		})
+	},
+}
+
+var dashboardViewRmCmd = &cobra.Command{
+	Use:   "rm <name>",
+	Short: "Remove a view",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withDB(func(db *sql.DB) error {
+			return runDashboardViewRm(cmd.OutOrStdout(), db, args[0])
+		})
+	},
+}
+
+var dashboardProjectCmd = &cobra.Command{
+	Use:   "project",
+	Short: "Manage per-project dashboard overrides",
+}
+
+var dashboardProjectSetCmd = &cobra.Command{
+	Use:   "set <name>",
+	Short: "Set a project's segment overrides",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withDB(func(db *sql.DB) error {
+			return runDashboardProjectSet(cmd.OutOrStdout(), db, args[0], dashboardProjectSetSegments)
+		})
+	},
+}
+
+var dashboardStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show dashboard master toggle, output dir, views, and monitored projects",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withDB(func(db *sql.DB) error {
+			return runDashboardStatus(cmd.OutOrStdout(), db)
 		})
 	},
 }
 
 func init() {
 	dashboardRefreshCmd.Flags().BoolVar(&dashboardRefreshForce, "force", false, "Bypass the refresh cooldown")
+	dashboardRefreshCmd.Flags().StringVar(&dashboardRefreshView, "view", "", "Refresh only this saved view")
+	dashboardRefreshCmd.Flags().BoolVar(&dashboardRefreshAll, "all", false, "Refresh every saved view (default when no other target flag is given)")
+	dashboardRefreshCmd.Flags().StringVar(&dashboardRefreshProjects, "projects", "", "Refresh an ephemeral view over this comma-separated project list")
+
+	dashboardViewSetCmd.Flags().StringVar(&dashboardViewSetProjects, "projects", "", "Comma-separated project list (required)")
+	dashboardViewSetCmd.Flags().StringVar(&dashboardViewSetCooldown, "cooldown", "", "Per-view refresh cooldown override (e.g. 5m)")
+	dashboardViewSetCmd.Flags().StringVar(&dashboardViewSetOutput, "output", "", "Explicit output file path override")
+
+	dashboardProjectSetCmd.Flags().StringVar(&dashboardProjectSetSegments, "segments", "", "Segment specs as a JSON array (required)")
+
+	dashboardViewCmd.AddCommand(dashboardViewSetCmd)
+	dashboardViewCmd.AddCommand(dashboardViewListCmd)
+	dashboardViewCmd.AddCommand(dashboardViewRmCmd)
+
+	dashboardProjectCmd.AddCommand(dashboardProjectSetCmd)
 
 	dashboardCmd.AddCommand(dashboardSegmentCmd)
 	dashboardCmd.AddCommand(dashboardRefreshCmd)
+	dashboardCmd.AddCommand(dashboardViewCmd)
+	dashboardCmd.AddCommand(dashboardProjectCmd)
+	dashboardCmd.AddCommand(dashboardStatusCmd)
 }
 
 // resolveDashboardContext builds a base Context from cwd/.git auto-detection,
@@ -106,100 +205,271 @@ func runDashboardSegment(in io.Reader, out io.Writer, db *sql.DB, name string) e
 	return dashboard.Emit(out, frags)
 }
 
-func runDashboardRefresh(out io.Writer, db *sql.DB, force bool) error {
-	enabled, err := backlog.GetConfig(db, dashboard.KeyEnabled)
-	if err != nil || enabled != "true" {
+// runDashboardViewSet creates or replaces a view.
+func runDashboardViewSet(out io.Writer, db *sql.DB, name, projectsCSV, cooldown, output string) error {
+	projects := splitCSV(projectsCSV)
+	if len(projects) == 0 {
+		return fmt.Errorf("dashboard view set: --projects is required and must be non-empty")
+	}
+
+	v := dashboard.View{Name: name, Projects: projects, Cooldown: cooldown, Output: output}
+	if err := dashboard.SetView(db, v); err != nil {
+		return fmt.Errorf("dashboard view set: %w", err)
+	}
+
+	fmt.Fprintf(out, "set view %s (%d projects)\n", name, len(projects))
+	return nil
+}
+
+// runDashboardViewRm removes a view and its runtime state.
+func runDashboardViewRm(out io.Writer, db *sql.DB, name string) error {
+	if err := dashboard.RemoveView(db, name); err != nil {
+		return fmt.Errorf("dashboard view rm: %w", err)
+	}
+	if err := dashboard.DeleteViewRuntime(db, name); err != nil {
+		return fmt.Errorf("dashboard view rm: %w", err)
+	}
+	fmt.Fprintf(out, "removed view %s\n", name)
+	return nil
+}
+
+// runDashboardProjectSet sets a project's segment overrides.
+func runDashboardProjectSet(out io.Writer, db *sql.DB, project, segmentsJSON string) error {
+	specs, err := dashboard.ParseSegments(segmentsJSON)
+	if err != nil {
+		return fmt.Errorf("dashboard project set: parse segments: %w", err)
+	}
+
+	if err := dashboard.SetProjectConfig(db, project, dashboard.ProjectConfig{Segments: specs}); err != nil {
+		return fmt.Errorf("dashboard project set: %w", err)
+	}
+
+	fmt.Fprintf(out, "set project %s (%d segments)\n", project, len(specs))
+	return nil
+}
+
+// runDashboardStatus prints the master toggle, output dir, every view
+// (members + last_refresh), and the union of monitored projects. It backs
+// both `dashboard status` and `dashboard view list`.
+func runDashboardStatus(out io.Writer, db *sql.DB) error {
+	enabled, _ := backlog.GetConfig(db, dashboard.KeyEnabled)
+	if enabled == "" {
+		enabled = "false"
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("dashboard status: load config: %w", err)
+	}
+	outputDir := dashboard.OutputDir(db, cfg.DBPath)
+
+	fmt.Fprintf(out, "dashboard.enabled: %s\n", enabled)
+	fmt.Fprintf(out, "output_dir: %s\n", outputDir)
+
+	views, err := dashboard.ListViews(db)
+	if err != nil {
+		fmt.Fprintf(out, "warning: %s\n", err.Error())
+	}
+
+	if len(views) == 0 {
+		fmt.Fprintln(out, "no views configured")
+	}
+	for _, v := range views {
+		rt, rtErr := dashboard.GetViewRuntime(db, v.Name)
+		lastRefresh := "never"
+		if rtErr == nil && rt.LastRefresh != "" {
+			lastRefresh = rt.LastRefresh
+		}
+		fmt.Fprintf(out, "view %s: [%s] last_refresh=%s%s\n", v.Name, strings.Join(v.Projects, ", "), lastRefresh, segmentOverrideNote(db, v.Projects))
+	}
+
+	monitored, monErr := dashboard.MonitoredProjects(db)
+	if monErr != nil {
+		fmt.Fprintf(out, "warning: %s\n", monErr.Error())
+	}
+	fmt.Fprintf(out, "monitored projects (%d): %s\n", len(monitored), strings.Join(monitored, ", "))
+	return nil
+}
+
+// segmentOverrideNote returns a trailing note listing which of a view's
+// projects carry a per-project segment override, or "" if none do.
+func segmentOverrideNote(db *sql.DB, projects []string) string {
+	var overridden []string
+	for _, p := range projects {
+		pc, err := dashboard.GetProjectConfig(db, p)
+		if err == nil && len(pc.Segments) > 0 {
+			overridden = append(overridden, p)
+		}
+	}
+	if len(overridden) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (segment overrides: %s)", strings.Join(overridden, ", "))
+}
+
+// dashboardRefreshOpts bundles the refresh command's target-selection flags.
+type dashboardRefreshOpts struct {
+	force    bool
+	view     string
+	all      bool
+	projects string
+}
+
+// runDashboardRefresh resolves the target view(s) from opts and refreshes
+// each: master-toggle gate, cooldown check, per-project segment run,
+// project-stamped fragment accumulation, and one NDJSON file per view.
+func runDashboardRefresh(out io.Writer, db *sql.DB, opts dashboardRefreshOpts) error {
+	enabled, getErr := backlog.GetConfig(db, dashboard.KeyEnabled)
+	if getErr != nil || enabled != "true" {
 		fmt.Fprintln(out, "dashboard disabled")
+		return nil //nolint:nilerr // "not found"/any lookup failure degrades to the same disabled message, not a hard error
+	}
+
+	targets, adhoc, err := resolveRefreshTargets(out, db, opts)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		fmt.Fprintln(out, "no views configured (dashboard view set <name> --projects ...)")
 		return nil
 	}
 
-	specs := dashboard.DefaultSegments()
-	if raw, err := backlog.GetConfig(db, dashboard.KeySegments); err == nil {
-		parsed, err := dashboard.ParseSegments(raw)
-		if err != nil {
-			return fmt.Errorf("dashboard refresh: parse segments: %w", err)
-		}
-		specs = parsed
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("dashboard refresh: load config: %w", err)
 	}
 
 	now := time.Now().UTC()
+	for _, v := range targets {
+		if err := refreshOneView(out, db, cfg.DBPath, v, now, opts.force, adhoc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-	cooldownRaw, _ := backlog.GetConfig(db, dashboard.KeyCooldown)
-	cooldown := dashboard.ParseCooldown(cooldownRaw)
+// resolveRefreshTargets picks the view(s) to refresh from the mutually
+// exclusive --view/--all/--projects flags, defaulting to every saved view.
+//
+// The --all/default path tolerates a malformed view blob: it proceeds with
+// every view that DID parse and prints a warning to out, rather than
+// blocking refresh of every good view over one corrupt one (matching
+// `status`/`view list`). A specific --view <name> still errors outright —
+// the caller asked for that one view by name.
+func resolveRefreshTargets(out io.Writer, db *sql.DB, opts dashboardRefreshOpts) (targets []dashboard.View, adhoc bool, err error) {
+	selected := 0
+	if opts.view != "" {
+		selected++
+	}
+	if opts.all {
+		selected++
+	}
+	if opts.projects != "" {
+		selected++
+	}
+	if selected > 1 {
+		return nil, false, fmt.Errorf("dashboard refresh: --view, --all, and --projects are mutually exclusive")
+	}
 
-	if !force {
-		if lastRaw, err := backlog.GetConfig(db, dashboard.KeyLastRefresh); err == nil {
-			// Corrupt/unparsable last_refresh (only ever self-written) fails
-			// open: treat as no prior refresh rather than blocking; --force
-			// remains available.
-			if last, err := time.Parse(time.RFC3339, lastRaw); err == nil {
+	switch {
+	case opts.projects != "":
+		projects := splitCSV(opts.projects)
+		return []dashboard.View{{Name: "_adhoc", Projects: projects}}, true, nil
+	case opts.view != "":
+		v, ok, getErr := dashboard.GetView(db, opts.view)
+		if getErr != nil {
+			return nil, false, fmt.Errorf("dashboard refresh: %w", getErr)
+		}
+		if !ok {
+			return nil, false, fmt.Errorf("dashboard refresh: unknown view %q", opts.view)
+		}
+		return []dashboard.View{v}, false, nil
+	default:
+		views, listErr := dashboard.ListViews(db)
+		if listErr != nil {
+			if len(views) == 0 {
+				return nil, false, fmt.Errorf("dashboard refresh: %w", listErr)
+			}
+			fmt.Fprintf(out, "warning: some views failed to load: %s\n", listErr.Error())
+		}
+		return views, false, nil
+	}
+}
+
+// refreshOneView refreshes a single view: cooldown gate, per-project
+// segment run, project-stamped accumulation, and one NDJSON output file.
+func refreshOneView(out io.Writer, db *sql.DB, dbPath string, v dashboard.View, now time.Time, force, adhoc bool) error {
+	if !adhoc && !force {
+		rt, err := dashboard.GetViewRuntime(db, v.Name)
+		if err == nil && rt.LastRefresh != "" {
+			if last, parseErr := time.Parse(time.RFC3339, rt.LastRefresh); parseErr == nil {
+				cooldown := dashboard.ViewCooldown(db, v)
 				if remaining := cooldown - now.Sub(last); remaining > 0 {
-					fmt.Fprintf(out, "dashboard: within cooldown (%s remaining); use --force\n", remaining.Round(time.Second))
+					fmt.Fprintf(out, "view %s: within cooldown (%s remaining); use --force\n", v.Name, remaining.Round(time.Second))
 					return nil
 				}
 			}
 		}
 	}
 
-	ctx := resolveDashboardContext()
-	ctx.Now = now.Format(time.RFC3339)
-
-	var attempted int
 	var accumulated []dashboard.Fragment
 	var drops []string
 
-	for _, spec := range specs {
-		if !spec.IsEnabled() {
-			continue
-		}
-		attempted++
-
-		if spec.Builtin == "" {
-			drops = append(drops, fmt.Sprintf("%s: exec/shell producers not yet supported", spec.ID))
-			continue
-		}
-
-		prov, ok := dashboard.Builtin(spec.Builtin)
-		if !ok {
-			drops = append(drops, fmt.Sprintf("%s: unknown builtin: %s", spec.ID, spec.Builtin))
-			continue
-		}
-
-		frags, err := prov(ctx, db)
+	for _, project := range v.Projects {
+		specs, err := dashboard.EffectiveSegments(db, project)
 		if err != nil {
-			drops = append(drops, fmt.Sprintf("%s: %s", spec.ID, err.Error()))
-			continue
-		}
-		if len(frags) == 0 {
+			drops = append(drops, fmt.Sprintf("%s: effective segments: %s", project, err.Error()))
 			continue
 		}
 
-		var buf bytes.Buffer
-		if err := dashboard.Emit(&buf, frags); err != nil {
-			drops = append(drops, fmt.Sprintf("%s: emit: %s", spec.ID, err.Error()))
-			continue
-		}
+		ctx := resolveDashboardContext()
+		ctx.Project = project
+		ctx.Now = now.Format(time.RFC3339)
 
-		res, err := dashboard.Parse(&buf)
-		if err != nil {
-			drops = append(drops, fmt.Sprintf("%s: parse: %s", spec.ID, err.Error()))
-			continue
-		}
-		accumulated = append(accumulated, res.Fragments...)
-		for range res.Dropped {
-			drops = append(drops, fmt.Sprintf("%s: dropped fragment", spec.ID))
+		for _, spec := range specs {
+			if !spec.IsEnabled() {
+				continue
+			}
+
+			if spec.Builtin == "" {
+				drops = append(drops, fmt.Sprintf("%s/%s: exec/shell producers not yet supported", project, spec.ID))
+				continue
+			}
+
+			prov, ok := dashboard.Builtin(spec.Builtin)
+			if !ok {
+				drops = append(drops, fmt.Sprintf("%s/%s: unknown builtin: %s", project, spec.ID, spec.Builtin))
+				continue
+			}
+
+			frags, err := prov(ctx, db)
+			if err != nil {
+				drops = append(drops, fmt.Sprintf("%s/%s: %s", project, spec.ID, err.Error()))
+				continue
+			}
+			if len(frags) == 0 {
+				continue
+			}
+
+			var buf bytes.Buffer
+			if err := dashboard.Emit(&buf, frags); err != nil {
+				drops = append(drops, fmt.Sprintf("%s/%s: emit: %s", project, spec.ID, err.Error()))
+				continue
+			}
+
+			res, err := dashboard.Parse(&buf)
+			if err != nil {
+				drops = append(drops, fmt.Sprintf("%s/%s: parse: %s", project, spec.ID, err.Error()))
+				continue
+			}
+			accumulated = append(accumulated, dashboard.StampProject(res.Fragments, project)...)
+			for range res.Dropped {
+				drops = append(drops, fmt.Sprintf("%s/%s: dropped fragment", project, spec.ID))
+			}
 		}
 	}
 
-	outputPath, err := backlog.GetConfig(db, dashboard.KeyOutput)
-	if err != nil {
-		cfg, cfgErr := config.Load()
-		if cfgErr != nil {
-			return fmt.Errorf("dashboard refresh: load config: %w", cfgErr)
-		}
-		outputPath = filepath.Join(filepath.Dir(cfg.DBPath), "dashboard.ndjson")
-	}
-
+	outputPath := dashboard.ViewOutputPath(db, v, dbPath)
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return fmt.Errorf("dashboard refresh: create output dir: %w", err)
 	}
@@ -208,17 +478,39 @@ func runDashboardRefresh(out io.Writer, db *sql.DB, force bool) error {
 	if err != nil {
 		return fmt.Errorf("dashboard refresh: create output file: %w", err)
 	}
-	defer f.Close() //nolint:errcheck
-
-	if err := dashboard.Emit(f, accumulated); err != nil {
-		return fmt.Errorf("dashboard refresh: write output: %w", err)
+	writeErr := dashboard.Emit(f, accumulated)
+	closeErr := f.Close()
+	if writeErr != nil {
+		return fmt.Errorf("dashboard refresh: write output: %w", writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("dashboard refresh: close output file: %w", closeErr)
 	}
 
-	if err := backlog.SetConfig(db, dashboard.KeyLastRefresh, now.Format(time.RFC3339)); err != nil {
-		return fmt.Errorf("dashboard refresh: save last_refresh: %w", err)
+	if !adhoc {
+		if err := dashboard.SetViewLastRefresh(db, v.Name, now.Format(time.RFC3339)); err != nil {
+			return fmt.Errorf("dashboard refresh: save last_refresh: %w", err)
+		}
 	}
 
-	fmt.Fprintf(out, "refreshed %d segments, %d fragments (%d dropped) -> %s\n",
-		attempted, len(accumulated), len(drops), outputPath)
+	fmt.Fprintf(out, "refreshed view %s (%d projects): %d fragments (%d dropped) -> %s\n",
+		v.Name, len(v.Projects), len(accumulated), len(drops), outputPath)
 	return nil
+}
+
+// splitCSV splits a comma-separated list, trimming whitespace and dropping
+// empty entries.
+func splitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

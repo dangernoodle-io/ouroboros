@@ -45,6 +45,25 @@ func TestGetAllConfig(t *testing.T) {
 	assert.Equal(t, "value2", config["key2"])
 }
 
+func TestDeleteConfig(t *testing.T) {
+	d := testDB(t)
+
+	require.NoError(t, backlog.SetConfig(d, "test-key", "test-value"))
+
+	require.NoError(t, backlog.DeleteConfig(d, "test-key"))
+
+	_, err := backlog.GetConfig(d, "test-key")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestDeleteConfig_NonExistentKeyIsNoop(t *testing.T) {
+	d := testDB(t)
+
+	err := backlog.DeleteConfig(d, "nonexistent")
+	require.NoError(t, err)
+}
+
 func TestSetConfigOverwrite(t *testing.T) {
 	d := testDB(t)
 
