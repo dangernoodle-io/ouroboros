@@ -16,10 +16,11 @@ import (
 // Config keys under which the dashboard layer stores its settings in the
 // backlog config table.
 const (
-	KeyEnabled   = "dashboard.enabled"
-	KeySegments  = "dashboard.segments"
-	KeyCooldown  = "dashboard.cooldown"
-	KeyOutputDir = "dashboard.output_dir"
+	KeyEnabled       = "dashboard.enabled"
+	KeySegments      = "dashboard.segments"
+	KeyCooldown      = "dashboard.cooldown"
+	KeyOutputDir     = "dashboard.output_dir"
+	KeyWorkspaceRoot = "dashboard.workspace_root"
 
 	// ViewKeyPrefix/ProjectKeyPrefix/RuntimeKeyPrefix key one JSON blob per
 	// entity: dashboard.view.<name>, dashboard.project.<name>,
@@ -48,6 +49,9 @@ type View struct {
 // ProjectConfig holds per-project dashboard overrides.
 type ProjectConfig struct {
 	Segments []SegmentSpec `json:"segments,omitempty"`
+	// Repo overrides the on-disk repo path a project resolves to (see
+	// ResolveRepo). Wins over dashboard.workspace_root when set.
+	Repo string `json:"repo,omitempty"`
 }
 
 // viewRuntime holds per-view runtime state (last_refresh), stored under a
@@ -163,6 +167,44 @@ func SetProjectConfig(db *sql.DB, project string, pc ProjectConfig) error {
 		return err
 	}
 	return backlog.SetConfig(db, ProjectKeyPrefix+project, string(b))
+}
+
+// ResolveRepo resolves the on-disk repo path for a project: a per-project
+// Repo override wins, else dashboard.workspace_root joined with the project
+// name, else "" (gitSegment then falls back to ctx.Cwd/cwd auto-detection,
+// leaving unconfigured behavior unchanged). It does not stat or validate the
+// resolved path — gitSegment already degrades gracefully on a bad dir.
+func ResolveRepo(db *sql.DB, project string) (string, error) {
+	pc, err := GetProjectConfig(db, project)
+	if err != nil {
+		return "", err
+	}
+	if pc.Repo != "" {
+		return pc.Repo, nil
+	}
+
+	root, err := backlog.GetConfig(db, KeyWorkspaceRoot)
+	if err != nil {
+		// backlog.GetConfig returns a generic error both for "key not
+		// found" (the normal, expected case when no workspace root is
+		// configured) and for a genuine DB failure. A real DB failure
+		// would already have surfaced above, from GetProjectConfig's own
+		// query — so failing open here (treat as "unset") never masks
+		// it, and keeps the common unconfigured case error-free.
+		return "", nil //nolint:nilerr // fail open: GetConfig doesn't distinguish not-found from a real error; a real DB failure already surfaced via GetProjectConfig above
+	}
+	if root == "" {
+		return "", nil
+	}
+	// Never join a project name that could escape workspace_root (path
+	// separator or ".." segment) — fail safe to unresolved rather than a
+	// traversal path. Mirrors validViewName's safety check. The pc.Repo
+	// override above is exempt: it's an operator-set full path, not
+	// joined against anything.
+	if strings.ContainsAny(project, "/\\") || strings.Contains(project, "..") {
+		return "", nil
+	}
+	return filepath.Join(root, project), nil
 }
 
 // EffectiveSegments resolves the segment list for one project: an explicit
