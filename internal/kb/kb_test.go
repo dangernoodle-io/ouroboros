@@ -688,6 +688,296 @@ func TestWriteBatch_NoConflictSameContent(t *testing.T) {
 	assert.Empty(t, results[0].PreviousExcerpt)
 }
 
+// strPtr and stringsPtr are small helpers for building EntryUpdate literals.
+func strPtr(s string) *string { return &s }
+
+// TestUpdateBatch_RetitleInPlace_NoNewRow is the core bug repro: an
+// id-addressed title-only update must retitle the existing row, not create
+// a new one under the new natural key.
+func TestUpdateBatch_RetitleInPlace_NoNewRow(t *testing.T) {
+	db := testDB(t)
+
+	created, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "decision", Project: "acme-corp", Title: "oldtitlexyz", Content: "original content"},
+	}, "")
+	require.NoError(t, err)
+	require.Len(t, created, 1)
+	id := created[0].ID
+
+	results, err := kb.UpdateBatch(db, []kb.EntryUpdate{
+		{ID: id, Title: strPtr("newtitlexyz")},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "updated", results[0].Action)
+	assert.Equal(t, "newtitlexyz", results[0].Title)
+
+	// Exactly one row for this project — no duplicate created.
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, id, docs[0].ID)
+	assert.Equal(t, "newtitlexyz", docs[0].Title)
+
+	// Content preserved (partial update touched title only).
+	full, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "original content", full.Content)
+
+	// FTS finds it under the new title, not the old one.
+	byNew, err := store.SearchDocuments(db, "newtitlexyz", nil, nil, nil, 10)
+	require.NoError(t, err)
+	require.Len(t, byNew, 1)
+	byOld, err := store.SearchDocuments(db, "oldtitlexyz", nil, nil, nil, 10)
+	require.NoError(t, err)
+	assert.Empty(t, byOld)
+}
+
+// TestUpdateBatch_PartialUpdate_ContentPreserved verifies an update that
+// touches only some fields leaves the rest untouched.
+func TestUpdateBatch_PartialUpdate_ContentPreserved(t *testing.T) {
+	db := testDB(t)
+
+	created, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "fact", Project: "acme-corp", Category: "config", Title: "db-host", Content: "prod.example.com", Notes: "keep me"},
+	}, "")
+	require.NoError(t, err)
+	id := created[0].ID
+
+	_, err = kb.UpdateBatch(db, []kb.EntryUpdate{
+		{ID: id, Content: strPtr("staging.example.com")},
+	})
+	require.NoError(t, err)
+
+	full, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "staging.example.com", full.Content)
+	assert.Equal(t, "db-host", full.Title)
+	assert.Equal(t, "keep me", full.Notes)
+	assert.Equal(t, "config", full.Category)
+}
+
+// TestUpdateBatch_NonexistentID_Errors verifies a clear error, not a silent
+// no-op or a new row, when the id doesn't exist.
+func TestUpdateBatch_NonexistentID_Errors(t *testing.T) {
+	db := testDB(t)
+
+	results, err := kb.UpdateBatch(db, []kb.EntryUpdate{
+		{ID: 999999, Title: strPtr("does not matter")},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "999999")
+	assert.Nil(t, results)
+}
+
+// TestUpdateBatch_ValidationFailure_EmptyTitle verifies a provided-but-empty
+// required field is rejected, not silently accepted.
+func TestUpdateBatch_ValidationFailure_EmptyTitle(t *testing.T) {
+	db := testDB(t)
+
+	created, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "note", Project: "acme-corp", Title: "keep-me", Content: "c"},
+	}, "")
+	require.NoError(t, err)
+	id := created[0].ID
+
+	_, err = kb.UpdateBatch(db, []kb.EntryUpdate{
+		{ID: id, Title: strPtr("")},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "title cannot be empty")
+
+	// Original row untouched.
+	full, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "keep-me", full.Title)
+}
+
+// TestUpdateBatch_AllFields exercises every EntryUpdate field through the
+// full UpdateBatch path (validation + store update + PutResult).
+func TestUpdateBatch_AllFields(t *testing.T) {
+	db := testDB(t)
+
+	created, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "fact", Project: "acme-corp", Title: "multi-field-batch", Content: "v1"},
+	}, "")
+	require.NoError(t, err)
+	id := created[0].ID
+
+	tags := []string{"x", "y"}
+	meta := map[string]string{"k": "v"}
+	results, err := kb.UpdateBatch(db, []kb.EntryUpdate{
+		{
+			ID:       id,
+			Type:     strPtr("decision"),
+			Project:  strPtr("other-proj"),
+			Category: strPtr("arch"),
+			Title:    strPtr("multi-field-batch-renamed"),
+			Content:  strPtr("v2"),
+			Notes:    strPtr("notes here"),
+			Tags:     &tags,
+			Metadata: &meta,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "multi-field-batch-renamed", results[0].Title)
+
+	full, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "decision", full.Type)
+	assert.Equal(t, "other-proj", full.Project)
+	assert.Equal(t, "arch", full.Category)
+	assert.Equal(t, "v2", full.Content)
+	assert.Equal(t, "notes here", full.Notes)
+	assert.ElementsMatch(t, tags, full.Tags)
+	assert.Equal(t, meta, full.Metadata)
+}
+
+// TestUpdateBatch_BeginTxError exercises UpdateBatch's db.BeginTx() error
+// path (closed DB), mirroring the store package's *_BeginError tests.
+func TestUpdateBatch_BeginTxError(t *testing.T) {
+	db := testDB(t)
+	require.NoError(t, db.Close())
+
+	results, err := kb.UpdateBatch(db, []kb.EntryUpdate{{ID: 1, Title: strPtr("x")}})
+	require.Error(t, err)
+	assert.Nil(t, results)
+}
+
+// TestUpdateBatch_Empty_NoResults mirrors TestWriteBatch_Empty_NoResults.
+func TestUpdateBatch_Empty_NoResults(t *testing.T) {
+	db := testDB(t)
+
+	results, err := kb.UpdateBatch(db, []kb.EntryUpdate{})
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+// TestWriteAndUpdateBatch_MixedHappyPath verifies a single call can mix a
+// create (id absent) and an update (id present), both committing together.
+func TestWriteAndUpdateBatch_MixedHappyPath(t *testing.T) {
+	db := testDB(t)
+
+	seeded, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "fact", Project: "acme-corp", Title: "combined-existing", Content: "c1"},
+	}, "")
+	require.NoError(t, err)
+	id := seeded[0].ID
+
+	creates, updates, err := kb.WriteAndUpdateBatch(db,
+		[]kb.Entry{{Type: "note", Project: "acme-corp", Title: "combined-new", Content: "c2"}},
+		[]kb.EntryUpdate{{ID: id, Title: strPtr("combined-existing-renamed")}},
+		"",
+	)
+	require.NoError(t, err)
+	require.Len(t, creates, 1)
+	require.Len(t, updates, 1)
+	assert.Equal(t, "combined-new", creates[0].Title)
+	assert.Equal(t, "combined-existing-renamed", updates[0].Title)
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+}
+
+// TestWriteAndUpdateBatch_PartialFailure_RollsBackCreate is the core
+// atomicity repro: a create alongside a failing update in the same call
+// must not persist the create.
+func TestWriteAndUpdateBatch_PartialFailure_RollsBackCreate(t *testing.T) {
+	db := testDB(t)
+
+	creates, updates, err := kb.WriteAndUpdateBatch(db,
+		[]kb.Entry{{Type: "fact", Project: "acme-corp", Title: "should-not-persist", Content: "c1"}},
+		[]kb.EntryUpdate{{ID: 999999, Title: strPtr("does not matter")}},
+		"",
+	)
+	require.Error(t, err)
+	assert.Nil(t, creates)
+	assert.Nil(t, updates)
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	assert.Empty(t, docs, "create in the same failed call must not persist")
+}
+
+// TestWriteAndUpdateBatch_EmptyBoth verifies no-op on empty entries/updates.
+func TestWriteAndUpdateBatch_EmptyBoth(t *testing.T) {
+	db := testDB(t)
+
+	creates, updates, err := kb.WriteAndUpdateBatch(db, nil, nil, "")
+	require.NoError(t, err)
+	assert.Empty(t, creates)
+	assert.Empty(t, updates)
+}
+
+// TestWriteAndUpdateBatch_CreateValidationFailure_AbortsBeforeTx verifies a
+// bad create entry fails validation before any DB interaction, leaving the
+// update side untouched too.
+func TestWriteAndUpdateBatch_CreateValidationFailure_AbortsBeforeTx(t *testing.T) {
+	db := testDB(t)
+
+	seeded, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "fact", Project: "acme-corp", Title: "untouched", Content: "c1"},
+	}, "")
+	require.NoError(t, err)
+	id := seeded[0].ID
+
+	_, _, err = kb.WriteAndUpdateBatch(db,
+		[]kb.Entry{{Type: "", Project: "acme-corp", Title: "invalid-entry", Content: "bad"}},
+		[]kb.EntryUpdate{{ID: id, Title: strPtr("should-not-apply")}},
+		"",
+	)
+	require.Error(t, err)
+
+	full, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "untouched", full.Title)
+}
+
+// TestWriteAndUpdateBatch_BeginTxError exercises the db.BeginTx() error
+// path (closed DB).
+func TestWriteAndUpdateBatch_BeginTxError(t *testing.T) {
+	db := testDB(t)
+	require.NoError(t, db.Close())
+
+	creates, updates, err := kb.WriteAndUpdateBatch(db,
+		[]kb.Entry{{Type: "fact", Project: "acme-corp", Title: "x", Content: "c"}},
+		nil, "")
+	require.Error(t, err)
+	assert.Nil(t, creates)
+	assert.Nil(t, updates)
+}
+
+// TestValidateEntryUpdate covers each ValidateEntryUpdate rejection branch.
+func TestValidateEntryUpdate(t *testing.T) {
+	cases := []struct {
+		name    string
+		update  kb.EntryUpdate
+		wantErr string
+	}{
+		{"empty type", kb.EntryUpdate{Type: strPtr("")}, "type cannot be empty"},
+		{"invalid type", kb.EntryUpdate{Type: strPtr("bogus")}, "invalid type"},
+		{"empty project", kb.EntryUpdate{Project: strPtr("")}, "project cannot be empty"},
+		{"empty title", kb.EntryUpdate{Title: strPtr("")}, "title cannot be empty"},
+		{"empty content", kb.EntryUpdate{Content: strPtr("")}, "content cannot be empty"},
+		{"content too long", kb.EntryUpdate{Content: strPtr(string(make([]rune, kb.ContentMaxLen+1)))}, "exceeds"},
+		{"valid, no error", kb.EntryUpdate{Type: strPtr("decision"), Title: strPtr("ok")}, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := kb.ValidateEntryUpdate(tc.update)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
 // TestWriteBatch_ConflictExcerptTruncated verifies long previous content is truncated to 100 chars.
 func TestWriteBatch_ConflictExcerptTruncated(t *testing.T) {
 	db := testDB(t)

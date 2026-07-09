@@ -110,11 +110,11 @@
       "annotations": {
         "idempotentHint": true
       },
-      "description": "Create or update knowledge entries via entries[], upserting by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb.",
+      "description": "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb.",
       "inputSchema": {
         "properties": {
           "entries": {
-            "description": "Documents to upsert",
+            "description": "Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?",
             "type": "array"
           }
         },

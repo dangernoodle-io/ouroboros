@@ -35,7 +35,7 @@ MCP surface is intentionally narrow (5 tools); operator-style ops are CLI-only. 
 |------|------|-------------|
 | get | Read | Fetch entries by ID or filters (requires `domain`: kb\|backlog\|roadmap) |
 | search | Read | Full-text search (requires `domain`: kb\|backlog\|roadmap) |
-| kb | Write | Create or update knowledge entries (upserts by type+project+category+title) |
+| kb | Write | Create or update (by id) knowledge entries (id absent: upserts by type+project+category+title) |
 | backlog | Write | Create, update, or delete backlog items |
 | roadmap | Write | Mutate per-project roadmap (now/next/deferred/parked/dropped/done sections; items carry two single-valued grouping axes, component + epic, plus optional position; via op=add\|update\|move\|reorder\|done\|remove) |
 

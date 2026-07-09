@@ -235,6 +235,130 @@ func UpsertDocumentTx(tx *sql.Tx, doc Document) (*UpsertResult, error) {
 	return upsertDocumentExec(tx, doc)
 }
 
+// UpdateDocumentFields is a partial, id-addressed document patch. Nil
+// pointers mean "leave unchanged" — this is what lets a title-only update
+// retitle a document in place without touching its content/notes/tags, and
+// is the fix for the retitle-creates-a-duplicate bug (the natural-key
+// upsert treats title as part of the key).
+type UpdateDocumentFields struct {
+	Type     *string
+	Project  *string
+	Category *string
+	Title    *string
+	Content  *string
+	Notes    *string
+	Tags     *[]string
+	Metadata *map[string]string
+}
+
+// updateDocumentExec contains the core id-addressed partial-update logic
+// operating on a sqlExecutor. Callers are responsible for FTS rebuild.
+// Returns an error if id does not exist.
+func updateDocumentExec(q sqlExecutor, id int64, fields UpdateDocumentFields) (*Document, error) {
+	var sets []string
+	var args []interface{}
+
+	if fields.Type != nil {
+		sets = append(sets, "type = ?")
+		args = append(args, *fields.Type)
+	}
+	if fields.Project != nil {
+		sets = append(sets, "project = ?")
+		args = append(args, *fields.Project)
+	}
+	if fields.Category != nil {
+		sets = append(sets, "category = ?")
+		args = append(args, *fields.Category)
+	}
+	if fields.Title != nil {
+		sets = append(sets, "title = ?")
+		args = append(args, *fields.Title)
+	}
+	if fields.Content != nil {
+		if len(*fields.Content) > MaxDocContentBytes {
+			return nil, fmt.Errorf("content exceeds %d byte cap (got %d)", MaxDocContentBytes, len(*fields.Content))
+		}
+		sets = append(sets, "content = ?")
+		args = append(args, *fields.Content)
+	}
+	if fields.Notes != nil {
+		if len(*fields.Notes) > MaxDocNotesBytes {
+			return nil, fmt.Errorf("notes exceeds %d byte cap (got %d)", MaxDocNotesBytes, len(*fields.Notes))
+		}
+		sets = append(sets, "notes = ?")
+		args = append(args, *fields.Notes)
+	}
+	if fields.Tags != nil {
+		tagsJSON, err := json.Marshal(*fields.Tags)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal tags: %w", err)
+		}
+		sets = append(sets, "tags = ?")
+		args = append(args, string(tagsJSON))
+	}
+	if fields.Metadata != nil {
+		metadataJSON, err := json.Marshal(*fields.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+		sets = append(sets, "metadata = ?")
+		args = append(args, string(metadataJSON))
+	}
+
+	if len(sets) == 0 {
+		doc, err := getDocumentExec(q, "id = ?", id)
+		if err != nil {
+			return nil, err
+		}
+		if doc == nil {
+			return nil, fmt.Errorf("document %d not found", id)
+		}
+		return doc, nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	sets = append(sets, "updated_at = ?")
+	args = append(args, now)
+	args = append(args, id)
+
+	result, err := q.Exec("UPDATE documents SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update document: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to update document: %w", err)
+	}
+	if rows == 0 {
+		return nil, fmt.Errorf("document %d not found", id)
+	}
+
+	return getDocumentExec(q, "id = ?", id)
+}
+
+// UpdateDocumentTx applies a partial, id-addressed update within an existing
+// transaction. The caller owns commit/rollback and FTS rebuild.
+func UpdateDocumentTx(tx *sql.Tx, id int64, fields UpdateDocumentFields) (*Document, error) {
+	return updateDocumentExec(tx, id, fields)
+}
+
+// UpdateDocument applies a partial, id-addressed update and rebuilds FTS.
+func UpdateDocument(db *sql.DB, id int64, fields UpdateDocumentFields) (*Document, error) {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+
+	doc, err := updateDocumentExec(db, id, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := RebuildFTS(db); err != nil {
+		return nil, fmt.Errorf("failed to rebuild FTS: %w", err)
+	}
+
+	return doc, nil
+}
+
 // GetDocument returns a full Document by ID. Returns nil, nil if not found.
 func GetDocument(db *sql.DB, id int64) (*Document, error) {
 	return getDocumentExec(db, "id = ?", id)

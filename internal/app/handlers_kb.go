@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strconv"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -21,60 +22,165 @@ func handleKB(db *sql.DB) server.ToolHandlerFunc {
 			return mcp.NewToolResultError("entries array is required (batch-only mode)"), nil //nolint:nilerr
 		}
 
-		// Convert to kb.Entry slice
+		// Split entries[] on id presence: id present -> update that doc in
+		// place (partial, by key-presence); id absent -> current
+		// upsert-by-natural-key (type+project+category+title) behavior,
+		// unchanged. The id key must be entirely ABSENT to select create —
+		// rowids start at 1, so id:0 (or any non-positive value) is a hard
+		// error, never a silent "treat as absent".
 		kbEntries := make([]kb.Entry, 0, len(entries))
+		var kbUpdates []kb.EntryUpdate
 		for _, e := range entries {
-			var entry kb.Entry
-
-			// Extract string fields
-			if v, ok := e["type"].(string); ok {
-				entry.Type = v
+			id, present, err := parseKBEntryID(e)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil //nolint:nilerr
 			}
-			if v, ok := e["project"].(string); ok {
-				entry.Project = v
+			if present {
+				kbUpdates = append(kbUpdates, parseKBEntryUpdate(id, e))
+				continue
 			}
-			if v, ok := e["title"].(string); ok {
-				entry.Title = v
-			}
-			if v, ok := e["content"].(string); ok {
-				entry.Content = v
-			}
-			if v, ok := e["category"].(string); ok {
-				entry.Category = v
-			}
-			if v, ok := e["notes"].(string); ok {
-				entry.Notes = v
-			}
-
-			// Extract tags array
-			if rawTags, ok := e["tags"].([]interface{}); ok {
-				for _, t := range rawTags {
-					if s, ok := t.(string); ok {
-						entry.Tags = append(entry.Tags, s)
-					}
-				}
-			}
-
-			// Extract metadata
-			if rawMeta, ok := e["metadata"].(map[string]interface{}); ok {
-				entry.Metadata = make(map[string]string)
-				for k, v := range rawMeta {
-					if s, ok := v.(string); ok {
-						entry.Metadata[k] = s
-					}
-				}
-			}
-
-			kbEntries = append(kbEntries, entry)
+			kbEntries = append(kbEntries, parseKBEntryCreate(e))
 		}
 
-		results, err := kb.WriteBatch(db, kbEntries, "")
+		// One atomic call: every create and update in this batch commits
+		// together or none do (single tx, single FTS rebuild) — a partial
+		// failure (e.g. an update targeting a nonexistent id) must not
+		// leave an earlier create in the same call persisted.
+		createResults, updateResults, err := kb.WriteAndUpdateBatch(db, kbEntries, kbUpdates, "")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
+		results := make([]interface{}, 0, len(createResults)+len(updateResults))
+		for _, r := range createResults {
+			results = append(results, r)
+		}
+		for _, r := range updateResults {
+			results = append(results, r)
+		}
+
 		return jsonResult(results)
 	}
+}
+
+// parseKBEntryID resolves the optional id field of an entries[] item. The
+// id key must be entirely ABSENT to select the create/upsert path — rowids
+// start at 1, so id:0 (or any non-positive value) is invalid, not a silent
+// "treat as absent" sentinel. A present id accepts a JSON number or a
+// numeric string (so a string-typed id like "42" still routes to update
+// instead of silently misrouting to create); anything else is a hard error.
+func parseKBEntryID(e map[string]interface{}) (id int64, present bool, err error) {
+	raw, ok := e["id"]
+	if !ok {
+		return 0, false, nil
+	}
+
+	switch v := raw.(type) {
+	case float64:
+		if v != float64(int64(v)) || v <= 0 {
+			return 0, true, fmt.Errorf("invalid id: %v", raw)
+		}
+		return int64(v), true, nil
+	case string:
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return 0, true, fmt.Errorf("invalid id: %v", raw)
+		}
+		return n, true, nil
+	default:
+		return 0, true, fmt.Errorf("invalid id: %v", raw)
+	}
+}
+
+// parseKBEntryCreate converts a raw entries[] map into a kb.Entry for the
+// id-absent upsert-by-natural-key path.
+func parseKBEntryCreate(e map[string]interface{}) kb.Entry {
+	var entry kb.Entry
+
+	if v, ok := e["type"].(string); ok {
+		entry.Type = v
+	}
+	if v, ok := e["project"].(string); ok {
+		entry.Project = v
+	}
+	if v, ok := e["title"].(string); ok {
+		entry.Title = v
+	}
+	if v, ok := e["content"].(string); ok {
+		entry.Content = v
+	}
+	if v, ok := e["category"].(string); ok {
+		entry.Category = v
+	}
+	if v, ok := e["notes"].(string); ok {
+		entry.Notes = v
+	}
+
+	if rawTags, ok := e["tags"].([]interface{}); ok {
+		for _, t := range rawTags {
+			if s, ok := t.(string); ok {
+				entry.Tags = append(entry.Tags, s)
+			}
+		}
+	}
+
+	if rawMeta, ok := e["metadata"].(map[string]interface{}); ok {
+		entry.Metadata = make(map[string]string)
+		for k, v := range rawMeta {
+			if s, ok := v.(string); ok {
+				entry.Metadata[k] = s
+			}
+		}
+	}
+
+	return entry
+}
+
+// parseKBEntryUpdate converts a raw entries[] map into a kb.EntryUpdate for
+// the id-addressed update path. Pointer fields track key presence (not just
+// non-empty values), so a title-only update leaves content/notes/tags
+// untouched instead of clobbering them with zero values.
+func parseKBEntryUpdate(id int64, e map[string]interface{}) kb.EntryUpdate {
+	u := kb.EntryUpdate{ID: id}
+
+	if v, ok := e["type"].(string); ok {
+		u.Type = &v
+	}
+	if v, ok := e["project"].(string); ok {
+		u.Project = &v
+	}
+	if v, ok := e["category"].(string); ok {
+		u.Category = &v
+	}
+	if v, ok := e["title"].(string); ok {
+		u.Title = &v
+	}
+	if v, ok := e["content"].(string); ok {
+		u.Content = &v
+	}
+	if v, ok := e["notes"].(string); ok {
+		u.Notes = &v
+	}
+	if rawTags, ok := e["tags"].([]interface{}); ok {
+		tags := make([]string, 0, len(rawTags))
+		for _, t := range rawTags {
+			if s, ok := t.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+		u.Tags = &tags
+	}
+	if rawMeta, ok := e["metadata"].(map[string]interface{}); ok {
+		meta := make(map[string]string, len(rawMeta))
+		for k, v := range rawMeta {
+			if s, ok := v.(string); ok {
+				meta[k] = s
+			}
+		}
+		u.Metadata = &meta
+	}
+
+	return u
 }
 
 // handleGet dispatches the read tool by required domain (kb|backlog).

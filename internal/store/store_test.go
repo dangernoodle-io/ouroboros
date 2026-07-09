@@ -307,6 +307,132 @@ func TestDeleteDocumentTx(t *testing.T) {
 	assert.Nil(t, retrieved)
 }
 
+// strPtr, strSlicePtr, and strMapPtr are small helpers for building
+// UpdateDocumentFields literals in tests.
+func strPtr(s string) *string                          { return &s }
+func strSlicePtr(s []string) *[]string                 { return &s }
+func strMapPtr(m map[string]string) *map[string]string { return &m }
+
+func TestUpdateDocument_RetitleInPlace(t *testing.T) {
+	db := testDB(t)
+
+	result, err := store.UpsertDocument(db, store.Document{
+		Type: "note", Project: "acme-corp", Title: "old-title-upd", Content: "original",
+	})
+	require.NoError(t, err)
+	id := result.ID
+
+	doc, err := store.UpdateDocument(db, id, store.UpdateDocumentFields{Title: strPtr("new-title-upd")})
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.Equal(t, "new-title-upd", doc.Title)
+	assert.Equal(t, "original", doc.Content, "untouched field must be preserved")
+
+	retrieved, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "new-title-upd", retrieved.Title)
+}
+
+func TestUpdateDocument_AllFields(t *testing.T) {
+	db := testDB(t)
+
+	result, err := store.UpsertDocument(db, store.Document{
+		Type: "note", Project: "acme-corp", Title: "multi-field", Content: "v1",
+	})
+	require.NoError(t, err)
+	id := result.ID
+
+	tags := []string{"a", "b"}
+	meta := map[string]string{"k": "v"}
+	doc, err := store.UpdateDocument(db, id, store.UpdateDocumentFields{
+		Type:     strPtr("decision"),
+		Project:  strPtr("other-proj"),
+		Category: strPtr("arch"),
+		Title:    strPtr("multi-field-renamed"),
+		Content:  strPtr("v2"),
+		Notes:    strPtr("notes here"),
+		Tags:     strSlicePtr(tags),
+		Metadata: strMapPtr(meta),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "decision", doc.Type)
+	assert.Equal(t, "other-proj", doc.Project)
+	assert.Equal(t, "arch", doc.Category)
+	assert.Equal(t, "multi-field-renamed", doc.Title)
+	assert.Equal(t, "v2", doc.Content)
+	assert.Equal(t, "notes here", doc.Notes)
+	assert.ElementsMatch(t, tags, doc.Tags)
+	assert.Equal(t, meta, doc.Metadata)
+}
+
+func TestUpdateDocument_NoFieldsReturnsCurrent(t *testing.T) {
+	db := testDB(t)
+
+	result, err := store.UpsertDocument(db, store.Document{
+		Type: "note", Project: "acme-corp", Title: "no-op-update", Content: "v1",
+	})
+	require.NoError(t, err)
+	id := result.ID
+
+	doc, err := store.UpdateDocument(db, id, store.UpdateDocumentFields{})
+	require.NoError(t, err)
+	assert.Equal(t, "no-op-update", doc.Title)
+	assert.Equal(t, "v1", doc.Content)
+}
+
+func TestUpdateDocument_NonexistentID_Errors(t *testing.T) {
+	db := testDB(t)
+
+	doc, err := store.UpdateDocument(db, 999999, store.UpdateDocumentFields{Title: strPtr("x")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "999999")
+	assert.Nil(t, doc)
+}
+
+// TestUpdateDocument_NonexistentID_NoFields_Errors covers the len(sets)==0
+// branch of updateDocumentExec when the id also doesn't exist.
+func TestUpdateDocument_NonexistentID_NoFields_Errors(t *testing.T) {
+	db := testDB(t)
+
+	doc, err := store.UpdateDocument(db, 999999, store.UpdateDocumentFields{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "999999")
+	assert.Nil(t, doc)
+}
+
+func TestUpdateDocumentTx_CommitsWithCaller(t *testing.T) {
+	db := testDB(t)
+
+	result, err := store.UpsertDocument(db, store.Document{
+		Type: "note", Project: "acme-corp", Title: "tx-update", Content: "v1",
+	})
+	require.NoError(t, err)
+	id := result.ID
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	doc, err := store.UpdateDocumentTx(tx, id, store.UpdateDocumentFields{Content: strPtr("v2")})
+	require.NoError(t, err)
+	assert.Equal(t, "v2", doc.Content)
+	require.NoError(t, tx.Commit())
+
+	retrieved, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "v2", retrieved.Content)
+}
+
+// TestUpdateDocument_BeginError exercises UpdateDocument's dbMu-guarded path
+// against a closed DB (mirrors TestDeleteDocument_BeginError).
+func TestUpdateDocument_BeginError(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	require.NoError(t, store.ApplySchema(db))
+	require.NoError(t, db.Close())
+
+	_, err = store.UpdateDocument(db, 1, store.UpdateDocumentFields{Title: strPtr("x")})
+	require.Error(t, err)
+}
+
 func TestGetDocumentNotFound(t *testing.T) {
 	db := testDB(t)
 

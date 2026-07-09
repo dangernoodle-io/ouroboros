@@ -43,3 +43,33 @@ func ValidateDocument(doc store.Document) error {
 	}
 	return nil
 }
+
+// ValidateEntryUpdate enforces the update-by-id contract: only provided
+// (non-nil) fields are checked, but a provided value must still satisfy the
+// same invariants as create — a required field can be repointed but not
+// blanked (e.g. title="" is rejected, not a silent no-op).
+func ValidateEntryUpdate(u EntryUpdate) error {
+	if u.Type != nil {
+		if *u.Type == "" {
+			return fmt.Errorf("type cannot be empty")
+		}
+		if !validTypes[*u.Type] {
+			return fmt.Errorf("invalid type %q (must be one of: decision, fact, note, plan, relation)", *u.Type)
+		}
+	}
+	if u.Project != nil && *u.Project == "" {
+		return fmt.Errorf("project cannot be empty")
+	}
+	if u.Title != nil && *u.Title == "" {
+		return fmt.Errorf("title cannot be empty")
+	}
+	if u.Content != nil {
+		if *u.Content == "" {
+			return fmt.Errorf("content cannot be empty")
+		}
+		if len(*u.Content) > ContentMaxLen {
+			return fmt.Errorf("content exceeds %d char hard cap (got %d) - move narrative into notes field", ContentMaxLen, len(*u.Content))
+		}
+	}
+	return nil
+}
