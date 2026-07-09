@@ -84,7 +84,7 @@ ouroboros link item:BB-9 blocks item:TM-40          # create a cross-reference e
 ouroboros ls edges --label blocks                   # list edges
 ```
 
-Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. `ls edges`: `--label`, `--type item|kb` + `--id` (together). All subcommands: `--json`. Roadmap: `show` (`--by component|epic`, `--component`, `--epic`), `add`, `update`, `move`, `reorder`, `done`, `remove` — see `ouroboros roadmap --help`. Edges: `link <src> <label> <dst>` / `unlink <src> <label> <dst>` where src/dst are `item:<id>` or `kb:<id>`.
+Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6, exact match), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. `ls edges`: `--label`, `--type item|kb` + `--id` (together). All subcommands: `--json`. Roadmap: `show` (`--by component|epic`, `--component`, `--epic`), `add`, `update`, `move`, `reorder`, `done`, `remove`, `seed` (`--backlog`, `--priority` — max cap, e.g. `P2` includes P0-P2, unlike `ls items --priority`'s exact match — `--component`, `--status`, `--replace` — resyncs only the current fetch's matches, leaving previously-seeded items outside the filter untouched) — see `ouroboros roadmap --help`. Edges: `link <src> <label> <dst>` / `unlink <src> <label> <dst>` where src/dst are `item:<id>` or `kb:<id>`.
 
 ## Configuration
 
