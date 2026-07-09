@@ -130,7 +130,7 @@ func TestRunProjectDeleteBlocked(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -144,7 +144,7 @@ func TestRunProjectDeleteForce(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -160,7 +160,7 @@ func TestRunProjectDeleteReassign(t *testing.T) {
 	require.NoError(t, err)
 	_, err = backlog.CreateProject(db, "dst-proj", "DP")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, src.ID, src.Prefix, "P1", "Task", "", "", "")
+	_, err = backlog.AddItem(db, src.ID, src.Prefix, "P1", "Task", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -224,7 +224,7 @@ func TestRunProjectRenameNewPrefix(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	proj, err := backlog.AddItem(db, 1, "AC", "P1", "task", "", "", "")
+	proj, err := backlog.AddItem(db, 1, "AC", "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "AC-1", proj.ID)
 

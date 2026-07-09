@@ -78,7 +78,7 @@ func TestHandleBacklogBatchCreateAndUpdate(t *testing.T) {
 	proj, err := backlog.CreateProject(db, "test-project", "TP")
 	require.NoError(t, err)
 
-	item1, err := backlog.AddItem(db, proj.ID, "TP", "P0", "Task 1", "Initial", "", "")
+	item1, err := backlog.AddItem(db, proj.ID, "TP", "P0", "Task 1", "Initial", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -192,6 +192,178 @@ func TestHandleBacklogCreateWithNotesAndComponent(t *testing.T) {
 	assert.Equal(t, "api", item.Component)
 }
 
+// TestHandleBacklogCreateWithEpic verifies entries[].epic is persisted on create.
+func TestHandleBacklogCreateWithEpic(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "epic child",
+				"epic":     "AC-1",
+			},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	item, err := backlog.GetItem(db, "AC-1")
+	require.NoError(t, err)
+	assert.Equal(t, "AC-1", item.Epic)
+}
+
+// TestHandleBacklogCreateEpicNotScalar_Errors verifies create rejects a
+// non-string epic (single-valued enforcement).
+func TestHandleBacklogCreateEpicNotScalar_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "x",
+				"epic":     []interface{}{"AC-1", "AC-2"},
+			},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "single-valued")
+}
+
+// TestHandleBacklogUpdateComponent verifies entries[].component patches an
+// existing item (the success path — see
+// TestHandleBacklogUpdateComponentNotScalar_Errors for the rejection path).
+func TestHandleBacklogUpdateComponent(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"id": item.ID, "component": "widget"},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "widget", updated.Component)
+}
+
+// TestHandleBacklogUpdateEpic verifies entries[].epic patches an existing item.
+func TestHandleBacklogUpdateEpic(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"id": item.ID, "epic": "AC-9"},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "AC-9", updated.Epic)
+}
+
+// TestHandleBacklogUpdateEpicNotScalar_Errors verifies update rejects a
+// non-string epic (single-valued enforcement).
+func TestHandleBacklogUpdateEpicNotScalar_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"id": item.ID, "epic": []interface{}{"AC-1", "AC-2"}},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "single-valued")
+}
+
+// TestHandleBacklogCreateComponentNotScalar_Errors verifies create rejects a
+// non-string component (single-valued enforcement).
+func TestHandleBacklogCreateComponentNotScalar_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":   "acme-corp",
+				"priority":  "P1",
+				"title":     "x",
+				"component": []interface{}{"a", "b"},
+			},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "single-valued")
+}
+
+// TestHandleBacklogUpdateComponentNotScalar_Errors verifies update rejects a
+// non-string component (single-valued enforcement).
+func TestHandleBacklogUpdateComponentNotScalar_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"id": item.ID, "component": []interface{}{"a", "b"}},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "single-valued")
+}
+
 // TestHandleBacklogInvalidPriority verifies error on bad priority in create mode.
 func TestHandleBacklogInvalidPriority(t *testing.T) {
 	resetAllDB(t)
@@ -264,7 +436,7 @@ func TestHandleBacklogUpdateInvalidPriority(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Original task", "", "", "")
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Original task", "", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
@@ -286,9 +458,9 @@ func TestHandleBacklogDeleteMultiple(t *testing.T) {
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	item1, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Delete me 1", "", "", "")
+	item1, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Delete me 1", "", "", "", "")
 	require.NoError(t, err)
-	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Delete me 2", "", "", "")
+	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Delete me 2", "", "", "", "")
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{

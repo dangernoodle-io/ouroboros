@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 )
 
@@ -77,23 +78,31 @@ func parseSection(s string) (roadmap.Section, error) {
 
 // show
 
+var (
+	roadmapShowBy        string
+	roadmapShowComponent string
+	roadmapShowEpic      string
+)
+
 var roadmapShowCmd = &cobra.Command{
 	Use:   "show <project>",
 	Short: "Print the roadmap as Markdown",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDB(func(db *sql.DB) error {
-			return runRoadmapShow(cmd.OutOrStdout(), db, args[0])
+			return runRoadmapShow(cmd.OutOrStdout(), db, args[0], roadmapShowBy, roadmapShowComponent, roadmapShowEpic)
 		})
 	},
 }
 
-func runRoadmapShow(w io.Writer, db *sql.DB, project string) error {
+func runRoadmapShow(w io.Writer, db *sql.DB, project, by, component, epic string) error {
 	rm, err := roadmap.Load(db, project)
 	if err != nil {
 		return fmt.Errorf("roadmap: %w", err)
 	}
-	fmt.Fprint(w, roadmap.RenderMarkdown(rm))
+	rm = roadmap.Filter(rm, component, epic)
+	epicLabels := backlog.EpicLabels(db, roadmap.EpicIDs(rm))
+	fmt.Fprint(w, roadmap.RenderMarkdown(rm, by, epicLabels, nil))
 	return nil
 }
 
@@ -109,6 +118,8 @@ var (
 	roadmapAddKB        []string
 	roadmapAddTicket    []string
 	roadmapAddBlockedBy []string
+	roadmapAddEpic      string
+	roadmapAddPosition  int
 )
 
 var roadmapAddCmd = &cobra.Command{
@@ -144,19 +155,28 @@ var roadmapAddCmd = &cobra.Command{
 			KB:            kbIDs,
 			Ticket:        roadmapAddTicket,
 			BlockedBy:     blockers,
+			Epic:          roadmapAddEpic,
+		}
+
+		// AddItem's position is presence-signaled (mirrors move/reorder) —
+		// item.Position is never an ordering input, so only pass position
+		// through when --position was actually set.
+		var position []int
+		if cmd.Flags().Changed("position") {
+			position = []int{roadmapAddPosition}
 		}
 
 		return withDB(func(db *sql.DB) error {
-			return runRoadmapAdd(cmd.OutOrStdout(), db, args[0], section, item)
+			return runRoadmapAdd(cmd.OutOrStdout(), db, args[0], section, item, position...)
 		})
 	},
 }
 
-func runRoadmapAdd(w io.Writer, db *sql.DB, project string, section roadmap.Section, item roadmap.Item) error {
+func runRoadmapAdd(w io.Writer, db *sql.DB, project string, section roadmap.Section, item roadmap.Item, position ...int) error {
 	var id int
 	err := roadmap.Mutate(db, project, func(rm *roadmap.Roadmap) error {
 		var err error
-		id, err = roadmap.AddItem(rm, section, item)
+		id, err = roadmap.AddItem(rm, section, item, position...)
 		return err
 	})
 	if err != nil {
@@ -178,6 +198,7 @@ var (
 	roadmapUpdateKB        []string
 	roadmapUpdateTicket    []string
 	roadmapUpdateBlockedBy []string
+	roadmapUpdateEpic      string
 )
 
 var roadmapUpdateCmd = &cobra.Command{
@@ -223,6 +244,9 @@ var roadmapUpdateCmd = &cobra.Command{
 			}
 			patch.BlockedBy = &blockers
 		}
+		if cmd.Flags().Changed("epic") {
+			patch.Epic = &roadmapUpdateEpic
+		}
 
 		var toSection roadmap.Section
 		move := cmd.Flags().Changed("section")
@@ -258,7 +282,10 @@ func runRoadmapUpdate(w io.Writer, db *sql.DB, project string, id int, patch roa
 
 // move
 
-var roadmapMoveTo string
+var (
+	roadmapMoveTo       string
+	roadmapMovePosition int
+)
 
 var roadmapMoveCmd = &cobra.Command{
 	Use:   "move <project> <id>",
@@ -276,20 +303,59 @@ var roadmapMoveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("roadmap: %w", err)
 		}
+
+		var position []int
+		if cmd.Flags().Changed("position") {
+			position = []int{roadmapMovePosition}
+		}
+
 		return withDB(func(db *sql.DB) error {
-			return runRoadmapMove(cmd.OutOrStdout(), db, args[0], id, section)
+			return runRoadmapMove(cmd.OutOrStdout(), db, args[0], id, section, position...)
 		})
 	},
 }
 
-func runRoadmapMove(w io.Writer, db *sql.DB, project string, id int, section roadmap.Section) error {
+func runRoadmapMove(w io.Writer, db *sql.DB, project string, id int, section roadmap.Section, position ...int) error {
 	err := roadmap.Mutate(db, project, func(rm *roadmap.Roadmap) error {
-		return roadmap.MoveItem(rm, id, section)
+		return roadmap.MoveItem(rm, id, section, position...)
 	})
 	if err != nil {
 		return fmt.Errorf("roadmap: %w", err)
 	}
 	fmt.Fprintf(w, "moved item %d to %s\n", id, section)
+	return nil
+}
+
+// reorder
+
+var roadmapReorderPosition int
+
+var roadmapReorderCmd = &cobra.Command{
+	Use:   "reorder <project> <id>",
+	Short: "Set a roadmap item's sort position within its section/lane",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.Atoi(args[1])
+		if err != nil {
+			return fmt.Errorf("roadmap: invalid id %q: %w", args[1], err)
+		}
+		if !cmd.Flags().Changed("position") {
+			return errors.New("roadmap: --position is required")
+		}
+		return withDB(func(db *sql.DB) error {
+			return runRoadmapReorder(cmd.OutOrStdout(), db, args[0], id, roadmapReorderPosition)
+		})
+	},
+}
+
+func runRoadmapReorder(w io.Writer, db *sql.DB, project string, id int, position int) error {
+	err := roadmap.Mutate(db, project, func(rm *roadmap.Roadmap) error {
+		return roadmap.ReorderItem(rm, id, position)
+	})
+	if err != nil {
+		return fmt.Errorf("roadmap: %w", err)
+	}
+	fmt.Fprintf(w, "reordered item %d to position %d\n", id, position)
 	return nil
 }
 
@@ -349,8 +415,10 @@ func runRoadmapRemove(w io.Writer, db *sql.DB, project string, id int) error {
 	return nil
 }
 
+const roadmapSectionsHelp = "now, next, deferred, parked, dropped, or done"
+
 func init() {
-	roadmapAddCmd.Flags().StringVar(&roadmapAddSection, "section", "", "Section: now, next, parked, or done (required)")
+	roadmapAddCmd.Flags().StringVar(&roadmapAddSection, "section", "", "Section: "+roadmapSectionsHelp+" (required)")
 	roadmapAddCmd.Flags().StringVar(&roadmapAddTitle, "title", "", "Item title (required)")
 	roadmapAddCmd.Flags().StringVar(&roadmapAddBody, "body", "", "Item body")
 	roadmapAddCmd.Flags().StringVar(&roadmapAddComponent, "component", "", "Component")
@@ -359,23 +427,34 @@ func init() {
 	roadmapAddCmd.Flags().StringSliceVar(&roadmapAddKB, "kb", nil, "KB doc IDs (repeatable, comma-split)")
 	roadmapAddCmd.Flags().StringSliceVar(&roadmapAddTicket, "ticket", nil, "Ticket IDs (repeatable, comma-split)")
 	roadmapAddCmd.Flags().StringArrayVar(&roadmapAddBlockedBy, "blocked-by", nil, "project:ref[:note] blocker (repeatable; note may contain colons/commas)")
+	roadmapAddCmd.Flags().StringVar(&roadmapAddEpic, "epic", "", "Epic backlog item id (single-valued)")
+	roadmapAddCmd.Flags().IntVar(&roadmapAddPosition, "position", 0, "Sort position within the section")
 
 	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateTitle, "title", "", "New title")
 	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateBody, "body", "", "New body")
-	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateComponent, "component", "", "New component")
+	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateComponent, "component", "", "New component (single-valued)")
 	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateWhy, "why", "", "New why-parked")
 	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateResume, "resume", "", "New resume trigger")
-	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateSection, "section", "", "Move to section: now, next, parked, or done")
+	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateSection, "section", "", "Move to section: "+roadmapSectionsHelp)
 	roadmapUpdateCmd.Flags().StringSliceVar(&roadmapUpdateKB, "kb", nil, "KB doc IDs (repeatable, comma-split; replaces existing)")
 	roadmapUpdateCmd.Flags().StringSliceVar(&roadmapUpdateTicket, "ticket", nil, "Ticket IDs (repeatable, comma-split; replaces existing)")
 	roadmapUpdateCmd.Flags().StringArrayVar(&roadmapUpdateBlockedBy, "blocked-by", nil, "project:ref[:note] blocker (repeatable; note may contain colons/commas; replaces existing)")
+	roadmapUpdateCmd.Flags().StringVar(&roadmapUpdateEpic, "epic", "", "New epic backlog item id (single-valued)")
 
-	roadmapMoveCmd.Flags().StringVar(&roadmapMoveTo, "to", "", "Target section: now, next, parked, or done (required)")
+	roadmapMoveCmd.Flags().StringVar(&roadmapMoveTo, "to", "", "Target section: "+roadmapSectionsHelp+" (required)")
+	roadmapMoveCmd.Flags().IntVar(&roadmapMovePosition, "position", 0, "Sort position within the target section")
+
+	roadmapReorderCmd.Flags().IntVar(&roadmapReorderPosition, "position", 0, "Sort position within the item's section (required)")
+
+	roadmapShowCmd.Flags().StringVar(&roadmapShowBy, "by", "component", `Markdown grouping axis: "component" or "epic"`)
+	roadmapShowCmd.Flags().StringVar(&roadmapShowComponent, "component", "", "Filter by component")
+	roadmapShowCmd.Flags().StringVar(&roadmapShowEpic, "epic", "", "Filter by epic backlog item id")
 
 	roadmapCmd.AddCommand(roadmapShowCmd)
 	roadmapCmd.AddCommand(roadmapAddCmd)
 	roadmapCmd.AddCommand(roadmapUpdateCmd)
 	roadmapCmd.AddCommand(roadmapMoveCmd)
+	roadmapCmd.AddCommand(roadmapReorderCmd)
 	roadmapCmd.AddCommand(roadmapDoneCmd)
 	roadmapCmd.AddCommand(roadmapRemoveCmd)
 }

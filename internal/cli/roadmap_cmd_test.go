@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -29,6 +30,11 @@ func resetRoadmapAddVars() {
 	roadmapAddKB = nil
 	roadmapAddTicket = nil
 	roadmapAddBlockedBy = nil
+	roadmapAddEpic = ""
+	roadmapAddPosition = 0
+	if f := roadmapAddCmd.Flags().Lookup("position"); f != nil {
+		f.Changed = false
+	}
 }
 
 func resetRoadmapUpdateVars() {
@@ -41,7 +47,8 @@ func resetRoadmapUpdateVars() {
 	roadmapUpdateKB = nil
 	roadmapUpdateTicket = nil
 	roadmapUpdateBlockedBy = nil
-	for _, name := range []string{"title", "body", "component", "why", "resume", "section", "kb", "ticket", "blocked-by"} {
+	roadmapUpdateEpic = ""
+	for _, name := range []string{"title", "body", "component", "why", "resume", "section", "kb", "ticket", "blocked-by", "epic"} {
 		if f := roadmapUpdateCmd.Flags().Lookup(name); f != nil {
 			f.Changed = false
 		}
@@ -118,6 +125,40 @@ func TestRoadmapAddCmd_Success(t *testing.T) {
 	roadmapAddCmd.SetOut(&bytes.Buffer{})
 	err := roadmapAddCmd.RunE(roadmapAddCmd, []string{"acme-corp"})
 	require.NoError(t, err)
+}
+
+// TestRoadmapAddCmd_WithPosition verifies --position, when actually set
+// (Flags().Changed), splices the new item to that index -- exercising the
+// RunE closure's Changed("position") branch (position 0 into a non-empty
+// section lands the new item first).
+func TestRoadmapAddCmd_WithPosition(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PROJECT_KB_PATH", filepath.Join(dir, "roadmap.db"))
+
+	resetRoadmapAddVars()
+	roadmapAddSection = "now"
+	roadmapAddTitle = "existing"
+	roadmapAddCmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, roadmapAddCmd.RunE(roadmapAddCmd, []string{"acme-corp"}))
+
+	resetRoadmapAddVars()
+	roadmapAddSection = "now"
+	roadmapAddTitle = "spliced first"
+	roadmapAddPosition = 0
+	roadmapAddCmd.Flags().Lookup("position").Changed = true
+
+	roadmapAddCmd.SetOut(&bytes.Buffer{})
+	err := roadmapAddCmd.RunE(roadmapAddCmd, []string{"acme-corp"})
+	require.NoError(t, err)
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		rm, err := roadmap.Load(db, "acme-corp")
+		require.NoError(t, err)
+		require.Len(t, rm.Sections.Now, 2)
+		assert.Equal(t, "spliced first", rm.Sections.Now[0].Title)
+		assert.Equal(t, "existing", rm.Sections.Now[1].Title)
+		return nil
+	}))
 }
 
 // ── update ───────────────────────────────────────────────────────────────────
@@ -303,7 +344,7 @@ func TestRunRoadmapShowLoadError(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runRoadmapShow(&buf, db, "acme-corp")
+	err = runRoadmapShow(&buf, db, "acme-corp", "", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "roadmap:")
 }

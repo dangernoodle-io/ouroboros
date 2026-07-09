@@ -280,7 +280,7 @@ func TestDeleteProjectBlocked(t *testing.T) {
 	proj, err := backlog.CreateProject(d, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "Task", "", "", "")
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
 	require.NoError(t, err)
 
 	err = backlog.DeleteProject(d, "acme-corp", false, "")
@@ -294,9 +294,9 @@ func TestDeleteProjectForce(t *testing.T) {
 	proj, err := backlog.CreateProject(d, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "Task 1", "", "", "")
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "Task 1", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P2", "Task 2", "", "", "")
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P2", "Task 2", "", "", "", "")
 	require.NoError(t, err)
 	_, err = backlog.CreatePlan(d, "Plan A", "content", &proj.ID, nil)
 	require.NoError(t, err)
@@ -327,7 +327,7 @@ func TestDeleteProjectReassign(t *testing.T) {
 	dst, err := backlog.CreateProject(d, "dst-proj", "DP")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P1", "Task", "", "", "")
+	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P1", "Task", "", "", "", "")
 	require.NoError(t, err)
 	_, err = backlog.CreatePlan(d, "Plan", "content", &src.ID, nil)
 	require.NoError(t, err)
@@ -398,9 +398,9 @@ func TestReassignProjectChildren(t *testing.T) {
 	dst, err := backlog.CreateProject(d, "dst-proj", "DP")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P1", "Task 1", "", "", "")
+	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P1", "Task 1", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P2", "Task 2", "", "", "")
+	_, err = backlog.AddItem(d, src.ID, src.Prefix, "P2", "Task 2", "", "", "", "")
 	require.NoError(t, err)
 	_, err = backlog.CreatePlan(d, "Plan A", "content", &src.ID, nil)
 	require.NoError(t, err)
@@ -529,11 +529,11 @@ func TestRenameProjectPrefixHappyPath(t *testing.T) {
 	proj, err := backlog.CreateProject(d, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task-one", "", "", "")
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task-one", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P2", "task-two", "", "", "")
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P2", "task-two", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P3", "task-three", "", "", "")
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P3", "task-three", "", "", "", "")
 	require.NoError(t, err)
 
 	renamed, err := backlog.RenameProject(d, "acme-corp", "", "XX")
@@ -565,7 +565,7 @@ func TestRenameProjectPrefixCascadesPlans(t *testing.T) {
 	proj, err := backlog.CreateProject(d, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	item, err := backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	item, err := backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
 	itemID := item.ID
@@ -598,7 +598,7 @@ func TestRenameProjectBothNameAndPrefix(t *testing.T) {
 
 	proj, err := backlog.CreateProject(d, "old-name", "OL")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
 	renamed, err := backlog.RenameProject(d, "old-name", "new-name", "NM")
@@ -646,7 +646,7 @@ func TestRenameProjectPrefixChained(t *testing.T) {
 	proj, err := backlog.CreateProject(d, "acme-corp", "OU")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "")
+	_, err = backlog.AddItem(d, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
 	// First rename: OU → XX

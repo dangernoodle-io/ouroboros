@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -404,6 +405,262 @@ func TestHandleRoadmap_Done_NotFound(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
+// TestHandleRoadmap_Reorder verifies op=reorder physically splices the item
+// to the target index and densely renumbers its section.
+func TestHandleRoadmap_Reorder(t *testing.T) {
+	resetDB(t)
+
+	addReq1 := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "stays first",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), addReq1)
+	require.NoError(t, err)
+	addReq2 := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "reorder me",
+	})
+	_, err = handleRoadmap(db, nil)(context.TODO(), addReq2)
+	require.NoError(t, err)
+
+	// Target index 4 clamps to the end (index 1, after removal) of a
+	// 2-item section, so "reorder me" moves to last, densely renumbered.
+	reorderReq := makeRequest(map[string]interface{}{
+		"op": "reorder", "project": "acme-corp", "id": float64(2), "position": float64(4),
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), reorderReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Now, 2)
+	assert.Equal(t, "stays first", rm.Sections.Now[0].Title)
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.Equal(t, "reorder me", rm.Sections.Now[1].Title)
+	assert.Equal(t, 2, rm.Sections.Now[1].Position)
+}
+
+// TestHandleRoadmap_Reorder_MissingPosition verifies op=reorder requires position.
+func TestHandleRoadmap_Reorder_MissingPosition(t *testing.T) {
+	resetDB(t)
+
+	addReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "reorder", "project": "acme-corp", "id": float64(1),
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleRoadmap_Reorder_MissingID verifies op=reorder requires id.
+func TestHandleRoadmap_Reorder_MissingID(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "reorder", "project": "acme-corp", "position": float64(1),
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleRoadmap_Reorder_NotFound verifies op=reorder on an unknown id errors.
+func TestHandleRoadmap_Reorder_NotFound(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "reorder", "project": "acme-corp", "id": float64(9999), "position": float64(1),
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleRoadmap_Add_EpicAndPosition verifies op=add wires epic/position
+// onto the item: position 0 into a NON-empty section splices the new item
+// to the front, mirroring op=reorder's index semantics.
+func TestHandleRoadmap_Add_EpicAndPosition(t *testing.T) {
+	resetDB(t)
+
+	existingReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "existing",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), existingReq)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
+		"epic": "BB-707", "position": float64(0),
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Now, 2)
+	assert.Equal(t, "x", rm.Sections.Now[0].Title, "position 0 splices the new item to the front")
+	assert.Equal(t, "BB-707", rm.Sections.Now[0].Epic)
+	assert.Equal(t, 1, rm.Sections.Now[0].Position)
+	assert.Equal(t, "existing", rm.Sections.Now[1].Title)
+	assert.Equal(t, 2, rm.Sections.Now[1].Position)
+}
+
+// TestHandleRoadmap_Add_NoPosition_AppendsLast verifies op=add with no
+// position given plain-appends (item.Position is never an ordering input).
+func TestHandleRoadmap_Add_NoPosition_AppendsLast(t *testing.T) {
+	resetDB(t)
+
+	firstReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "first",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), firstReq)
+	require.NoError(t, err)
+
+	secondReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "second",
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), secondReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Now, 2)
+	assert.Equal(t, "first", rm.Sections.Now[0].Title)
+	assert.Equal(t, "second", rm.Sections.Now[1].Title)
+	assert.Zero(t, rm.Sections.Now[0].Position, "section stays legacy — no position was ever given")
+}
+
+// TestHandleRoadmap_Add_ComponentNotScalar_Errors verifies op=add rejects a
+// non-string component (single-valued enforcement).
+func TestHandleRoadmap_Add_ComponentNotScalar_Errors(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
+		"component": []interface{}{"a", "b"},
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "single-valued")
+}
+
+// TestHandleRoadmap_Add_EpicNotScalar_Errors verifies op=add rejects a
+// non-string epic (single-valued enforcement).
+func TestHandleRoadmap_Add_EpicNotScalar_Errors(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
+		"epic": []interface{}{"BB-1", "BB-2"},
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "single-valued")
+}
+
+// TestHandleRoadmap_Update_Epic verifies op=update patches epic.
+func TestHandleRoadmap_Update_Epic(t *testing.T) {
+	resetDB(t)
+
+	addReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	require.NoError(t, err)
+
+	updateReq := makeRequest(map[string]interface{}{
+		"op": "update", "project": "acme-corp", "id": float64(1), "epic": "BB-707",
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), updateReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Now, 1)
+	assert.Equal(t, "BB-707", rm.Sections.Now[0].Epic)
+}
+
+// TestHandleRoadmap_Update_EpicNotScalar_Errors verifies op=update rejects a
+// non-string epic (single-valued enforcement).
+func TestHandleRoadmap_Update_EpicNotScalar_Errors(t *testing.T) {
+	resetDB(t)
+
+	addReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	require.NoError(t, err)
+
+	updateReq := makeRequest(map[string]interface{}{
+		"op": "update", "project": "acme-corp", "id": float64(1),
+		"epic": []interface{}{"BB-1", "BB-2"},
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), updateReq)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "single-valued")
+}
+
+// TestHandleRoadmap_Move_WithPosition verifies op=move honors an optional
+// position: a lone item landing in an empty target section always clamps
+// to index 0, densely renumbered to Position 1.
+func TestHandleRoadmap_Move_WithPosition(t *testing.T) {
+	resetDB(t)
+
+	addReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "Move me",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	require.NoError(t, err)
+
+	moveReq := makeRequest(map[string]interface{}{
+		"op": "move", "project": "acme-corp", "id": float64(1), "to": "deferred", "position": float64(6),
+	})
+	result, err := handleRoadmap(db, nil)(context.TODO(), moveReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Deferred, 1)
+	assert.Equal(t, 1, rm.Sections.Deferred[0].Position)
+}
+
+// TestHandleRoadmap_Add_DeferredAndDropped verifies op=add accepts the new sections.
+func TestHandleRoadmap_Add_DeferredAndDropped(t *testing.T) {
+	resetDB(t)
+
+	for _, section := range []string{"deferred", "dropped"} {
+		req := makeRequest(map[string]interface{}{
+			"op": "add", "project": "acme-corp", "section": section, "title": "item " + section,
+		})
+		result, err := handleRoadmap(db, nil)(context.TODO(), req)
+		require.NoError(t, err)
+		require.False(t, result.IsError, "section=%s", section)
+	}
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	assert.Len(t, rm.Sections.Deferred, 1)
+	assert.Len(t, rm.Sections.Dropped, 1)
+}
+
 // TestHandleRoadmap_Remove_NotFound verifies op=remove on an unknown id errors.
 func TestHandleRoadmap_Remove_NotFound(t *testing.T) {
 	resetDB(t)
@@ -463,6 +720,68 @@ func TestHandleGet_DomainRoadmap_Markdown(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, textContent.Text, "# Roadmap")
 	assert.Contains(t, textContent.Text, "MD item")
+}
+
+// TestHandleGet_DomainRoadmap_ByEpicResolvesLabel verifies get domain=roadmap
+// format=md by=epic groups by epic and resolves the epic's backlog title,
+// stripping a leading "EPIC:" prefix.
+func TestHandleGet_DomainRoadmap_ByEpicResolvesLabel(t *testing.T) {
+	resetDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	epicItem, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: WiFi map", "", "", "", "")
+	require.NoError(t, err)
+
+	addReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "epic item",
+		"epic": epicItem.ID,
+	})
+	_, err = handleRoadmap(db, nil)(context.TODO(), addReq)
+	require.NoError(t, err)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "roadmap", "projects": []interface{}{"acme-corp"}, "format": "md", "by": "epic",
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "#### epic: WiFi map")
+}
+
+// TestHandleGet_DomainRoadmap_ComponentAndEpicFilters verifies get
+// domain=roadmap filters items by component and epic (structured output).
+func TestHandleGet_DomainRoadmap_ComponentAndEpicFilters(t *testing.T) {
+	resetDB(t)
+
+	addReq1 := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "matches",
+		"component": "widget", "epic": "BB-707",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), addReq1)
+	require.NoError(t, err)
+
+	addReq2 := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "other",
+		"component": "gadget",
+	})
+	_, err = handleRoadmap(db, nil)(context.TODO(), addReq2)
+	require.NoError(t, err)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "roadmap", "projects": []interface{}{"acme-corp"}, "component": "widget", "epic": "BB-707",
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var rm roadmap.Roadmap
+	require.NoError(t, unmarshalResult(result, &rm))
+	require.Len(t, rm.Sections.Now, 1)
+	assert.Equal(t, "matches", rm.Sections.Now[0].Title)
 }
 
 // TestHandleGet_DomainRoadmap_MissingProject_Errors verifies get domain=roadmap requires projects[0].

@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/backup"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 	"dangernoodle.io/ouroboros/internal/store"
@@ -38,6 +39,37 @@ func stringPtrArg(args map[string]interface{}, key string) *string {
 		}
 	}
 	return nil
+}
+
+// scalarStringArg returns args[key] as a string when present ("" when
+// absent), or an error when present with a non-string type. component and
+// epic are single-valued grouping axes — no item may carry more than one
+// value per axis — so a caller passing a list/object for either is a
+// misuse, not a silent no-op.
+func scalarStringArg(args map[string]interface{}, key string) (string, error) {
+	v, ok := args[key]
+	if !ok {
+		return "", nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a single string value (single-valued, not a list)", key)
+	}
+	return s, nil
+}
+
+// scalarStringPtrArg is scalarStringArg's Patch-pointer counterpart: nil
+// when key is absent (unchanged), a pointer to the value when present and
+// valid, or an error when present but non-scalar.
+func scalarStringPtrArg(args map[string]interface{}, key string) (*string, error) {
+	if _, ok := args[key]; !ok {
+		return nil, nil
+	}
+	s, err := scalarStringArg(args, key)
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
 // parseIntSlice extracts an int array from tool arguments by key.
@@ -115,7 +147,7 @@ func blockedByPtrArg(args map[string]interface{}, key string) (*[]roadmap.Blocke
 	return &v, nil
 }
 
-// handleRoadmap is the roadmap write tool (destructive): op=add|update|move|done|remove
+// handleRoadmap is the roadmap write tool (destructive): op=add|update|move|reorder|done|remove
 // mutates the per-project roadmap singleton via roadmap.Mutate, which serializes the
 // load->mutate->save cycle in a single transaction. Reads live under get/search
 // domain=roadmap.
@@ -137,20 +169,25 @@ func handleRoadmap(db *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 			return handleRoadmapUpdate(db, bk, project, args)
 		case "move":
 			return handleRoadmapMove(db, bk, project, args)
+		case "reorder":
+			return handleRoadmapReorder(db, bk, project, args)
 		case "done":
 			return handleRoadmapDone(db, bk, project, args)
 		case "remove":
 			return handleRoadmapRemove(db, bk, project, args)
 		default:
-			return mcp.NewToolResultError(`op is required: must be "add", "update", "move", "done", or "remove"`), nil //nolint:nilerr
+			return mcp.NewToolResultError(`op is required: must be "add", "update", "move", "reorder", "done", or "remove"`), nil //nolint:nilerr
 		}
 	}
 }
 
+// validSectionsMsg lists the valid section names for error messages.
+const validSectionsMsg = "now, next, deferred, parked, dropped, or done"
+
 func handleRoadmapAdd(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	section := roadmap.Section(strArg(args, "section"))
 	if !roadmap.ValidSection(section) {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid section %q: must be now, next, parked, or done", section)), nil //nolint:nilerr
+		return mcp.NewToolResultError(fmt.Sprintf("invalid section %q: must be %s", section, validSectionsMsg)), nil //nolint:nilerr
 	}
 
 	blockers, err := parseBlockers(args, "blocked_by")
@@ -158,21 +195,39 @@ func handleRoadmapAdd(db *sql.DB, bk *backup.Backup, project string, args map[st
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	component, err := scalarStringArg(args, "component")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	epic, err := scalarStringArg(args, "epic")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	item := roadmap.Item{
 		Title:         strArg(args, "title"),
 		Body:          strArg(args, "body"),
-		Component:     strArg(args, "component"),
+		Component:     component,
 		Why:           strArg(args, "why"),
 		ResumeTrigger: strArg(args, "resume_trigger"),
 		KB:            parseIntSlice(args, "kb"),
 		Ticket:        parseStringSlice(args, "ticket"),
 		BlockedBy:     blockers,
+		Epic:          epic,
+	}
+
+	// AddItem's position is presence-signaled (mirrors move/reorder) —
+	// item.Position is never an ordering input, so only pass position
+	// through when the caller actually supplied the arg.
+	var position []int
+	if v, ok := args["position"].(float64); ok {
+		position = []int{int(v)}
 	}
 
 	var id int
 	mutateErr := roadmap.Mutate(db, project, func(rm *roadmap.Roadmap) error {
 		var err error
-		id, err = roadmap.AddItem(rm, section, item)
+		id, err = roadmap.AddItem(rm, section, item, position...)
 		return err
 	})
 	if mutateErr != nil {
@@ -194,15 +249,25 @@ func handleRoadmapUpdate(db *sql.DB, bk *backup.Backup, project string, args map
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	component, err := scalarStringPtrArg(args, "component")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	epic, err := scalarStringPtrArg(args, "epic")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	patch := roadmap.Patch{
 		Title:         stringPtrArg(args, "title"),
 		Body:          stringPtrArg(args, "body"),
-		Component:     stringPtrArg(args, "component"),
+		Component:     component,
 		Why:           stringPtrArg(args, "why"),
 		ResumeTrigger: stringPtrArg(args, "resume_trigger"),
 		KB:            intSlicePtrArg(args, "kb"),
 		Ticket:        stringSlicePtrArg(args, "ticket"),
 		BlockedBy:     blockedBy,
+		Epic:          epic,
 	}
 
 	mutateErr := roadmap.Mutate(db, project, func(rm *roadmap.Roadmap) error {
@@ -224,11 +289,16 @@ func handleRoadmapMove(db *sql.DB, bk *backup.Backup, project string, args map[s
 
 	to := roadmap.Section(strArg(args, "to"))
 	if !roadmap.ValidSection(to) {
-		return mcp.NewToolResultError(fmt.Sprintf("invalid section %q: must be now, next, parked, or done", to)), nil //nolint:nilerr
+		return mcp.NewToolResultError(fmt.Sprintf("invalid section %q: must be %s", to, validSectionsMsg)), nil //nolint:nilerr
+	}
+
+	var position []int
+	if v, ok := args["position"].(float64); ok {
+		position = []int{int(v)}
 	}
 
 	mutateErr := roadmap.Mutate(db, project, func(rm *roadmap.Roadmap) error {
-		return roadmap.MoveItem(rm, id, to)
+		return roadmap.MoveItem(rm, id, to, position...)
 	})
 	if mutateErr != nil {
 		return mcp.NewToolResultError(mutateErr.Error()), nil
@@ -236,6 +306,28 @@ func handleRoadmapMove(db *sql.DB, bk *backup.Backup, project string, args map[s
 
 	backupCommit(bk, fmt.Sprintf("roadmap: moved item %d to %s (%s)", id, to, project))
 	return jsonResult(map[string]interface{}{"id": id, "section": string(to)})
+}
+
+func handleRoadmapReorder(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	id, ok := intArg(args)
+	if !ok {
+		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
+	}
+
+	position, ok := args["position"].(float64)
+	if !ok {
+		return mcp.NewToolResultError("position is required"), nil //nolint:nilerr
+	}
+
+	mutateErr := roadmap.Mutate(db, project, func(rm *roadmap.Roadmap) error {
+		return roadmap.ReorderItem(rm, id, int(position))
+	})
+	if mutateErr != nil {
+		return mcp.NewToolResultError(mutateErr.Error()), nil
+	}
+
+	backupCommit(bk, fmt.Sprintf("roadmap: reordered item %d to position %d (%s)", id, int(position), project))
+	return jsonResult(map[string]interface{}{"id": id, "position": int(position)})
 }
 
 func handleRoadmapDone(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
@@ -274,6 +366,10 @@ func handleRoadmapRemove(db *sql.DB, bk *backup.Backup, project string, args map
 
 // getRoadmap handles domain=roadmap reads for the get tool: the singleton roadmap
 // for projects[0], as structured JSON (default) or a Markdown mirror (format=md).
+// component/epic filter items on their respective axis (both apply together
+// when both are set); by picks the Markdown grouping axis (component|epic,
+// default component) — it has no effect on structured output, which always
+// returns every item's full field set.
 func getRoadmap(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := req.GetArguments()
 	projects := parseStringSlice(args, "projects")
@@ -286,8 +382,12 @@ func getRoadmap(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	rm = roadmap.Filter(rm, strArg(args, "component"), strArg(args, "epic"))
+
 	if strArg(args, "format") == "md" {
-		return mcp.NewToolResultText(roadmap.RenderMarkdown(rm)), nil
+		by := strArg(args, "by")
+		epicLabels := backlog.EpicLabels(db, roadmap.EpicIDs(rm))
+		return mcp.NewToolResultText(roadmap.RenderMarkdown(rm, by, epicLabels, nil)), nil
 	}
 	return jsonResult(rm)
 }

@@ -19,10 +19,12 @@ type Section string
 
 // Roadmap lanes, in render order.
 const (
-	SectionNow    Section = "now"
-	SectionNext   Section = "next"
-	SectionParked Section = "parked"
-	SectionDone   Section = "done"
+	SectionNow      Section = "now"
+	SectionNext     Section = "next"
+	SectionDeferred Section = "deferred"
+	SectionParked   Section = "parked"
+	SectionDropped  Section = "dropped"
+	SectionDone     Section = "done"
 )
 
 const (
@@ -30,12 +32,16 @@ const (
 	docCategory = ""
 	docTitle    = "roadmap"
 	metadataKey = "data"
+
+	// schemaVersion is stamped onto every save; a v1 doc (no schema_version
+	// field) has no lanes/positions/deferred/dropped and still round-trips.
+	schemaVersion = 2
 )
 
 // ValidSection reports whether s is a known roadmap section.
 func ValidSection(s Section) bool {
 	switch s {
-	case SectionNow, SectionNext, SectionParked, SectionDone:
+	case SectionNow, SectionNext, SectionDeferred, SectionParked, SectionDropped, SectionDone:
 		return true
 	default:
 		return false
@@ -60,16 +66,32 @@ type Item struct {
 	KB            []int     `json:"kb,omitempty"`
 	Ticket        []string  `json:"ticket,omitempty"`
 	BlockedBy     []Blocker `json:"blocked_by,omitempty"`
-	CreatedAt     string    `json:"created_at"`
-	UpdatedAt     string    `json:"updated_at"`
+	// Epic holds the id of the epic backlog item this item belongs to, if
+	// any (an epic IS a backlog item — see the EPIC: convention). Epic and
+	// Component are the two grouping axes; render picks one via `by` and
+	// shows the other as an inline chip. Both are single-valued (scalar) —
+	// no item belongs to more than one component or epic.
+	Epic string `json:"epic,omitempty"`
+	// Position is the item's 1-based sort slot within its section. A
+	// position write (ReorderItem, or a position-bearing MoveItem)
+	// physically splices the item to that 0-based target index and then
+	// densely renumbers every item in the section to 1..N (idx+1) — so
+	// slice order and Position order always agree exactly and there's
+	// never a tie to break. 0 means unset (legacy) — a section nothing
+	// has repositioned yet stays all-0 and renders in add/slice order.
+	Position  int    `json:"position,omitempty"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
-// Sections holds the roadmap's four lanes.
+// Sections holds the roadmap's six lanes.
 type Sections struct {
-	Now    []Item `json:"now"`
-	Next   []Item `json:"next"`
-	Parked []Item `json:"parked"`
-	Done   []Item `json:"done"`
+	Now      []Item `json:"now"`
+	Next     []Item `json:"next"`
+	Deferred []Item `json:"deferred"`
+	Parked   []Item `json:"parked"`
+	Dropped  []Item `json:"dropped"`
+	Done     []Item `json:"done"`
 }
 
 // Roadmap is the canonical per-project roadmap structure, persisted as
@@ -78,6 +100,9 @@ type Roadmap struct {
 	Sections    Sections `json:"sections"`
 	ArtifactURL string   `json:"artifact_url,omitempty"`
 	NextID      int      `json:"next_id"`
+	// SchemaVersion is 0/absent on a v1 doc (pre-lanes/positions/deferred/
+	// dropped); Save always stamps the current version.
+	SchemaVersion int `json:"schema_version,omitempty"`
 }
 
 // Patch carries optional field updates for UpdateItem; nil fields are left
@@ -91,6 +116,7 @@ type Patch struct {
 	KB            *[]int
 	Ticket        *[]string
 	BlockedBy     *[]Blocker
+	Epic          *string
 }
 
 func nowStamp() string {
@@ -114,8 +140,14 @@ func ensureInitialized(rm *Roadmap) {
 	if rm.Sections.Next == nil {
 		rm.Sections.Next = []Item{}
 	}
+	if rm.Sections.Deferred == nil {
+		rm.Sections.Deferred = []Item{}
+	}
 	if rm.Sections.Parked == nil {
 		rm.Sections.Parked = []Item{}
+	}
+	if rm.Sections.Dropped == nil {
+		rm.Sections.Dropped = []Item{}
 	}
 	if rm.Sections.Done == nil {
 		rm.Sections.Done = []Item{}
@@ -189,8 +221,13 @@ func saveTx(tx *sql.Tx, project string, rm *Roadmap) error {
 	return nil
 }
 
-// buildDoc renders rm into the store.Document Save/saveTx persist.
+// buildDoc renders rm into the store.Document Save/saveTx persist. Every
+// save stamps SchemaVersion to the current version, so a v1 doc (loaded
+// with SchemaVersion 0) is upgraded on its next save without losing data —
+// v1's now/next/parked/done and their items are untouched additive fields.
 func buildDoc(project string, rm *Roadmap) (*store.Document, error) {
+	rm.SchemaVersion = schemaVersion
+	canonicalizeSections(rm)
 	dataJSON, err := json.Marshal(rm)
 	if err != nil {
 		return nil, fmt.Errorf("marshal roadmap: %w", err)
@@ -210,14 +247,18 @@ func buildDoc(project string, rm *Roadmap) (*store.Document, error) {
 // to fit under store.MaxDocContentBytes if necessary so a save never fails
 // on an oversized roadmap. The canonical structure always lives in the
 // metadata JSON column (marshaled untruncated in buildDoc); content is only
-// a rendered preview mirror, so truncating it here loses no data.
+// a rendered preview mirror, so truncating it here loses no data. The
+// preview always groups by the default axis (component) with no epic
+// labels/blocked-status resolved — it's a storage-side mirror, not a
+// caller-driven render.
 func renderContent(rm *Roadmap) string {
-	md := RenderMarkdown(rm)
+	md := RenderMarkdown(rm, "component", nil, nil)
 	if len(md) <= store.MaxDocContentBytes {
 		return md
 	}
 
-	count := len(rm.Sections.Now) + len(rm.Sections.Next) + len(rm.Sections.Parked) + len(rm.Sections.Done)
+	count := len(rm.Sections.Now) + len(rm.Sections.Next) + len(rm.Sections.Deferred) +
+		len(rm.Sections.Parked) + len(rm.Sections.Dropped) + len(rm.Sections.Done)
 	marker := fmt.Sprintf("\n... (truncated; %d items — see structured data)\n", count)
 
 	maxBody := store.MaxDocContentBytes - len(marker)
@@ -225,6 +266,23 @@ func renderContent(rm *Roadmap) string {
 		maxBody = 0
 	}
 	return truncateUTF8(md, maxBody) + marker
+}
+
+// canonicalizeSections stable-sorts every section slice in rm by Position
+// ascending (legacy/unset Position 0 keeps add/ID order on ties), so the
+// stored metadata JSON and the structured get domain=roadmap output always
+// agree. Axis grouping (component/epic) is a render-time concern (see
+// groupByAxis in render.go) — storage order carries no axis bucketing,
+// since a section can be rendered grouped by either axis. Called on every
+// Save/saveTx before marshaling. Idempotent: canonicalizing an
+// already-ordered roadmap is a no-op (same bytes on re-save).
+func canonicalizeSections(rm *Roadmap) {
+	rm.Sections.Now = sortByPosition(rm.Sections.Now)
+	rm.Sections.Next = sortByPosition(rm.Sections.Next)
+	rm.Sections.Deferred = sortByPosition(rm.Sections.Deferred)
+	rm.Sections.Parked = sortByPosition(rm.Sections.Parked)
+	rm.Sections.Dropped = sortByPosition(rm.Sections.Dropped)
+	rm.Sections.Done = sortByPosition(rm.Sections.Done)
 }
 
 // truncateUTF8 truncates s to at most maxBytes bytes, backing off as needed
@@ -299,8 +357,12 @@ func sectionSlice(rm *Roadmap, section Section) *[]Item {
 		return &rm.Sections.Now
 	case SectionNext:
 		return &rm.Sections.Next
+	case SectionDeferred:
+		return &rm.Sections.Deferred
 	case SectionParked:
 		return &rm.Sections.Parked
+	case SectionDropped:
+		return &rm.Sections.Dropped
 	case SectionDone:
 		return &rm.Sections.Done
 	default:
@@ -308,9 +370,12 @@ func sectionSlice(rm *Roadmap, section Section) *[]Item {
 	}
 }
 
+// allSections lists every roadmap section, in render order.
+var allSections = []Section{SectionNow, SectionNext, SectionDeferred, SectionParked, SectionDropped, SectionDone}
+
 // findItem locates id across all sections.
 func findItem(rm *Roadmap, id int) (Section, int, bool) {
-	for _, s := range []Section{SectionNow, SectionNext, SectionParked, SectionDone} {
+	for _, s := range allSections {
 		items := *sectionSlice(rm, s)
 		for i, it := range items {
 			if it.ID == id {
@@ -321,9 +386,19 @@ func findItem(rm *Roadmap, id int) (Section, int, bool) {
 	return "", 0, false
 }
 
-// AddItem assigns item the next sequential ID, stamps timestamps, and
-// appends it to section. Returns the assigned ID.
-func AddItem(rm *Roadmap, section Section, item Item) (int, error) {
+// AddItem assigns item the next sequential ID, stamps timestamps, and adds
+// it to section. Returns the assigned ID.
+//
+// position is optional and mirrors MoveItem/ReorderItem's variadic — its
+// PRESENCE, not item.Position, signals intent (item.Position is never read
+// as an ordering input; it's reset to 0 before insertion). When position is
+// given, AddItem splices the new item to that 0-based target index within
+// section and densely renumbers the whole section (see insertAtIndex) —
+// index 0 lands the item first even among untouched (Position-0) siblings.
+// When omitted, AddItem plain-appends and calls renumberIfDense, which
+// keeps a DENSE section's item order correct (the new item sorts last)
+// while leaving a LEGACY (all-0) section untouched.
+func AddItem(rm *Roadmap, section Section, item Item, position ...int) (int, error) {
 	if !ValidSection(section) {
 		return 0, fmt.Errorf("invalid section %q", section)
 	}
@@ -333,9 +408,15 @@ func AddItem(rm *Roadmap, section Section, item Item) (int, error) {
 	now := nowStamp()
 	item.CreatedAt = now
 	item.UpdatedAt = now
+	item.Position = 0
 
 	items := sectionSlice(rm, section)
-	*items = append(*items, item)
+	if len(position) > 0 {
+		*items = insertAtIndex(*items, item, position[0])
+	} else {
+		*items = append(*items, item)
+		renumberIfDense(*items)
+	}
 	return item.ID, nil
 }
 
@@ -373,13 +454,84 @@ func UpdateItem(rm *Roadmap, id int, patch Patch) error {
 	if patch.BlockedBy != nil {
 		it.BlockedBy = *patch.BlockedBy
 	}
+	if patch.Epic != nil {
+		it.Epic = *patch.Epic
+	}
 	it.UpdatedAt = nowStamp()
 	return nil
 }
 
+// insertAtIndex splices item into items at the given 0-based target index
+// (clamped to [0, len(items)]), then densely renumbers every item's
+// Position to its 1-based slot (i+1). The splice fixes the physical order;
+// the renumber makes that order durable and unambiguous under
+// canonicalizeSections' Position sort — no two items in the section can
+// tie afterward, so index 0 always sorts first.
+func insertAtIndex(items []Item, item Item, index int) []Item {
+	if index < 0 {
+		index = 0
+	}
+	if index > len(items) {
+		index = len(items)
+	}
+
+	out := make([]Item, 0, len(items)+1)
+	out = append(out, items[:index]...)
+	out = append(out, item)
+	out = append(out, items[index:]...)
+
+	for i := range out {
+		out[i].Position = i + 1
+	}
+	return out
+}
+
+// removeAt returns a copy of items with the element at idx removed,
+// without aliasing items' backing array (safe to keep using items after).
+func removeAt(items []Item, idx int) []Item {
+	out := make([]Item, 0, len(items)-1)
+	out = append(out, items[:idx]...)
+	out = append(out, items[idx+1:]...)
+	return out
+}
+
+// renumberIfDense enforces the section invariant after a membership or
+// order change: a section is either LEGACY (every item's Position == 0,
+// sorting by slice/add order) or DENSE (Position is exactly 1..N, mirroring
+// slice order) — never a mix. If any item in items already carries a
+// nonzero Position (the section is DENSE), every item is renumbered to its
+// 1-based slot (i+1) by current slice order, so an appended item lands last
+// and a removed item leaves no gap. A LEGACY section (all-0) is left
+// untouched — renumbering it would needlessly promote it to DENSE.
+func renumberIfDense(items []Item) {
+	dense := false
+	for _, it := range items {
+		if it.Position != 0 {
+			dense = true
+			break
+		}
+	}
+	if !dense {
+		return
+	}
+	for i := range items {
+		items[i].Position = i + 1
+	}
+}
+
 // MoveItem relocates the item with id to toSection, preserving its ID and
-// stamping UpdatedAt.
-func MoveItem(rm *Roadmap, id int, toSection Section) error {
+// stamping UpdatedAt. An optional position is a 0-based target index within
+// the item's new section: when given, MoveItem physically splices the item
+// to that index and densely renumbers the whole section (see
+// insertAtIndex) so slice order and Position order agree exactly. Omit
+// position to leave Position unchanged. At most one position value is
+// honored — extras are ignored.
+//
+// A same-section move (fromSection == toSection) with no position given is
+// a true no-op — it never re-appends the item to the end of its slice,
+// which would disturb sibling order for no reason. With a position given,
+// same- and cross-section moves both splice+renumber identically.
+func MoveItem(rm *Roadmap, id int, toSection Section, position ...int) error {
 	if !ValidSection(toSection) {
 		return fmt.Errorf("invalid section %q", toSection)
 	}
@@ -388,17 +540,59 @@ func MoveItem(rm *Roadmap, id int, toSection Section) error {
 	if !ok {
 		return fmt.Errorf("item %d not found", id)
 	}
+
 	if fromSection == toSection {
+		if len(position) == 0 {
+			return nil
+		}
+		items := sectionSlice(rm, fromSection)
+		item := (*items)[idx]
+		item.UpdatedAt = nowStamp()
+		*items = insertAtIndex(removeAt(*items, idx), item, position[0])
 		return nil
 	}
 
 	fromItems := sectionSlice(rm, fromSection)
 	item := (*fromItems)[idx]
-	*fromItems = append((*fromItems)[:idx], (*fromItems)[idx+1:]...)
+	*fromItems = removeAt(*fromItems, idx)
+	// Removing an item from a DENSE source section can leave a gap in its
+	// 1..N numbering; close it. A LEGACY (all-0) source stays untouched.
+	renumberIfDense(*fromItems)
 
 	item.UpdatedAt = nowStamp()
 	toItems := sectionSlice(rm, toSection)
-	*toItems = append(*toItems, item)
+	if len(position) > 0 {
+		*toItems = insertAtIndex(*toItems, item, position[0])
+	} else {
+		// No explicit position: the item's Position is whatever it was in
+		// the SOURCE section — stale and meaningless in the target, and
+		// (if nonzero) would wrongly promote a LEGACY target to DENSE by
+		// accident. Reset it before appending; renumberIfDense then
+		// correctly makes it land last if the target is already DENSE, or
+		// leaves a LEGACY target untouched.
+		item.Position = 0
+		*toItems = append(*toItems, item)
+		renumberIfDense(*toItems)
+	}
+	return nil
+}
+
+// ReorderItem relocates the item with id to the given 0-based target index
+// within its current section, without changing section: it physically
+// splices the item to that index and densely renumbers the whole section
+// (see insertAtIndex), so slice order and Position order agree exactly and
+// index 0 always sorts first — even when every sibling is still at the
+// legacy/unset Position 0.
+func ReorderItem(rm *Roadmap, id int, position int) error {
+	section, idx, ok := findItem(rm, id)
+	if !ok {
+		return fmt.Errorf("item %d not found", id)
+	}
+
+	items := sectionSlice(rm, section)
+	item := (*items)[idx]
+	item.UpdatedAt = nowStamp()
+	*items = insertAtIndex(removeAt(*items, idx), item, position)
 	return nil
 }
 
@@ -415,6 +609,56 @@ func RemoveItem(rm *Roadmap, id int) error {
 	}
 
 	items := sectionSlice(rm, section)
-	*items = append((*items)[:idx], (*items)[idx+1:]...)
+	*items = removeAt(*items, idx)
+	// Removing an item from a DENSE section can leave a gap in its 1..N
+	// numbering; close it. A LEGACY (all-0) section stays untouched.
+	renumberIfDense(*items)
 	return nil
+}
+
+// Filter returns a copy of rm containing only items matching component and
+// epic (each ignored when empty; both filters apply together when both are
+// set). Section order is preserved. Returns rm unchanged (not a copy) when
+// both filters are empty.
+func Filter(rm *Roadmap, component, epic string) *Roadmap {
+	if component == "" && epic == "" {
+		return rm
+	}
+
+	out := &Roadmap{ArtifactURL: rm.ArtifactURL, NextID: rm.NextID, SchemaVersion: rm.SchemaVersion}
+	for _, s := range allSections {
+		*sectionSlice(out, s) = filterItems(*sectionSlice(rm, s), component, epic)
+	}
+	ensureInitialized(out)
+	return out
+}
+
+func filterItems(items []Item, component, epic string) []Item {
+	out := make([]Item, 0, len(items))
+	for _, it := range items {
+		if component != "" && it.Component != component {
+			continue
+		}
+		if epic != "" && it.Epic != epic {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+// EpicIDs returns every distinct non-empty Epic id referenced by rm's
+// items, in first-appearance order across sections (render order).
+func EpicIDs(rm *Roadmap) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, s := range allSections {
+		for _, it := range *sectionSlice(rm, s) {
+			if it.Epic != "" && !seen[it.Epic] {
+				seen[it.Epic] = true
+				ids = append(ids, it.Epic)
+			}
+		}
+	}
+	return ids
 }

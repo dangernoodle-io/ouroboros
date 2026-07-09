@@ -195,10 +195,26 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 				if entryID, ok := e["id"].(string); ok && entryID != "" {
 					// Update mode
 					fields := make(map[string]string)
-					for _, key := range []string{"priority", "title", "description", "notes", "status", "component"} {
+					for _, key := range []string{"priority", "title", "description", "notes", "status"} {
 						if v, ok := e[key].(string); ok && v != "" {
 							fields[key] = v
 						}
+					}
+					// component/epic are single-valued — a caller passing a
+					// list/object for either is a misuse, not a silent no-op.
+					component, err := scalarStringArg(e, "component")
+					if err != nil {
+						return mcp.NewToolResultError(err.Error()), nil
+					}
+					if component != "" {
+						fields["component"] = component
+					}
+					epic, err := scalarStringArg(e, "epic")
+					if err != nil {
+						return mcp.NewToolResultError(err.Error()), nil
+					}
+					if epic != "" {
+						fields["epic"] = epic
 					}
 
 					if len(fields) > 0 {
@@ -251,12 +267,18 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 							notes = v
 						}
 
-						component := ""
-						if v, ok := e["component"].(string); ok {
-							component = v
+						// component/epic are single-valued — a caller passing a
+						// list/object for either is a misuse, not a silent no-op.
+						component, err := scalarStringArg(e, "component")
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+						epic, err := scalarStringArg(e, "epic")
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
 						}
 
-						item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc, notes, component)
+						item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc, notes, component, epic)
 						if err != nil {
 							return mcp.NewToolResultError(err.Error()), nil
 						}

@@ -18,11 +18,15 @@ const (
 var validItemStatuses = map[string]bool{"open": true, "done": true}
 
 type Item struct {
-	ID          string `json:"id"`
-	ProjectID   int64  `json:"project_id,omitempty"`
-	Priority    string `json:"priority"`
-	Title       string `json:"title"`
-	Component   string `json:"component,omitempty"`
+	ID        string `json:"id"`
+	ProjectID int64  `json:"project_id,omitempty"`
+	Priority  string `json:"priority"`
+	Title     string `json:"title"`
+	Component string `json:"component,omitempty"`
+	// Epic holds the id of the epic backlog item this item belongs to, if
+	// any (an epic IS a backlog item — the EPIC: title convention). Like
+	// Component, it is single-valued: at most one epic per item.
+	Epic        string `json:"epic,omitempty"`
 	Description string `json:"description"`
 	Notes       string `json:"notes,omitempty"`
 	Status      string `json:"status"`
@@ -30,7 +34,7 @@ type Item struct {
 	Updated     string `json:"updated"`
 }
 
-func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, notes, component string) (*Item, error) {
+func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, notes, component, epic string) (*Item, error) {
 	if len(description) > MaxItemDescBytes {
 		return nil, fmt.Errorf("description exceeds %d byte cap (got %d)", MaxItemDescBytes, len(description))
 	}
@@ -54,8 +58,8 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 	now := nowRFC3339()
 
 	_, err = tx.Exec(
-		"INSERT INTO items (id, project_id, seq, priority, title, description, notes, component, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
-		id, projectID, seq, priority, title, description, notes, component, now, now,
+		"INSERT INTO items (id, project_id, seq, priority, title, description, notes, component, epic, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
+		id, projectID, seq, priority, title, description, notes, component, epic, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("add item: %w", err)
@@ -67,7 +71,7 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 
 	return &Item{
 		ID: id, ProjectID: projectID, Priority: priority,
-		Title: title, Component: component, Description: description, Notes: notes, Status: "open",
+		Title: title, Component: component, Epic: epic, Description: description, Notes: notes, Status: "open",
 		Created: now, Updated: now,
 	}, nil
 }
@@ -75,8 +79,8 @@ func AddItem(d *sql.DB, projectID int64, prefix, priority, title, description, n
 func getItemDirect(d *sql.DB, id string) (*Item, error) {
 	var item Item
 	err := d.QueryRow(
-		"SELECT id, project_id, priority, title, component, description, notes, status, created, updated FROM items WHERE id = ?", id,
-	).Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Component, &item.Description, &item.Notes, &item.Status, &item.Created, &item.Updated)
+		"SELECT id, project_id, priority, title, component, epic, description, notes, status, created, updated FROM items WHERE id = ?", id,
+	).Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Component, &item.Epic, &item.Description, &item.Notes, &item.Status, &item.Created, &item.Updated)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("item not found: %s", id)
 	}
@@ -103,8 +107,75 @@ func GetItem(d *sql.DB, id string) (*Item, error) {
 	return getItemDirect(d, resolved)
 }
 
+// GetItemsByIDs fetches items by id in a single batched query (no
+// alias-following — see EpicLabels for the alias-aware caller). An id with
+// no matching row is simply omitted from the result, not an error.
+func GetItemsByIDs(d *sql.DB, ids []string) ([]Item, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	rows, err := d.Query(
+		"SELECT id, project_id, priority, title, component, epic, description, status, created, updated FROM items WHERE id IN ("+strings.Join(placeholders, ",")+")",
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get items by ids: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	return scanItems(rows)
+}
+
+// epicLabel strips a leading "EPIC:" title prefix (the epic-item title
+// convention), trimming surrounding whitespace.
+func epicLabel(title string) string {
+	return strings.TrimSpace(strings.TrimPrefix(title, "EPIC:"))
+}
+
+// EpicLabels resolves each id in ids to a display label: the referenced
+// backlog item's title with a leading "EPIC:" prefix stripped (an epic IS
+// a backlog item — the EPIC: title convention). Every id is fetched with
+// one batched query (GetItemsByIDs); only ids that query misses fall back
+// to a per-id GetItem lookup, which additionally resolves one alias hop
+// (so a renamed epic still resolves) — a rare path, so this stays a single
+// query in the common (no renames) case rather than N+1. An id with no
+// matching backlog item, even after alias resolution, is simply omitted
+// from the result map; callers fall back to rendering the raw id.
+func EpicLabels(d *sql.DB, ids []string) map[string]string {
+	labels := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return labels
+	}
+
+	if items, err := GetItemsByIDs(d, ids); err == nil {
+		for _, item := range items {
+			labels[item.ID] = epicLabel(item.Title)
+		}
+	}
+
+	for _, id := range ids {
+		if _, ok := labels[id]; ok {
+			continue
+		}
+		item, err := GetItem(d, id)
+		if err != nil || item == nil {
+			continue
+		}
+		labels[id] = epicLabel(item.Title)
+	}
+	return labels
+}
+
 func UpdateItem(d *sql.DB, id string, fields map[string]string) (*Item, error) {
-	allowed := map[string]bool{"priority": true, "title": true, "description": true, "notes": true, "status": true, "component": true}
+	allowed := map[string]bool{"priority": true, "title": true, "description": true, "notes": true, "status": true, "component": true, "epic": true}
 
 	var sets []string
 	var args []interface{}
@@ -219,12 +290,12 @@ func buildItemFilterWhere(f ItemFilter, colPrefix string) (string, []interface{}
 }
 
 // scanItems drains rows produced by the shared item column list (id, project_id,
-// priority, title, component, description, status, created, updated).
+// priority, title, component, epic, description, status, created, updated).
 func scanItems(rows *sql.Rows) ([]Item, error) {
 	var items []Item
 	for rows.Next() {
 		var item Item
-		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Component, &item.Description, &item.Status, &item.Created, &item.Updated); err != nil {
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Component, &item.Epic, &item.Description, &item.Status, &item.Created, &item.Updated); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -233,7 +304,7 @@ func scanItems(rows *sql.Rows) ([]Item, error) {
 }
 
 func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
-	query := "SELECT id, project_id, priority, title, component, description, status, created, updated FROM items WHERE 1=1"
+	query := "SELECT id, project_id, priority, title, component, epic, description, status, created, updated FROM items WHERE 1=1"
 	whereClause, args := buildItemFilterWhere(f, "")
 	query += whereClause
 
@@ -259,7 +330,7 @@ func SearchItems(d *sql.DB, query string, f ItemFilter) ([]Item, error) {
 		return nil, nil
 	}
 
-	q := `SELECT items.id, items.project_id, items.priority, items.title, items.component, items.description, items.status, items.created, items.updated
+	q := `SELECT items.id, items.project_id, items.priority, items.title, items.component, items.epic, items.description, items.status, items.created, items.updated
 		FROM items
 		JOIN items_fts ON items.rowid = items_fts.rowid
 		WHERE items_fts MATCH ?`

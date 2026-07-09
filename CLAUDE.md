@@ -36,9 +36,9 @@ MCP surface is intentionally narrow (5 tools); operator-style ops are CLI-only. 
 | search | Read | Full-text search (requires `domain`: kb\|backlog\|roadmap) |
 | kb | Write | Create or update knowledge entries (upserts by type+project+category+title) |
 | backlog | Write | Create, update, or delete backlog items |
-| roadmap | Write | Mutate per-project roadmap (now/next/parked/done sections via op=add\|update\|move\|done\|remove) |
+| roadmap | Write | Mutate per-project roadmap (now/next/deferred/parked/dropped/done sections; items carry two single-valued grouping axes, component + epic, plus optional position; via op=add\|update\|move\|reorder\|done\|remove) |
 
-CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`, `roadmap` (show/add/update/move/done/remove). Browse with `ls items`, `ls kb`, `ls plans`, `ls projects`.
+CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete`, `export`, `import`, `roadmap` (show/add/update/move/reorder/done/remove). Browse with `ls items`, `ls kb`, `ls plans`, `ls projects`.
 
 ## Configuration
 

@@ -63,11 +63,11 @@ func TestRunStatuslineBacklogOnly(t *testing.T) {
 	p, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, p.ID, "AC", "P0", "Critical task", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "AC", "P0", "Critical task", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, p.ID, "AC", "P1", "High priority task", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "AC", "P1", "High priority task", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, p.ID, "AC", "P1", "Another high priority", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "AC", "P1", "Another high priority", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -100,9 +100,9 @@ func TestRunStatuslineFull(t *testing.T) {
 	p, err := backlog.CreateProject(db, "ouroboros", "OUR")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, p.ID, "OUR", "P1", "Task 1", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "OUR", "P1", "Task 1", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, p.ID, "OUR", "P2", "Task 2", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "OUR", "P2", "Task 2", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -142,9 +142,9 @@ func TestRunStatuslineJSON(t *testing.T) {
 	p, err := backlog.CreateProject(db, "test-project", "TP")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, p.ID, "TP", "P0", "Critical item", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "TP", "P0", "Critical item", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, p.ID, "TP", "P1", "High priority item", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "TP", "P1", "High priority item", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -191,9 +191,9 @@ func TestRunStatuslineProjectFilter(t *testing.T) {
 	pB, err := backlog.CreateProject(db, "project-b", "PB")
 	require.NoError(t, err)
 
-	_, err = backlog.AddItem(db, pA.ID, "PA", "P1", "Item A1", "", "", "")
+	_, err = backlog.AddItem(db, pA.ID, "PA", "P1", "Item A1", "", "", "", "")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, pB.ID, "PB", "P1", "Item B1", "", "", "")
+	_, err = backlog.AddItem(db, pB.ID, "PB", "P1", "Item B1", "", "", "", "")
 	require.NoError(t, err)
 
 	// Query with project filter
@@ -319,7 +319,7 @@ func TestRunStatuslinePlainFlag(t *testing.T) {
 
 	p, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, p.ID, "AC", "P1", "Task 1", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "AC", "P1", "Task 1", "", "", "", "")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -346,7 +346,7 @@ func TestRunStatuslineNoColorEnv(t *testing.T) {
 
 	p, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	_, err = backlog.AddItem(db, p.ID, "AC", "P0", "Critical bug", "", "", "")
+	_, err = backlog.AddItem(db, p.ID, "AC", "P0", "Critical bug", "", "", "", "")
 	require.NoError(t, err)
 
 	// Simulate env-driven plain by passing plain=true (as the cobra RunE would compute)
