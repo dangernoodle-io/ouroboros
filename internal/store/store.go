@@ -226,6 +226,23 @@ INSERT INTO items_fts(rowid, title, description, notes) SELECT rowid, title, des
 		version: 12,
 		sql:     `ALTER TABLE items ADD COLUMN epic TEXT NOT NULL DEFAULT '';`,
 	},
+	{
+		version: 13,
+		sql: `CREATE TABLE IF NOT EXISTS edges (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type TEXT NOT NULL,
+    source_id   TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id   TEXT NOT NULL,
+    label       TEXT NOT NULL,
+    project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL,
+    UNIQUE(source_type, source_id, target_type, target_id, label)
+);
+
+CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_type, target_id);`,
+	},
 }
 
 // ApplySchema applies all pending migrations to the database.

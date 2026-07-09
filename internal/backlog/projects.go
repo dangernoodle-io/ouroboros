@@ -112,6 +112,9 @@ func ReassignProjectChildren(tx *sql.Tx, fromID int64, fromName string, toID int
 	if _, err := tx.Exec("UPDATE documents SET project = ? WHERE LOWER(project) = LOWER(?)", toName, fromName); err != nil {
 		return fmt.Errorf("reassign documents: %w", err)
 	}
+	if _, err := tx.Exec("UPDATE edges SET project_id = ? WHERE project_id = ?", toID, fromID); err != nil {
+		return fmt.Errorf("reassign edges: %w", err)
+	}
 	return nil
 }
 
@@ -161,6 +164,28 @@ func DeleteProject(db *sql.DB, name string, force bool, reassignTo string) error
 		}
 		defer tx.Rollback() //nolint:errcheck
 
+		// Cascade-delete every edge whose endpoint belongs to this project,
+		// BEFORE deleting the items/documents themselves so the subqueries
+		// still resolve. The edges.project_id FK's ON DELETE CASCADE alone
+		// is insufficient: an edge created via CLI `link` or a [[Title]]
+		// autolink always stores project_id NULL (never set), so it would
+		// never be caught by that FK and would dangle over now-deleted
+		// endpoints. This bulk delete-by-endpoint is the real cascade; the
+		// FK cascade is defensive belt-and-suspenders for edges that do
+		// carry a project_id. Documents are matched by the same
+		// case-insensitive `project` name column the delete below uses
+		// (documents.project_id is never populated on write — see
+		// upsertDocumentExec — so matching on it here would silently match
+		// nothing).
+		if _, err := tx.Exec(`
+			DELETE FROM edges
+			WHERE (source_type = 'item' AND source_id IN (SELECT id FROM items WHERE project_id = ?))
+			   OR (target_type = 'item' AND target_id IN (SELECT id FROM items WHERE project_id = ?))
+			   OR (source_type = 'kb'   AND source_id IN (SELECT CAST(id AS TEXT) FROM documents WHERE LOWER(project) = LOWER(?)))
+			   OR (target_type = 'kb'   AND target_id IN (SELECT CAST(id AS TEXT) FROM documents WHERE LOWER(project) = LOWER(?)))
+		`, src.ID, src.ID, src.Name, src.Name); err != nil {
+			return fmt.Errorf("delete project edges: %w", err)
+		}
 		if _, err := tx.Exec("DELETE FROM documents WHERE LOWER(project) = LOWER(?)", src.Name); err != nil {
 			return fmt.Errorf("delete project documents: %w", err)
 		}
@@ -349,6 +374,28 @@ func renamePrefixInTx(tx *sql.Tx, projectID int64, newPrefix, renamedAt string) 
 
 		if _, err = tx.Exec("UPDATE items SET id = ? WHERE id = ?", newID, ref.oldID); err != nil {
 			return fmt.Errorf("rename prefix item %s: %w", ref.oldID, err)
+		}
+
+		// Cascade-update any edge referencing the old item id (source or
+		// target) — keeps edges.source_id/target_id canonical rather than
+		// relying solely on read-time item_id_aliases resolution. OR IGNORE
+		// drops the update on the rare unique-constraint collision (both
+		// old and new id already held an identical edge) instead of
+		// aborting the rename; the DELETE that follows then removes the
+		// now-redundant old-id row left behind by that collision so no
+		// stale, unreachable edge survives (the new-id equivalent already
+		// exists).
+		if _, err = tx.Exec("UPDATE OR IGNORE edges SET source_id = ? WHERE source_type = 'item' AND source_id = ?", newID, ref.oldID); err != nil {
+			return fmt.Errorf("rename prefix edges source %s: %w", ref.oldID, err)
+		}
+		if _, err = tx.Exec("DELETE FROM edges WHERE source_type = 'item' AND source_id = ?", ref.oldID); err != nil {
+			return fmt.Errorf("rename prefix edges source cleanup %s: %w", ref.oldID, err)
+		}
+		if _, err = tx.Exec("UPDATE OR IGNORE edges SET target_id = ? WHERE target_type = 'item' AND target_id = ?", newID, ref.oldID); err != nil {
+			return fmt.Errorf("rename prefix edges target %s: %w", ref.oldID, err)
+		}
+		if _, err = tx.Exec("DELETE FROM edges WHERE target_type = 'item' AND target_id = ?", ref.oldID); err != nil {
+			return fmt.Errorf("rename prefix edges target cleanup %s: %w", ref.oldID, err)
 		}
 
 		_, err = tx.Exec(

@@ -18,7 +18,9 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 | Read | `get`, `search` (domain: kb\|backlog\|roadmap) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog), [Wiki](../../wiki/Roadmap) |
 | Write | `kb` (KB entries), `backlog` (items), `roadmap` (per-project sections, grouped by component/epic) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog), [Wiki](../../wiki/Roadmap) |
 
-Operator-style ops (`project`, `plan`, `config`, `kb delete`, `export`, `import`, `roadmap`) are CLI-only — see `ouroboros --help`.
+Cross-reference edges (`blocks`/`relates`/`explains` between items/KB docs) fold into the existing tools rather than a 6th tool: `backlog` write entries[].edges[], `kb` write `[[Title]]` autolinks, `get` verbose=true edges sidecar. See [Backlog](../../wiki/Backlog).
+
+Operator-style ops (`project`, `plan`, `config`, `kb delete`, `export`, `import`, `roadmap`, `link`/`unlink`) are CLI-only — see `ouroboros --help`.
 
 ## Use with Claude Code
 
@@ -78,9 +80,11 @@ ouroboros ls kb --search caching                   # search knowledge base
 ouroboros ls kb 42 --json                          # fetch document as JSON
 ouroboros ls plans --status active                 # list active plans
 ouroboros roadmap show acme-corp --by epic          # print roadmap grouped by epic
+ouroboros link item:BB-9 blocks item:TM-40          # create a cross-reference edge
+ouroboros ls edges --label blocks                   # list edges
 ```
 
-Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. All subcommands: `--json`. Roadmap: `show` (`--by component|epic`, `--component`, `--epic`), `add`, `update`, `move`, `reorder`, `done`, `remove` — see `ouroboros roadmap --help`.
+Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. `ls edges`: `--label`, `--type item|kb` + `--id` (together). All subcommands: `--json`. Roadmap: `show` (`--by component|epic`, `--component`, `--epic`), `add`, `update`, `move`, `reorder`, `done`, `remove` — see `ouroboros roadmap --help`. Edges: `link <src> <label> <dst>` / `unlink <src> <label> <dst>` where src/dst are `item:<id>` or `kb:<id>`.
 
 ## Configuration
 

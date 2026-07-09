@@ -45,6 +45,8 @@ func init() {
 	rootCmd.AddCommand(kbCmd)
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(roadmapCmd)
+	rootCmd.AddCommand(linkCmd)
+	rootCmd.AddCommand(unlinkCmd)
 }
 
 // Execute runs the root command.

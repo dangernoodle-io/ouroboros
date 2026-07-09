@@ -14,4 +14,5 @@ func init() {
 	lsCmd.AddCommand(lsKBCmd)
 	lsCmd.AddCommand(lsPlansCmd)
 	lsCmd.AddCommand(lsProjectsCmd)
+	lsCmd.AddCommand(lsEdgesCmd)
 }

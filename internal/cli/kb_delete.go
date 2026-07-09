@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
@@ -37,7 +38,27 @@ func runKBDelete(out io.Writer, db *sql.DB, idStr string) error {
 		return fmt.Errorf("kb delete: document %d not found", id)
 	}
 
-	if err := store.DeleteDocument(db, id); err != nil {
+	// Atomic: the doc delete and its edge cascade cleanup happen in one tx
+	// (mirrors backlog.DeleteItems) — a crash between them must not orphan
+	// edges referencing the now-deleted document.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("kb delete: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := store.DeleteDocumentTx(tx, id); err != nil {
+		return fmt.Errorf("kb delete: %w", err)
+	}
+	if _, err := edges.CascadeDelete(tx, edges.TypeKB, idStr); err != nil {
+		return fmt.Errorf("kb delete: cascade cleanup: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("kb delete: %w", err)
+	}
+
+	if err := store.RebuildFTS(db); err != nil {
 		return fmt.Errorf("kb delete: %w", err)
 	}
 

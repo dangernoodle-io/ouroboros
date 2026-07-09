@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
@@ -93,6 +94,15 @@ func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, e
 		if err != nil {
 			_ = tx.Rollback()
 			return nil, fmt.Errorf("upsert failed: %w", err)
+		}
+
+		// [[Title]] autolinks: item-id-shaped titles resolve against
+		// backlog items, otherwise against a same-project KB title.
+		// Best-effort — unresolved titles are silently skipped, never a
+		// write failure.
+		if _, err := edges.AutolinkKB(tx, result.ID, project, entry.Content); err != nil {
+			_ = tx.Rollback()
+			return nil, fmt.Errorf("autolink failed: %w", err)
 		}
 
 		pr := PutResult{

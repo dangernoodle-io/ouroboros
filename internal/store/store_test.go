@@ -277,6 +277,36 @@ func TestDeleteDocument(t *testing.T) {
 	assert.Nil(t, retrieved)
 }
 
+// TestDeleteDocument_BeginError exercises DeleteDocument's db.Begin() error
+// path (closed DB).
+func TestDeleteDocument_BeginError(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	require.NoError(t, store.ApplySchema(db))
+	require.NoError(t, db.Close())
+
+	err = store.DeleteDocument(db, 1)
+	require.Error(t, err)
+}
+
+func TestDeleteDocumentTx(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{Type: "note", Project: "acme-corp", Title: "to-delete-tx", Content: "content"}
+	result, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+	id := result.ID
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	require.NoError(t, store.DeleteDocumentTx(tx, id))
+	require.NoError(t, tx.Commit())
+
+	retrieved, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Nil(t, retrieved)
+}
+
 func TestGetDocumentNotFound(t *testing.T) {
 	db := testDB(t)
 
@@ -645,8 +675,8 @@ func TestMigrationVersionTracking(t *testing.T) {
 		versions = append(versions, v)
 	}
 
-	// Should have recorded migrations 1 through 11
-	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, versions)
+	// Should have recorded migrations 1 through 13
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}, versions)
 
 	// Verify applied_at is set (not NULL)
 	var appliedAt string

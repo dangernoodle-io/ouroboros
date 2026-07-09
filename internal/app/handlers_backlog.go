@@ -10,6 +10,7 @@ import (
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/backup"
+	"dangernoodle.io/ouroboros/internal/edges"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -27,6 +28,59 @@ func parsePriority(s string) (int, error) {
 
 func resolveProject(d *sql.DB, name string) (*backlog.Project, error) {
 	return backlog.GetProjectByName(d, name)
+}
+
+// edgeSpec is one {label,target} element of a backlog entry's edges[]:
+// an item->item edge, source = the item being written.
+type edgeSpec struct {
+	Label  string
+	Target string
+}
+
+// parseEdgeSpecs extracts and validates the optional edges[] array on a
+// backlog write entry. A present-but-malformed element (missing
+// label/target, or an unrecognized label) is a hard error, not a silent
+// skip — a wrong/dropped edge is worse than a rejected write.
+func parseEdgeSpecs(e map[string]interface{}) ([]edgeSpec, error) {
+	raw, ok := e["edges"].([]interface{})
+	if !ok {
+		return nil, nil
+	}
+
+	specs := make([]edgeSpec, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid edges[] entry: expected object with label and target")
+		}
+		label, _ := m["label"].(string)
+		target, _ := m["target"].(string)
+		if label == "" || target == "" {
+			return nil, fmt.Errorf("edges[] entry requires label and target")
+		}
+		if !edges.ValidLabel(label) {
+			return nil, fmt.Errorf("invalid edge label %q: must be one of blocks, relates, explains", label)
+		}
+		specs = append(specs, edgeSpec{Label: label, Target: target})
+	}
+	return specs, nil
+}
+
+// linkEdgesTx creates each spec as an item->item edge sourced from itemID,
+// on the given transaction so the edge links commit atomically with the
+// item write that produced them (see handleBacklog). Validates each
+// target item exists first — a typo'd target must not silently produce a
+// permanently dangling edge.
+func linkEdgesTx(tx *sql.Tx, itemID string, projectID int64, specs []edgeSpec) error {
+	for _, spec := range specs {
+		if _, err := backlog.GetItem(tx, spec.Target); err != nil {
+			return fmt.Errorf("edge target item %q not found: %w", spec.Target, err)
+		}
+		if _, err := edges.Link(tx, edges.TypeItem, itemID, spec.Label, edges.TypeItem, spec.Target, projectID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resolveProjects(d *sql.DB, names []string) ([]int64, error) {
@@ -106,6 +160,13 @@ func itemLinesResult(items []backlog.Item) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(strings.Join(lines, "\n")), nil
 }
 
+// itemWithEdges wraps a backlog item with its edges sidecar, only populated
+// on verbose=true reads (see getBacklogItems).
+type itemWithEdges struct {
+	*backlog.Item
+	Edges []edges.Edge `json:"edges,omitempty"`
+}
+
 // getBacklogItems handles domain=backlog reads for the get tool: ids[] fetch, or filters list.
 func getBacklogItems(d *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ids := parseStringSlice(req.GetArguments(), "ids")
@@ -125,9 +186,17 @@ func getBacklogItems(d *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, e
 
 			if !verbose {
 				item.Notes = ""
+				item.ProjectID = 0
+				items = append(items, item)
+				continue
 			}
 			item.ProjectID = 0
-			items = append(items, item)
+
+			edgeList, err := edges.EdgesFor(d, edges.TypeItem, item.ID)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			items = append(items, itemWithEdges{Item: item, Edges: edgeList})
 		}
 
 		return jsonResult(items)
@@ -191,6 +260,11 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 			writeCount := 0
 
 			for _, e := range entries {
+				edgeSpecs, err := parseEdgeSpecs(e)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
 				// Check if this is an update (has id) or create (no id)
 				if entryID, ok := e["id"].(string); ok && entryID != "" {
 					// Update mode
@@ -217,7 +291,7 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 						fields["epic"] = epic
 					}
 
-					if len(fields) > 0 {
+					if len(fields) > 0 || len(edgeSpecs) > 0 {
 						// Validate priority if present
 						if p, ok := fields["priority"]; ok {
 							if _, err := parsePriority(p); err != nil {
@@ -225,8 +299,30 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 							}
 						}
 
-						item, err := backlog.UpdateItem(d, entryID, fields)
+						// The field update and its edges[] links commit
+						// atomically: a failing (e.g. nonexistent-target)
+						// edge must not leave a partially-applied write.
+						tx, err := d.Begin()
 						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+						defer tx.Rollback() //nolint:errcheck
+
+						var item *backlog.Item
+						if len(fields) > 0 {
+							item, err = backlog.UpdateItemTx(tx, entryID, fields)
+						} else {
+							item, err = backlog.GetItem(tx, entryID)
+						}
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						if err := linkEdgesTx(tx, item.ID, item.ProjectID, edgeSpecs); err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						if err := tx.Commit(); err != nil {
 							return mcp.NewToolResultError(err.Error()), nil
 						}
 
@@ -278,8 +374,25 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 							return mcp.NewToolResultError(err.Error()), nil
 						}
 
-						item, err := backlog.AddItem(d, proj.ID, proj.Prefix, priority, title, desc, notes, component, epic)
+						// The item create and its edges[] links commit
+						// atomically: a failing (e.g. nonexistent-target)
+						// edge must not leave a half-created item behind.
+						tx, err := d.Begin()
 						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+						defer tx.Rollback() //nolint:errcheck
+
+						item, err := backlog.AddItemTx(tx, proj.ID, proj.Prefix, priority, title, desc, notes, component, epic)
+						if err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						if err := linkEdgesTx(tx, item.ID, proj.ID, edgeSpecs); err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
+						if err := tx.Commit(); err != nil {
 							return mcp.NewToolResultError(err.Error()), nil
 						}
 

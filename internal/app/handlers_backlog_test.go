@@ -27,6 +27,8 @@ func resetAllDB(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec("DELETE FROM documents")
 	require.NoError(t, err)
+	_, err = db.Exec("DELETE FROM edges")
+	require.NoError(t, err)
 }
 
 func TestParsePriority(t *testing.T) {
@@ -68,6 +70,8 @@ func resetBacklogDBBatch(t *testing.T) {
 	_, err = db.Exec("DELETE FROM plans")
 	require.NoError(t, err)
 	_, err = db.Exec("DELETE FROM projects")
+	require.NoError(t, err)
+	_, err = db.Exec("DELETE FROM edges")
 	require.NoError(t, err)
 }
 
