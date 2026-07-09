@@ -136,6 +136,363 @@ func TestHandleKBBatchEmpty(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
+// TestHandleKBUpdateByID_RetitleInPlace verifies the id-addressed update
+// path retitles a document in place instead of creating a duplicate row —
+// the MCP-level repro of the retitle-creates-duplicate bug.
+func TestHandleKBUpdateByID_RetitleInPlace(t *testing.T) {
+	resetDB(t)
+
+	createReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "old title",
+				"content": "original content",
+			},
+		},
+	})
+	createResult, err := handleKB(db)(context.TODO(), createReq)
+	require.NoError(t, err)
+
+	var createResp []map[string]interface{}
+	require.NoError(t, unmarshalResult(createResult, &createResp))
+	id, ok := createResp[0]["id"].(float64)
+	require.True(t, ok)
+
+	updateReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":    id,
+				"title": "new title",
+			},
+		},
+	})
+	updateResult, err := handleKB(db)(context.TODO(), updateReq)
+	require.NoError(t, err)
+	require.False(t, updateResult.IsError)
+
+	var updateResp []map[string]interface{}
+	require.NoError(t, unmarshalResult(updateResult, &updateResp))
+	require.Len(t, updateResp, 1)
+	assert.Equal(t, "updated", updateResp[0]["action"])
+	assert.Equal(t, "new title", updateResp[0]["title"])
+	assert.Equal(t, id, updateResp[0]["id"])
+
+	// Exactly one row — no duplicate under the new title.
+	listReq := makeRequest(map[string]interface{}{
+		"domain": "kb",
+		"types":  []interface{}{"decision"},
+	})
+	listResult, err := handleGet(db)(context.TODO(), listReq)
+	require.NoError(t, err)
+	var docs []map[string]interface{}
+	require.NoError(t, unmarshalResult(listResult, &docs))
+	require.Len(t, docs, 1)
+	assert.Equal(t, "new title", docs[0]["title"])
+
+	// Content preserved by the partial update.
+	getReq := makeRequest(map[string]interface{}{
+		"domain":  "kb",
+		"ids":     []interface{}{id},
+		"verbose": true,
+	})
+	getResult, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	var full []map[string]interface{}
+	require.NoError(t, unmarshalResult(getResult, &full))
+	require.Len(t, full, 1)
+	assert.Equal(t, "original content", full[0]["content"])
+}
+
+// TestHandleKBUpdateByID_AllFields exercises every updatable field on the
+// entries[] id-addressed update path (type/project/category/title/content/
+// notes/tags/metadata).
+func TestHandleKBUpdateByID_AllFields(t *testing.T) {
+	resetDB(t)
+
+	createReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "all-fields-orig",
+				"content": "v1",
+			},
+		},
+	})
+	createResult, err := handleKB(db)(context.TODO(), createReq)
+	require.NoError(t, err)
+	var createResp []map[string]interface{}
+	require.NoError(t, unmarshalResult(createResult, &createResp))
+	id, ok := createResp[0]["id"].(float64)
+	require.True(t, ok)
+
+	updateReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":       id,
+				"type":     "decision",
+				"project":  "other-proj",
+				"category": "arch",
+				"title":    "all-fields-renamed",
+				"content":  "v2",
+				"notes":    "some notes",
+				"tags":     []interface{}{"x", "y"},
+				"metadata": map[string]interface{}{"k": "v"},
+			},
+		},
+	})
+	updateResult, err := handleKB(db)(context.TODO(), updateReq)
+	require.NoError(t, err)
+	require.False(t, updateResult.IsError)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain":  "kb",
+		"ids":     []interface{}{id},
+		"verbose": true,
+	})
+	getResult, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	var docs []map[string]interface{}
+	require.NoError(t, unmarshalResult(getResult, &docs))
+	require.Len(t, docs, 1)
+	assert.Equal(t, "decision", docs[0]["type"])
+	assert.Equal(t, "other-proj", docs[0]["project"])
+	assert.Equal(t, "arch", docs[0]["category"])
+	assert.Equal(t, "all-fields-renamed", docs[0]["title"])
+	assert.Equal(t, "v2", docs[0]["content"])
+	assert.Equal(t, "some notes", docs[0]["notes"])
+}
+
+// TestHandleKBUpdateByID_NonexistentID_Errors verifies a clear error, not a
+// silent no-op, when id doesn't exist.
+func TestHandleKBUpdateByID_NonexistentID_Errors(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":    float64(999999),
+				"title": "does not matter",
+			},
+		},
+	})
+	result, err := handleKB(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleKBUpdateByID_MixedBatch verifies a single entries[] call can mix
+// a create (id absent) and an update (id present).
+func TestHandleKBUpdateByID_MixedBatch(t *testing.T) {
+	resetDB(t)
+
+	seedReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "existing",
+				"content": "c1",
+			},
+		},
+	})
+	seedResult, err := handleKB(db)(context.TODO(), seedReq)
+	require.NoError(t, err)
+	var seedResp []map[string]interface{}
+	require.NoError(t, unmarshalResult(seedResult, &seedResp))
+	id, ok := seedResp[0]["id"].(float64)
+	require.True(t, ok)
+
+	mixedReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":    id,
+				"title": "existing renamed",
+			},
+			map[string]interface{}{
+				"type":    "note",
+				"project": "acme-corp",
+				"title":   "brand new",
+				"content": "c2",
+			},
+		},
+	})
+	mixedResult, err := handleKB(db)(context.TODO(), mixedReq)
+	require.NoError(t, err)
+	require.False(t, mixedResult.IsError)
+
+	var mixedResp []map[string]interface{}
+	require.NoError(t, unmarshalResult(mixedResult, &mixedResp))
+	require.Len(t, mixedResp, 2)
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+}
+
+// TestHandleKBUpdateByID_MixedBatchPartialFailure_Atomic verifies a single
+// entries[] call is atomic across creates AND updates: a create alongside an
+// update targeting a nonexistent id must roll back entirely, not leave the
+// create persisted under a "failed" tool result.
+func TestHandleKBUpdateByID_MixedBatchPartialFailure_Atomic(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "should-not-persist",
+				"content": "c1",
+			},
+			map[string]interface{}{
+				"id":    float64(999999),
+				"title": "does not matter",
+			},
+		},
+	})
+	result, err := handleKB(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError, "batch with a bad update id must fail")
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	assert.Empty(t, docs, "create in the same failed batch must not persist")
+}
+
+// TestHandleKBUpdateByID_StringID verifies a JSON string id ("42") still
+// routes to update instead of silently misrouting to create.
+func TestHandleKBUpdateByID_StringID(t *testing.T) {
+	resetDB(t)
+
+	createReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "fact",
+				"project": "acme-corp",
+				"title":   "string-id-orig",
+				"content": "v1",
+			},
+		},
+	})
+	createResult, err := handleKB(db)(context.TODO(), createReq)
+	require.NoError(t, err)
+	var createResp []map[string]interface{}
+	require.NoError(t, unmarshalResult(createResult, &createResp))
+	id, ok := createResp[0]["id"].(float64)
+	require.True(t, ok)
+
+	updateReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":    fmt.Sprintf("%d", int64(id)),
+				"title": "string-id-renamed",
+			},
+		},
+	})
+	updateResult, err := handleKB(db)(context.TODO(), updateReq)
+	require.NoError(t, err)
+	require.False(t, updateResult.IsError)
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, docs, 1, "string id must update the existing row, not create a new one")
+	assert.Equal(t, "string-id-renamed", docs[0].Title)
+}
+
+// TestHandleKBUpdateByID_InvalidStringID_Errors verifies an unparseable
+// string id is a hard error, not a silent misroute to create.
+func TestHandleKBUpdateByID_InvalidStringID_Errors(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":    "abc",
+				"title": "does not matter",
+			},
+		},
+	})
+	result, err := handleKB(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	assert.Empty(t, docs, "invalid id must not be silently misrouted to create")
+}
+
+// TestHandleKBUpdateByID_ZeroID_Errors verifies id:0 is rejected, not
+// treated as an absent-id sentinel.
+func TestHandleKBUpdateByID_ZeroID_Errors(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":    float64(0),
+				"title": "does not matter",
+			},
+		},
+	})
+	result, err := handleKB(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleKBUpdateByID_NonScalarID_Errors verifies an id of a type that's
+// neither a JSON number nor a string (the parseKBEntryID default branch) is
+// a hard error, not a silent misroute to create.
+func TestHandleKBUpdateByID_NonScalarID_Errors(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"id":    true,
+				"title": "does not matter",
+			},
+		},
+	})
+	result, err := handleKB(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleKB_IDAbsent_StillUpserts verifies id-absent entries keep the
+// existing upsert-by-natural-key behavior unchanged.
+func TestHandleKB_IDAbsent_StillUpserts(t *testing.T) {
+	resetDB(t)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "natural-key-entry",
+				"content": "v1",
+			},
+		},
+	})
+	_, err := handleKB(db)(context.TODO(), req)
+	require.NoError(t, err)
+
+	result, err := handleKB(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resp []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	require.Len(t, resp, 1)
+	assert.Equal(t, "updated", resp[0]["action"])
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+}
+
 // TestHandleGetBatch tests domain=kb batch get with ids.
 func TestHandleGetBatch(t *testing.T) {
 	resetDB(t)

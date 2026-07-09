@@ -31,7 +31,7 @@ const (
 const serverInstructions = `Persist decisions and track work items across conversations.
 get/search are reads (required domain: kb|backlog|roadmap); kb/backlog/roadmap are writes.
 
-- Search before writing — avoid duplicates; kb upserts by type+project+category+title.
+- Search before writing — avoid duplicates; kb upserts by type+project+category+title when id is absent, or updates in place when id is present (use this to retitle).
 - Default response is summary; verbose=true only when full content/notes are needed.
 - roadmap is a per-project singleton (now/next/deferred/parked/dropped/done sections); items carry two single-valued grouping axes, component and epic (an epic is a backlog item); get format=md&by=component|epic renders Markdown grouped on that axis, filterable by component/epic.
 - Edges (blocks/relates/explains) link items/kb docs: backlog entries[].edges[] creates them inline at write time; kb content [[Title]] autolinks; get verbose=true surfaces an edges sidecar; CLI link/unlink/ls edges for retrofits.
@@ -82,8 +82,8 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 	), withRecover(handleSearch(db)))
 
 	s.AddTool(mcp.NewTool("kb",
-		mcp.WithDescription("Create or update knowledge entries via entries[], upserting by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb."),
-		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to upsert")),
+		mcp.WithDescription("Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb."),
+		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?")),
 		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
 	), withRecover(handleKB(db)))
 
