@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,44 +15,64 @@ import (
 
 // kbCmd is declared in kb.go, which also attaches kbDeleteCmd as a subcommand.
 var kbDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
-	Short: "Delete a knowledge base document by ID",
-	Args:  cobra.ExactArgs(1),
+	Use:   "delete <id> [<id>...]",
+	Short: "Delete one or more knowledge base documents by ID",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDB(func(db *sql.DB) error {
-			return runKBDelete(cmd.OutOrStdout(), db, args[0])
+			return runKBDelete(cmd.OutOrStdout(), db, args)
 		})
 	},
 }
 
-func runKBDelete(out io.Writer, db *sql.DB, idStr string) error {
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		return fmt.Errorf("kb delete: invalid id %q: must be an integer", idStr)
+func runKBDelete(out io.Writer, db *sql.DB, idStrs []string) error {
+	seen := make(map[int64]bool, len(idStrs))
+	ids := make([]int64, 0, len(idStrs))
+	for _, s := range idStrs {
+		id, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || id <= 0 {
+			return fmt.Errorf("kb delete: invalid id %q: must be a positive integer", s)
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
 	}
 
-	doc, err := store.GetDocument(db, id)
-	if err != nil {
-		return fmt.Errorf("kb delete: %w", err)
+	// All-or-nothing: verify every id exists before deleting any of them, so
+	// a typo among a batch aborts with nothing deleted rather than a partial
+	// delete.
+	var missing []string
+	for _, id := range ids {
+		doc, err := store.GetDocument(db, id)
+		if err != nil {
+			return fmt.Errorf("kb delete: %w", err)
+		}
+		if doc == nil {
+			missing = append(missing, strconv.FormatInt(id, 10))
+		}
 	}
-	if doc == nil {
-		return fmt.Errorf("kb delete: document %d not found", id)
+	if len(missing) > 0 {
+		return fmt.Errorf("kb delete: document(s) not found: %s — nothing deleted", strings.Join(missing, ", "))
 	}
 
-	// Atomic: the doc delete and its edge cascade cleanup happen in one tx
-	// (mirrors backlog.DeleteItems) — a crash between them must not orphan
-	// edges referencing the now-deleted document.
+	// Atomic batch: every doc delete and its edge cascade cleanup happen in
+	// one tx (mirrors backlog.DeleteItems), followed by a single FTS rebuild
+	// after commit — not one rebuild per id.
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("kb delete: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if err := store.DeleteDocumentTx(tx, id); err != nil {
-		return fmt.Errorf("kb delete: %w", err)
-	}
-	if _, err := edges.CascadeDelete(tx, edges.TypeKB, idStr); err != nil {
-		return fmt.Errorf("kb delete: cascade cleanup: %w", err)
+	for _, id := range ids {
+		if err := store.DeleteDocumentTx(tx, id); err != nil {
+			return fmt.Errorf("kb delete: %w", err)
+		}
+		if _, err := edges.CascadeDelete(tx, edges.TypeKB, strconv.FormatInt(id, 10)); err != nil {
+			return fmt.Errorf("kb delete: cascade cleanup: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -62,6 +83,10 @@ func runKBDelete(out io.Writer, db *sql.DB, idStr string) error {
 		return fmt.Errorf("kb delete: %w", err)
 	}
 
-	fmt.Fprintf(out, "deleted document %d\n", id)
+	idOut := make([]string, len(ids))
+	for i, id := range ids {
+		idOut[i] = strconv.FormatInt(id, 10)
+	}
+	fmt.Fprintf(out, "deleted %d document(s): %s\n", len(ids), strings.Join(idOut, ", "))
 	return nil
 }

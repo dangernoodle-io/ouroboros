@@ -20,7 +20,7 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 
 Cross-reference edges (`blocks`/`relates`/`explains` between items/KB docs) fold into the existing tools rather than a 6th tool: `backlog` write entries[].edges[], `kb` write `[[Title]]` autolinks, `get` verbose=true edges sidecar. See [Backlog](../../wiki/Backlog).
 
-Operator-style ops (`project`, `plan`, `config`, `kb delete`, `export`, `import`, `roadmap`, `link`/`unlink`) are CLI-only — see `ouroboros --help`.
+Operator-style ops (`project`, `plan`, `config`, `kb delete <id>...`, `export`, `import`, `roadmap`, `link`/`unlink`) are CLI-only — see `ouroboros --help`.
 
 ## Use with Claude Code
 
