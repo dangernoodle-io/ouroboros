@@ -29,7 +29,7 @@
       "inputSchema": {
         "properties": {
           "by": {
-            "description": "Markdown grouping axis: \"component\" (default) or \"epic\"; the other axis renders as an inline chip (roadmap get format=md only)",
+            "description": "Grouping axis: \"component\" (default) or \"epic\"; the other axis renders as an inline chip (roadmap get format=md|html only)",
             "type": "string"
           },
           "categories": {
@@ -52,7 +52,7 @@
             "type": "string"
           },
           "format": {
-            "description": "structured or md, default structured (roadmap only)",
+            "description": "structured, md, or html, default structured (roadmap only)",
             "type": "string"
           },
           "ids": {

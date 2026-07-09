@@ -33,7 +33,7 @@ MCP surface is intentionally narrow (5 tools); operator-style ops are CLI-only. 
 
 | Tool | Type | Description |
 |------|------|-------------|
-| get | Read | Fetch entries by ID or filters (requires `domain`: kb\|backlog\|roadmap) |
+| get | Read | Fetch entries by ID or filters (requires `domain`: kb\|backlog\|roadmap); roadmap supports `format=md\|html` |
 | search | Read | Full-text search (requires `domain`: kb\|backlog\|roadmap) |
 | kb | Write | Create or update (by id) knowledge entries (id absent: upserts by type+project+category+title) |
 | backlog | Write | Create, update, or delete backlog items |

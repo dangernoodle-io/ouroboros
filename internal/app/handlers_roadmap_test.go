@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -750,6 +751,104 @@ func TestHandleGet_DomainRoadmap_ByEpicResolvesLabel(t *testing.T) {
 	textContent, ok := mcp.AsTextContent(result.Content[0])
 	require.True(t, ok)
 	assert.Contains(t, textContent.Text, "#### epic: WiFi map")
+}
+
+// TestHandleGet_DomainRoadmap_HTML verifies get domain=roadmap format=html
+// returns a self-contained HTML fragment.
+func TestHandleGet_DomainRoadmap_HTML(t *testing.T) {
+	resetDB(t)
+
+	addReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "HTML item",
+		"component": "widget",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	require.NoError(t, err)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "roadmap", "projects": []interface{}{"acme-corp"}, "format": "html",
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "<style>")
+	assert.Contains(t, textContent.Text, "HTML item")
+	assert.Contains(t, textContent.Text, "component: widget")
+}
+
+// TestHandleGet_DomainRoadmap_HTMLByEpicMarksBlockedHeader verifies
+// format=html&by=epic resolves the epic's backlog title and marks the
+// group header blocked when an incoming "blocks" edge targets the epic
+// item, computed from internal/edges.
+func TestHandleGet_DomainRoadmap_HTMLByEpicMarksBlockedHeader(t *testing.T) {
+	resetDB(t)
+
+	proj, err := backlog.GetProjectByName(db, "acme-corp")
+	require.NoError(t, err)
+	if proj == nil {
+		proj, err = backlog.CreateProject(db, "acme-corp", "AC")
+		require.NoError(t, err)
+	}
+	epicItem, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: WiFi map", "", "", "", "")
+	require.NoError(t, err)
+	blocker, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "blocking item", "", "", "", "")
+	require.NoError(t, err)
+	_, err = edges.Link(db, edges.TypeItem, blocker.ID, "blocks", edges.TypeItem, epicItem.ID, proj.ID)
+	require.NoError(t, err)
+
+	addReq := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "epic item",
+		"epic": epicItem.ID,
+	})
+	_, err = handleRoadmap(db, nil)(context.TODO(), addReq)
+	require.NoError(t, err)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "roadmap", "projects": []interface{}{"acme-corp"}, "format": "html", "by": "epic",
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "epic: WiFi map")
+	assert.Contains(t, textContent.Text, `class="blocked-marker"`)
+}
+
+// TestHandleGet_DomainRoadmap_HTMLFiltersApply verifies component/epic
+// filters still apply under format=html.
+func TestHandleGet_DomainRoadmap_HTMLFiltersApply(t *testing.T) {
+	resetDB(t)
+
+	addReq1 := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "matches",
+		"component": "widget",
+	})
+	_, err := handleRoadmap(db, nil)(context.TODO(), addReq1)
+	require.NoError(t, err)
+
+	addReq2 := makeRequest(map[string]interface{}{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "other",
+		"component": "gadget",
+	})
+	_, err = handleRoadmap(db, nil)(context.TODO(), addReq2)
+	require.NoError(t, err)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "roadmap", "projects": []interface{}{"acme-corp"}, "format": "html", "component": "widget",
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "matches")
+	assert.NotContains(t, textContent.Text, "other")
 }
 
 // TestHandleGet_DomainRoadmap_ComponentAndEpicFilters verifies get

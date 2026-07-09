@@ -11,6 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 )
 
@@ -132,6 +133,33 @@ func TestRunRoadmapShowByEpicResolvesLabelAndFilters(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "in the epic")
 	assert.NotContains(t, buf.String(), "not in the epic")
+}
+
+// TestRunRoadmapShowHTMLByEpicMarksBlockedHeader verifies runRoadmapShowHTML
+// (the CLI copy) marks the epic group header blocked when an incoming
+// "blocks" edge targets the epic item, exercising blockedEpicsFor's loop
+// body -- unlike the app.handleGet path, no CLI test previously drove this.
+func TestRunRoadmapShowHTMLByEpicMarksBlockedHeader(t *testing.T) {
+	db := newTestDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	epicItem, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: WiFi map", "", "", "", "")
+	require.NoError(t, err)
+	blocker, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "blocking item", "", "", "", "")
+	require.NoError(t, err)
+	_, err = edges.Link(db, edges.TypeItem, blocker.ID, "blocks", edges.TypeItem, epicItem.ID, proj.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, runRoadmapAdd(&bytes.Buffer{}, db, "acme-corp", roadmap.SectionNow, roadmap.Item{
+		Title: "epic item", Epic: epicItem.ID,
+	}))
+
+	var buf bytes.Buffer
+	err = runRoadmapShowHTML(&buf, db, "acme-corp", "epic", "", "", "")
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "epic: WiFi map")
+	assert.Contains(t, buf.String(), `class="blocked-marker"`)
 }
 
 // ── add ──────────────────────────────────────────────────────────────────────

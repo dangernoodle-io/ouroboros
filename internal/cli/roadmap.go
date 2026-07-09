@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 )
 
@@ -82,14 +84,22 @@ var (
 	roadmapShowBy        string
 	roadmapShowComponent string
 	roadmapShowEpic      string
+	roadmapShowHTML      bool
+	roadmapShowOutput    string
 )
 
 var roadmapShowCmd = &cobra.Command{
 	Use:   "show <project>",
-	Short: "Print the roadmap as Markdown",
+	Short: "Print the roadmap as Markdown or HTML",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !roadmapShowHTML && roadmapShowOutput != "" {
+			return errors.New("roadmap: -o requires --html")
+		}
 		return withDB(func(db *sql.DB) error {
+			if roadmapShowHTML {
+				return runRoadmapShowHTML(cmd.OutOrStdout(), db, args[0], roadmapShowBy, roadmapShowComponent, roadmapShowEpic, roadmapShowOutput)
+			}
 			return runRoadmapShow(cmd.OutOrStdout(), db, args[0], roadmapShowBy, roadmapShowComponent, roadmapShowEpic)
 		})
 	},
@@ -103,6 +113,48 @@ func runRoadmapShow(w io.Writer, db *sql.DB, project, by, component, epic string
 	rm = roadmap.Filter(rm, component, epic)
 	epicLabels := backlog.EpicLabels(db, roadmap.EpicIDs(rm))
 	fmt.Fprint(w, roadmap.RenderMarkdown(rm, by, epicLabels, nil))
+	return nil
+}
+
+// blockedEpicsFor resolves, for each epic id referenced by the roadmap,
+// whether that epic (itself a backlog item) is the target of an incoming
+// "blocks" edge. A lookup failure for one epic id is treated as "not
+// blocked" rather than failing the whole render.
+func blockedEpicsFor(db *sql.DB, epicIDs []string) map[string]bool {
+	blocked := make(map[string]bool, len(epicIDs))
+	for _, id := range epicIDs {
+		sources, err := edges.ItemsByEdge(db, edges.TypeItem, id, "blocks")
+		if err == nil && len(sources) > 0 {
+			blocked[id] = true
+		}
+	}
+	return blocked
+}
+
+// runRoadmapShowHTML renders the roadmap as a self-contained HTML fragment.
+// With no --output, it writes the bare embeddable fragment to w (stdout);
+// with --output/-o, it wraps the fragment in a minimal standalone
+// <!doctype html> document and writes it to that file instead, so the file
+// opens cleanly in a browser.
+func runRoadmapShowHTML(w io.Writer, db *sql.DB, project, by, component, epic, outPath string) error {
+	rm, err := roadmap.Load(db, project)
+	if err != nil {
+		return fmt.Errorf("roadmap: %w", err)
+	}
+	rm = roadmap.Filter(rm, component, epic)
+	epicIDs := roadmap.EpicIDs(rm)
+	epicLabels := backlog.EpicLabels(db, epicIDs)
+	blockedEpics := blockedEpicsFor(db, epicIDs)
+	fragment := roadmap.RenderHTML(rm, by, epicLabels, blockedEpics)
+
+	if outPath == "" {
+		fmt.Fprint(w, fragment)
+		return nil
+	}
+	if err := os.WriteFile(outPath, []byte(roadmap.WrapStandaloneHTML(fragment)), 0o600); err != nil {
+		return fmt.Errorf("roadmap: write %s: %w", outPath, err)
+	}
+	fmt.Fprintf(w, "wrote %s\n", outPath)
 	return nil
 }
 
@@ -538,9 +590,11 @@ func init() {
 
 	roadmapReorderCmd.Flags().IntVar(&roadmapReorderPosition, "position", 0, "Sort position within the item's section (required)")
 
-	roadmapShowCmd.Flags().StringVar(&roadmapShowBy, "by", "component", `Markdown grouping axis: "component" or "epic"`)
+	roadmapShowCmd.Flags().StringVar(&roadmapShowBy, "by", "component", `Grouping axis: "component" or "epic"`)
 	roadmapShowCmd.Flags().StringVar(&roadmapShowComponent, "component", "", "Filter by component")
 	roadmapShowCmd.Flags().StringVar(&roadmapShowEpic, "epic", "", "Filter by epic backlog item id")
+	roadmapShowCmd.Flags().BoolVar(&roadmapShowHTML, "html", false, "Render as a self-contained HTML fragment instead of Markdown")
+	roadmapShowCmd.Flags().StringVarP(&roadmapShowOutput, "output", "o", "", "Write HTML to this file as a standalone document (--html only; default: print the bare fragment to stdout)")
 
 	roadmapSeedCmd.Flags().BoolVar(&roadmapSeedBacklog, "backlog", false, "Seed from backlog items (required)")
 	roadmapSeedCmd.Flags().StringVar(&roadmapSeedPriority, "priority", "", "Max priority to include, e.g. P2 includes P0-P2 (cap, not exact match like ls items --priority; default: no cap)")

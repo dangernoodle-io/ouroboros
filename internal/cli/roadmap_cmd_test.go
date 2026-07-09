@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -308,7 +309,16 @@ func TestRoadmapRemoveCmd_Success(t *testing.T) {
 
 // ── show ─────────────────────────────────────────────────────────────────────
 
+func resetRoadmapShowVars() {
+	roadmapShowBy = ""
+	roadmapShowComponent = ""
+	roadmapShowEpic = ""
+	roadmapShowHTML = false
+	roadmapShowOutput = ""
+}
+
 func TestRoadmapShowCmd_Success(t *testing.T) {
+	resetRoadmapShowVars()
 	dir := t.TempDir()
 	t.Setenv("PROJECT_KB_PATH", filepath.Join(dir, "roadmap.db"))
 
@@ -317,6 +327,50 @@ func TestRoadmapShowCmd_Success(t *testing.T) {
 	err := roadmapShowCmd.RunE(roadmapShowCmd, []string{"acme-corp"})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "# Roadmap")
+}
+
+func TestRoadmapShowCmd_HTMLStdout(t *testing.T) {
+	resetRoadmapShowVars()
+	dir := t.TempDir()
+	t.Setenv("PROJECT_KB_PATH", filepath.Join(dir, "roadmap.db"))
+	roadmapShowHTML = true
+
+	var buf bytes.Buffer
+	roadmapShowCmd.SetOut(&buf)
+	err := roadmapShowCmd.RunE(roadmapShowCmd, []string{"acme-corp"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "<style>")
+	assert.NotContains(t, buf.String(), "<!doctype")
+}
+
+func TestRoadmapShowCmd_OutputWithoutHTML(t *testing.T) {
+	resetRoadmapShowVars()
+	roadmapShowOutput = "rm.html"
+
+	err := roadmapShowCmd.RunE(roadmapShowCmd, []string{"acme-corp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "-o requires --html")
+}
+
+func TestRoadmapShowCmd_HTMLOutputFile(t *testing.T) {
+	resetRoadmapShowVars()
+	dir := t.TempDir()
+	t.Setenv("PROJECT_KB_PATH", filepath.Join(dir, "roadmap.db"))
+	roadmapShowHTML = true
+	outPath := filepath.Join(dir, "rm.html")
+	roadmapShowOutput = outPath
+
+	var buf bytes.Buffer
+	roadmapShowCmd.SetOut(&buf)
+	err := roadmapShowCmd.RunE(roadmapShowCmd, []string{"acme-corp"})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), outPath)
+
+	contents, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(contents), "<!doctype html>")
+	assert.Contains(t, string(contents), "<style>")
+	assert.Contains(t, string(contents), "<body>")
 }
 
 // ── parseSection valid path + runRoadmapAdd Mutate error ────────────────────
@@ -345,6 +399,26 @@ func TestRunRoadmapShowLoadError(t *testing.T) {
 
 	var buf bytes.Buffer
 	err = runRoadmapShow(&buf, db, "acme-corp", "", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "roadmap:")
+}
+
+func TestRunRoadmapShowHTMLLoadError(t *testing.T) {
+	db := newTestDB(t)
+	_, err := db.Exec("DROP TABLE documents")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runRoadmapShowHTML(&buf, db, "acme-corp", "", "", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "roadmap:")
+}
+
+func TestRunRoadmapShowHTMLWriteError(t *testing.T) {
+	db := newTestDB(t)
+
+	var buf bytes.Buffer
+	err := runRoadmapShowHTML(&buf, db, "acme-corp", "", "", "", filepath.Join(t.TempDir(), "no-such-dir", "rm.html"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "roadmap:")
 }
