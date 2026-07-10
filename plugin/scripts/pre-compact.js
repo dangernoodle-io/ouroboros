@@ -57,32 +57,20 @@ async function main() {
         // Query failed or no docs found: fall through to heuristic
       }
 
-      // Heuristic path: check for decision language
+      // Heuristic path: check for decision language. Compaction is never
+      // blocked on this — it's an advisory-only observability signal.
       const decisionTurns = turns.filter(t => t.hasDecisionLanguage).length;
       const trigger = data.trigger || 'manual';
       const threshold = 3;
-
-      if (decisionTurns >= threshold) {
-        const reason = '[ouroboros] unpersisted decisions detected — emit ```kb``` blocks for the key decisions from this session before compacting';
-        process.stdout.write(JSON.stringify({ decision: 'block', reason }));
-        logHookEvent({
-          hook: 'pre_compact',
-          kind: 'block',
-          project,
-          trigger,
-          decision_turns: decisionTurns,
-          threshold,
-        });
-        process.exit(0);
-      }
 
       logHookEvent({
         hook: 'pre_compact',
         kind: 'allow',
         project,
-        reason: 'no_decisions',
+        reason: decisionTurns >= threshold ? 'decisions_unpersisted_advisory' : 'no_decisions',
         trigger,
         decision_turns: decisionTurns,
+        threshold,
       });
       process.exit(0);
     }
@@ -128,12 +116,13 @@ async function main() {
       process.exit(0);
     }
 
+    // Some kb-blocks in this transcript weren't persisted. This is a real
+    // signal worth logging, but compaction is never blocked on it — advisory
+    // only.
     const unpersisted = blocks.length - persistedCount;
-    const reason = `[ouroboros] ${unpersisted} of ${blocks.length} kb-blocks unpersisted — persist before compacting`;
-    process.stdout.write(JSON.stringify({ decision: 'block', reason }));
     logHookEvent({
       hook: 'pre_compact',
-      kind: 'block',
+      kind: 'unpersisted_advisory',
       project,
       reason: 'unpersisted_blocks',
       block_count: blocks.length,
