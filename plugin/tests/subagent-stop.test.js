@@ -162,6 +162,22 @@ test('subagent-stop: no kb block + tier-1 decision language → exit 0, no nudge
   assert.strictEqual(result.stdout.trim(), '', 'subagent stop must never block the final turn with a nudge');
 });
 
+test('subagent-stop: long decision-language message, no kb block → exit 0, no nudge string in stdout (OU-254 regression)', () => {
+  const input = JSON.stringify({
+    agent_type: 'general',
+    agent_id: 'abc12345678',
+    last_assistant_message:
+      'After reviewing the options, the rationale for this architecture is clear: the trade-off ' +
+      'favors simplicity over flexibility, so we decided to keep the current design as-is.',
+  });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+  assert.strictEqual(result.stdout.trim(), '');
+  assert(!result.stdout.toLowerCase().includes('nudge'), 'stdout must not contain a nudge');
+  assert(!result.stdout.toLowerCase().includes('tier-1'), 'stdout must not contain tier-1 nudge language');
+  assert(!result.stdout.toLowerCase().includes('persist'), 'stdout must not contain a persist prompt');
+});
+
 test('subagent-stop: message with no kb block + neutral content → exit 0, no stdout', () => {
   const input = JSON.stringify({
     agent_type: 'general',

@@ -182,6 +182,32 @@ function checkStatusline(pluginRoot) {
   return { ok: missing.length === 0, missing, settingsPath };
 }
 
+// isStaleSubagentHook detects a pre-OU-222 subagent-stop.js: one that still
+// fires a blocking nudge on a subagent's final message. That nudge forces
+// another turn to address it, and the meta-acknowledgement overwrites the
+// real report the caller needs (OU-222/OU-254). The current clean script
+// contains neither signature string; only the stale cached copy does.
+function isStaleSubagentHook(contents) {
+  if (typeof contents !== 'string') return false;
+  return /nudge fired/i.test(contents) || /tier-1/i.test(contents);
+}
+
+// checkSubagentHookStale reads <pluginRoot>/scripts/subagent-stop.js and
+// reports whether it's a stale pre-OU-222 copy that nudges subagents,
+// destroying their final report. Read-only and advisory only — a corrupt
+// or unreadable file is "skipped", never a failure that blocks bootstrap.
+function checkSubagentHookStale(pluginRoot) {
+  if (!pluginRoot) return { ok: true, skipped: true };
+  const scriptPath = path.join(pluginRoot, 'scripts', 'subagent-stop.js');
+  let contents;
+  try {
+    contents = fs.readFileSync(scriptPath, 'utf8');
+  } catch (err) {
+    return { ok: true, skipped: true, scriptPath };
+  }
+  return { ok: !isStaleSubagentHook(contents), scriptPath };
+}
+
 // --- network (injectable) -----------------------------------------------
 
 // rawRequest performs a single HTTPS GET and resolves the full response
@@ -472,7 +498,16 @@ async function bootstrap(env, opts) {
     log(`configured statusLine command references missing script(s): ${statusline.missing.join(', ')}`);
   }
 
-  return { binary, scripts, statusline, repaired, installResult };
+  const subagentHook = checkSubagentHookStale(pluginRoot);
+  if (!subagentHook.skipped && !subagentHook.ok) {
+    log(
+      `STALE subagent-stop.js detected (${subagentHook.scriptPath}): this cached copy ` +
+        'nudges subagents on their final message, which destroys the report returned ' +
+        'to the caller (OU-222/OU-254). Update the plugin — re-fetch it, not just reload.'
+    );
+  }
+
+  return { binary, scripts, statusline, subagentHook, repaired, installResult };
 }
 
 if (require.main === module) {
@@ -491,6 +526,8 @@ module.exports = {
   extractPluginPaths,
   checkHookScripts,
   checkStatusline,
+  isStaleSubagentHook,
+  checkSubagentHookStale,
   rawRequest,
   followRedirects,
   httpGet,
