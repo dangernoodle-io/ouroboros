@@ -12,7 +12,7 @@
             "type": "array"
           },
           "entries": {
-            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id)",
+            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes",
             "type": "array"
           }
         },
@@ -126,7 +126,7 @@
       "inputSchema": {
         "properties": {
           "entries": {
-            "description": "Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?",
+            "description": "Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?. content max 500 chars; put narrative in notes",
             "type": "array"
           }
         },

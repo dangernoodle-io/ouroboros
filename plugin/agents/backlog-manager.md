@@ -21,6 +21,7 @@ Reads are MCP-native: `get`/`search` with `domain: "backlog"`, not the CLI `ls` 
 - Update: `id` + fields to change
 - Close: `id` + `status: "done"`
 - Reprioritize: `id` + `priority`
+- `description` has a 500-char hard cap (same as kb `content`) — narrative goes in `notes`
 
 ## Epics
 
