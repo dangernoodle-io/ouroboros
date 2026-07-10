@@ -53,14 +53,12 @@ async function main() {
 
     // Parse message from stdin JSON
     let message = '';
-    let transcriptPath = '';
     let cwd = '';
     let session_id = undefined;
     try {
       const json = JSON.parse(input);
       // UserPromptSubmit hook sends `prompt`, fallback to legacy `message` for testing
       message = json.prompt || json.message || '';
-      transcriptPath = json.transcript_path || '';
       cwd = json.cwd || '';
       session_id = json.session_id;
     } catch (e) {
@@ -75,14 +73,22 @@ async function main() {
       process.exit(0);
     }
 
-    // Determine project with fallback chain: cwd → hints chain (message, transcript)
+    // Determine project from the SESSION'S PRIMARY REPO: cwd resolved to its
+    // enclosing git root, falling back only to an explicit project-name mention
+    // in the prompt text. Deliberately does NOT fall back to scanning the
+    // transcript for the most-recently-touched file path (resolveProject's
+    // transcriptPath hint) — that guesses the project of whatever file was
+    // last read/edited, which can be a different repo than the one the
+    // session is actually working in (e.g. a one-off read into another
+    // project mid-session), and silently mislabels injected KB context and
+    // the persist-project hint. Fail-open: unresolvable cwd + no message
+    // mention → no injection, never a wrong guess.
     let project = null;
     if (cwd) {
       project = projectFromPath(cwd);
     }
     if (!project) {
-      const hints = { message, transcriptPath };
-      project = resolveProject(hints);
+      project = resolveProject({ message });
     }
     if (!project) {
       process.exit(0);
