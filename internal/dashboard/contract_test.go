@@ -181,6 +181,15 @@ func TestProjectField_SurvivesEmitParseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFragmentProject(t *testing.T) {
+	maxVal := 100.0
+	assert.Equal(t, "p", FragmentProject(Tile{Type: "tile", Project: "p"}))
+	assert.Equal(t, "p", FragmentProject(Bar{Type: "bar", Max: &maxVal, Project: "p"}))
+	assert.Equal(t, "p", FragmentProject(Group{Type: "group", Project: "p"}))
+	assert.Equal(t, "p", FragmentProject(Note{Type: "note", Project: "p"}))
+	assert.Equal(t, "p", FragmentProject(HTML{Type: "html", Project: "p"}))
+}
+
 func TestNewTile(t *testing.T) {
 	tile := NewTile("git", "branch", "main")
 	assert.Equal(t, 1, tile.V)
