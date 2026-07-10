@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,10 +71,82 @@ func gitSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
 		}
 	}
 
-	return []Fragment{
+	frags := []Fragment{
 		NewTile("git", "branch", branch),
 		NewTile("git", "uncommitted", strconv.Itoa(uncommitted)),
-	}, nil
+	}
+
+	if group, ok := gitWorktreesGroup(dir); ok {
+		frags = append(frags, group)
+	}
+
+	return frags, nil
+}
+
+// gitWorktree is one entry parsed from `git worktree list --porcelain`.
+type gitWorktree struct {
+	path   string
+	branch string
+}
+
+// gitWorktreesGroup builds a "worktrees" Group fragment for dir's linked
+// worktrees. It returns ok=false when git errors (old git, not a repo) or
+// when there's only the one (main) worktree — not worth a group.
+func gitWorktreesGroup(dir string) (Group, bool) {
+	out, err := exec.Command("git", "-C", dir, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return Group{}, false //nolint:nilerr // degrade gracefully: git worktree failure is not a segment error
+	}
+
+	worktrees := parseWorktreePorcelain(string(out))
+	if len(worktrees) < 2 {
+		return Group{}, false
+	}
+
+	cards := make([]Card, 0, len(worktrees))
+	for i, wt := range worktrees {
+		card := Card{
+			Title: filepath.Base(wt.path),
+			Desc:  wt.branch,
+		}
+		if i == 0 {
+			card.State = "main"
+		}
+		cards = append(cards, card)
+	}
+
+	return Group{
+		V:       schemaVersion,
+		Type:    "group",
+		Section: "git",
+		Title:   "worktrees",
+		Cards:   cards,
+	}, true
+}
+
+// parseWorktreePorcelain parses `git worktree list --porcelain` output into
+// gitWorktree entries, in the order git reports them (main tree first).
+func parseWorktreePorcelain(out string) []gitWorktree {
+	var worktrees []gitWorktree
+	var cur *gitWorktree
+
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			worktrees = append(worktrees, gitWorktree{path: strings.TrimPrefix(line, "worktree ")})
+			cur = &worktrees[len(worktrees)-1]
+		case cur == nil:
+			continue
+		case strings.HasPrefix(line, "branch "):
+			cur.branch = strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
+		case line == "detached":
+			cur.branch = "detached"
+		case line == "bare":
+			cur.branch = "bare"
+		}
+	}
+
+	return worktrees
 }
 
 // roadmapSegment reports non-empty section counts from ctx.Project's
