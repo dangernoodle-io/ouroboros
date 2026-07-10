@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType } = require('../scripts/lib');
+const { extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType, isOuroborosWriteTool, turnAlreadyPersisted } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -1285,5 +1285,91 @@ test('extractAllKbBlocks - large file: kb-blocks in tail are parsed correctly', 
   assert(result.blocks.length >= 1, 'should find the kb-block placed in the tail');
   assert.strictEqual(result.blocks[result.blocks.length - 1].text, kbJson);
 
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('isOuroborosWriteTool - matches kb/backlog/roadmap/put/item under an ouroboros MCP server namespace', () => {
+  assert.strictEqual(isOuroborosWriteTool('mcp__ouroboros-mcp__kb'), true);
+  assert.strictEqual(isOuroborosWriteTool('mcp__plugin_ouroboros-mcp_ouroboros__backlog'), true);
+  assert.strictEqual(isOuroborosWriteTool('mcp__plugin_ouroboros-mcp_ouroboros__roadmap'), true);
+  assert.strictEqual(isOuroborosWriteTool('mcp__ouroboros-mcp__put'), true);
+  assert.strictEqual(isOuroborosWriteTool('mcp__ouroboros-mcp__item'), true);
+});
+
+test('isOuroborosWriteTool - rejects non-write tools and non-ouroboros servers', () => {
+  assert.strictEqual(isOuroborosWriteTool('mcp__ouroboros-mcp__get'), false);
+  assert.strictEqual(isOuroborosWriteTool('mcp__ouroboros-mcp__search'), false);
+  assert.strictEqual(isOuroborosWriteTool('mcp__some-other-server__kb'), false);
+  assert.strictEqual(isOuroborosWriteTool('Edit'), false);
+  assert.strictEqual(isOuroborosWriteTool(''), false);
+  assert.strictEqual(isOuroborosWriteTool(null), false);
+});
+
+test('turnAlreadyPersisted - ouroboros write tool_use within current turn → true', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-persisted-'));
+  const transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+  const lines = [
+    JSON.stringify({ type: 'user', message: { content: 'do the thing' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__ouroboros-mcp__backlog', input: {} }] } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'final summary text' }] } }),
+  ];
+  fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+  assert.strictEqual(turnAlreadyPersisted(transcriptPath), true);
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('turnAlreadyPersisted - prior kb fenced block within current turn → true', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-persisted-kb-'));
+  const transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+  const lines = [
+    JSON.stringify({ type: 'user', message: { content: 'do the thing' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'persisting now:\n```kb\n[{"type":"note"}]\n```' }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'final summary text' }] } }),
+  ];
+  fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+  assert.strictEqual(turnAlreadyPersisted(transcriptPath), true);
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('turnAlreadyPersisted - persist signal only in a previous turn → false', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-persisted-prev-'));
+  const transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+  const lines = [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__ouroboros-mcp__kb', input: {} }] } }),
+    JSON.stringify({ type: 'user', message: { content: 'a fresh new prompt' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'final summary text' }] } }),
+  ];
+  fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+  assert.strictEqual(turnAlreadyPersisted(transcriptPath), false);
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('turnAlreadyPersisted - no persist signal anywhere → false', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-persisted-none-'));
+  const transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+  const lines = [
+    JSON.stringify({ type: 'user', message: { content: 'do the thing' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'final summary text' }] } }),
+  ];
+  fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+  assert.strictEqual(turnAlreadyPersisted(transcriptPath), false);
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('turnAlreadyPersisted - missing transcript file → fail-open false', () => {
+  assert.strictEqual(turnAlreadyPersisted('/nonexistent/path/transcript.jsonl'), false);
+});
+
+test('turnAlreadyPersisted - unparseable lines are skipped, not fatal', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'turn-persisted-garbage-'));
+  const transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+  const lines = [
+    JSON.stringify({ type: 'user', message: { content: 'do the thing' } }),
+    '{not valid json',
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'final summary text' }] } }),
+  ];
+  fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+  assert.strictEqual(turnAlreadyPersisted(transcriptPath), false);
   fs.rmSync(tmpDir, { recursive: true });
 });
