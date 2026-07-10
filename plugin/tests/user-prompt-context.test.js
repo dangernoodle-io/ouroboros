@@ -191,52 +191,103 @@ test('cleanup: remove temp stub dir', () => {
   }
 });
 
-// E2E test: transcriptPath hint resolves project
-test('e2e: transcript with tool_use → resolves project from hint', () => {
+// OU-257: project resolution must key off session cwd, NOT the most
+// recently-read file path in the transcript. A transcript whose last tool_use
+// references a file under a foreign project must NOT redirect resolution
+// away from the cwd's project.
+test('OU-257: transcript last-touched file in a foreign project is ignored; cwd project wins', () => {
   if (!fs.existsSync(FIXTURES_PATH)) {
-    // Skip if fixtures don't exist (will be run in correct test environment)
     return;
   }
 
-  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'upc-e2e-'));
-  const ouroboros = path.join(workspaceRoot, 'ouroboros');
-  fs.mkdirSync(ouroboros);
-  fs.mkdirSync(path.join(ouroboros, 'internal', 'app'), { recursive: true });
-  fs.writeFileSync(path.join(ouroboros, 'internal', 'app', 'server.go'), '// stub');
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'upc-ou257-'));
 
-  // Create .claude in workspace root
+  // Session's real project: breadboard (this is where cwd points)
+  const breadboard = path.join(workspaceRoot, 'breadboard');
+  fs.mkdirSync(breadboard);
+  spawnSync('git', ['init', '-q'], { cwd: breadboard });
+
+  // Clear cooldown so injection isn't suppressed by a real dev session's
+  // recent breadboard context injection outside this test.
+  try { fs.unlinkSync('/tmp/.ouroboros-ctx-breadboard'); } catch (e) {}
+
+  // Foreign project: dangernoodle-github (last file read in the transcript,
+  // but NOT where the session is actually working)
+  const foreign = path.join(workspaceRoot, 'dangernoodle-github');
+  fs.mkdirSync(foreign);
+  fs.writeFileSync(path.join(foreign, 'workflow.yml'), '# stub');
+
   fs.mkdirSync(path.join(workspaceRoot, '.claude'));
 
-  // Create stub binary in a new temp dir for this test
-  const testStubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upc-e2e-bin-'));
+  const testStubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upc-ou257-bin-'));
   const stubPath = path.join(testStubDir, 'ouroboros');
   fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub.sh'), stubPath);
   fs.chmodSync(stubPath, 0o755);
 
-  // Create a transcript with a tool_use referencing the file
+  // Transcript's most recent tool_use references the foreign project's file
   const transcriptPath = path.join(workspaceRoot, 'transcript.jsonl');
-  const filePath = path.join(ouroboros, 'internal', 'app', 'server.go');
+  const foreignFile = path.join(foreign, 'workflow.yml');
   const line = JSON.stringify({
-    message: { content: [{ type: 'tool_use', input: { file_path: filePath } }] }
+    message: { content: [{ type: 'tool_use', input: { file_path: foreignFile } }] }
   });
   fs.writeFileSync(transcriptPath, line);
 
-  // Run script with transcript_path hint
+  // Prompt is substantive (specific intent) and does not mention either project by name
   const input = JSON.stringify({
-    message: 'what is next',
-    transcript_path: transcriptPath
+    prompt: 'how does the reconnect logic handle a dropped socket?',
+    cwd: breadboard,
+    transcript_path: transcriptPath,
   });
   const result = runScript(input, { PATH: `${testStubDir}:${process.env.PATH}` });
 
   assert.strictEqual(result.status, 0);
-  // Should find ouroboros project via transcript and call stub binary
-  const hasOutput = result.stdout.includes('[ouroboros]');
-  if (hasOutput) {
-    assert(result.stdout.includes('ouroboros'));
+  assert(result.stdout.includes('[ouroboros] breadboard KB'), 'should inject KB context for the cwd project (breadboard)');
+  assert(!result.stdout.includes('dangernoodle-github'), 'must NOT mislabel context under the foreign last-read-file project');
+
+  fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  fs.rmSync(testStubDir, { recursive: true, force: true });
+});
+
+// OU-257: fail-open — cwd doesn't resolve to any git repo, and the prompt
+// doesn't explicitly mention a known project name → no injection, no crash,
+// and (critically) no fallback guess from the transcript's last-touched file.
+test('OU-257: unresolvable cwd + no project mention in prompt → fail-open, no injection', () => {
+  if (!fs.existsSync(FIXTURES_PATH)) {
+    return;
   }
 
-  fs.rmSync(workspaceRoot, { recursive: true });
-  fs.rmSync(testStubDir, { recursive: true });
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'upc-ou257-failopen-'));
+  // workspaceRoot itself is NOT a git repo (simulates a multi-project
+  // workspace root as cwd, with no enclosing .git)
+  fs.mkdirSync(path.join(workspaceRoot, '.claude'));
+
+  const otherProject = path.join(workspaceRoot, 'some-other-project');
+  fs.mkdirSync(otherProject);
+  fs.writeFileSync(path.join(otherProject, 'file.js'), '// stub');
+
+  const testStubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upc-ou257-failopen-bin-'));
+  const stubPath = path.join(testStubDir, 'ouroboros');
+  fs.copyFileSync(path.join(FIXTURES_PATH, 'ouroboros-stub.sh'), stubPath);
+  fs.chmodSync(stubPath, 0o755);
+
+  const transcriptPath = path.join(workspaceRoot, 'transcript.jsonl');
+  const line = JSON.stringify({
+    message: { content: [{ type: 'tool_use', input: { file_path: path.join(otherProject, 'file.js') } }] }
+  });
+  fs.writeFileSync(transcriptPath, line);
+
+  const input = JSON.stringify({
+    prompt: 'why does the retry loop spin so aggressively on failure?',
+    cwd: workspaceRoot,
+    transcript_path: transcriptPath,
+  });
+  const result = runScript(input, { PATH: `${testStubDir}:${process.env.PATH}` });
+
+  assert.strictEqual(result.status, 0, 'hook must exit 0 (fail-open), never crash');
+  assert.strictEqual(result.stdout.trim(), '', 'must not inject context or guess a project from the last-touched file');
+
+  fs.rmSync(workspaceRoot, { recursive: true, force: true });
+  fs.rmSync(testStubDir, { recursive: true, force: true });
 });
 
 test('e2e: message hint resolves project name from text', () => {
