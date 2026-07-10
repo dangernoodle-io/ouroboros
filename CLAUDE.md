@@ -30,7 +30,7 @@ make lint     # golangci-lint run
 - `internal/backup/` — git backup operations
 - `internal/config/` — bootstrap config file + env var loading
 - `internal/kb/` — KB export/import, validation
-- `internal/dashboard/` — dashboard data-capture (segment providers → NDJSON contract; gated by `dashboard.enabled`)
+- `internal/dashboard/` — dashboard data-capture (builtin/exec/shell segment producers → NDJSON contract; gated by `dashboard.enabled`); exec/shell run per-segment with a `timeout` (default 5s, clamped [1s,30s]) — sh/jq are NOT required (exec is native argv, shell is opt-in `sh -c`), and producers are operator-configured local commands (trust boundary = a Makefile/git hook), not remote input
 - `internal/testutil/` — `SkipUnlessAcc` acceptance-test gate
 - `integration/` — MCP wire acceptance harness (ACC-gated, `make acc`)
 
