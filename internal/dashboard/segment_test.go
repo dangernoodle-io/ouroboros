@@ -214,8 +214,175 @@ func TestBuiltinAndBuiltinNames(t *testing.T) {
 	assert.True(t, ok)
 	_, ok = Builtin("roadmap")
 	assert.True(t, ok)
+	_, ok = Builtin("github")
+	assert.True(t, ok)
 	_, ok = Builtin("nonexistent")
 	assert.False(t, ok)
 
-	assert.Equal(t, []string{"git", "roadmap"}, BuiltinNames())
+	assert.Equal(t, []string{"git", "github", "roadmap"}, BuiltinNames())
+}
+
+// stubGh writes an executable "gh" script to a temp dir and prepends that
+// dir to PATH for the duration of the test, so githubSegment shells out to
+// the stub instead of the real gh CLI (no network, no auth).
+func stubGh(t *testing.T, script string) {
+	t.Helper()
+	bin := t.TempDir()
+	path := filepath.Join(bin, "gh")
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755)) //nolint:gosec // test fixture, executable by design
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+}
+
+const stubGhPRListJSON = `#!/bin/sh
+cat <<'EOF'
+[
+  {"number": 12, "title": "add widget support", "author": {"login": "test-user"}},
+  {"number": 7, "title": "fix flaky test", "author": {"login": "test-user-two"}}
+]
+EOF
+`
+
+func TestGitHubSegment_OpenPRs(t *testing.T) {
+	stubGh(t, stubGhPRListJSON)
+
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
+	db := newDashboardTestDB(t)
+
+	frags, err := githubSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 2)
+
+	tile, ok := frags[0].(Tile)
+	require.True(t, ok)
+	assert.Equal(t, "github", tile.Section)
+	assert.Equal(t, "open PRs", tile.Label)
+	assert.Equal(t, "2", tile.Value)
+
+	group, ok := frags[1].(Group)
+	require.True(t, ok)
+	assert.Equal(t, "github", group.Section)
+	assert.Equal(t, "pull requests", group.Title)
+	require.Len(t, group.Cards, 2)
+	assert.Equal(t, "#12 add widget support", group.Cards[0].Title)
+	assert.Equal(t, "@test-user", group.Cards[0].Desc)
+	assert.Equal(t, "#7 fix flaky test", group.Cards[1].Title)
+	assert.Equal(t, "@test-user-two", group.Cards[1].Desc)
+}
+
+func TestGitHubSegment_NoOpenPRs(t *testing.T) {
+	stubGh(t, "#!/bin/sh\necho '[]'\n")
+
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
+	db := newDashboardTestDB(t)
+
+	frags, err := githubSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 1)
+
+	tile, ok := frags[0].(Tile)
+	require.True(t, ok)
+	assert.Equal(t, "0", tile.Value)
+}
+
+func TestGitHubSegment_NoOriginRemote(t *testing.T) {
+	dir := initGitRepo(t)
+	db := newDashboardTestDB(t)
+
+	frags, err := githubSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestGitHubSegment_NonGitHubOrigin(t *testing.T) {
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "git@gitlab.com:acme-corp/widget.git")
+	db := newDashboardTestDB(t)
+
+	frags, err := githubSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestGitHubSegment_GhFailure(t *testing.T) {
+	stubGh(t, "#!/bin/sh\nexit 1\n")
+
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
+	db := newDashboardTestDB(t)
+
+	frags, err := githubSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestGitHubSegment_NonGitDir(t *testing.T) {
+	dir := t.TempDir()
+	db := newDashboardTestDB(t)
+
+	frags, err := githubSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestGitHubSegment_MalformedJSON(t *testing.T) {
+	stubGh(t, "#!/bin/sh\necho 'not-json'\n")
+
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
+	db := newDashboardTestDB(t)
+
+	frags, err := githubSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestGitHubSegment_ResolvesDirFromCwd(t *testing.T) {
+	stubGh(t, stubGhPRListJSON)
+
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
+	db := newDashboardTestDB(t)
+
+	t.Chdir(dir)
+
+	frags, err := githubSegment(Context{}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 2)
+
+	tile, ok := frags[0].(Tile)
+	require.True(t, ok)
+	assert.Equal(t, "2", tile.Value)
+
+	group, ok := frags[1].(Group)
+	require.True(t, ok)
+	require.Len(t, group.Cards, 2)
+}
+
+func TestParseGitHubRepo(t *testing.T) {
+	cases := []struct {
+		name   string
+		remote string
+		want   string
+		wantOk bool
+	}{
+		{"https", "https://github.com/acme-corp/widget.git", "acme-corp/widget", true},
+		{"https-no-suffix", "https://github.com/acme-corp/widget", "acme-corp/widget", true},
+		{"ssh-scp", "git@github.com:acme-corp/widget.git", "acme-corp/widget", true},
+		{"ssh-url", "ssh://git@github.com/acme-corp/widget.git", "acme-corp/widget", true},
+		{"dotted-repo-https", "https://github.com/dangernoodle-io/notarizedbyape.com.git", "dangernoodle-io/notarizedbyape.com", true},
+		{"dotted-repo-ssh-scp", "git@github.com:dangernoodle-io/notarizedbyape.com.git", "dangernoodle-io/notarizedbyape.com", true},
+		{"non-github", "git@gitlab.com:acme-corp/widget.git", "", false},
+		{"garbage", "not a url at all", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseGitHubRepo(tc.remote)
+			assert.Equal(t, tc.wantOk, ok)
+			if tc.wantOk {
+				assert.Equal(t, tc.want, got)
+			}
+		})
+	}
 }

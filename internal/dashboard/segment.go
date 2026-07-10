@@ -1,13 +1,17 @@
 package dashboard
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"dangernoodle.io/ouroboros/internal/roadmap"
 )
@@ -20,6 +24,7 @@ type Provider func(ctx Context, db *sql.DB) ([]Fragment, error)
 var builtins = map[string]Provider{
 	"git":     gitSegment,
 	"roadmap": roadmapSegment,
+	"github":  githubSegment,
 }
 
 // Builtin looks up a built-in segment provider by name.
@@ -181,5 +186,106 @@ func roadmapSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
 		}
 		frags = append(frags, NewTile("roadmap", s.name, strconv.Itoa(s.count)))
 	}
+	return frags, nil
+}
+
+// githubRepoPattern matches github.com owner/repo out of https, git@, and
+// ssh:// remote URL forms, tolerating an optional trailing ".git".
+var githubRepoPattern = regexp.MustCompile(`github\.com[:/]([^/]+)/(.+?)(?:\.git)?/?$`)
+
+// parseGitHubRepo extracts "owner/repo" from a git remote URL, handling
+// https://github.com/owner/repo(.git), git@github.com:owner/repo(.git), and
+// ssh://git@github.com/owner/repo(.git) forms. It returns ok=false for any
+// non-github.com host or an unparseable URL.
+func parseGitHubRepo(remoteURL string) (string, bool) {
+	m := githubRepoPattern.FindStringSubmatch(strings.TrimSpace(remoteURL))
+	if m == nil {
+		return "", false
+	}
+	return m[1] + "/" + m[2], true
+}
+
+// githubPR is one entry parsed from `gh pr list --json number,title,author`.
+type githubPR struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
+
+// githubSegment reports a project's open pull requests via the `gh` CLI,
+// tokenless. It resolves the repo dir the same way gitSegment does, reads
+// the origin remote, and degrades to (nil, nil) whenever the dir isn't a
+// git repo, has no github.com origin, or `gh` fails/is unavailable/times
+// out — never an error return.
+func githubSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
+	dir := ctx.Repo
+	if dir == "" {
+		dir = ctx.Cwd
+	}
+	if dir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, nil //nolint:nilerr // degrade gracefully: no resolvable dir is not a segment error
+		}
+		dir = wd
+	}
+
+	remoteOut, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return nil, nil //nolint:nilerr // degrade gracefully: no origin remote is not a segment error
+	}
+
+	repo, ok := parseGitHubRepo(string(remoteOut))
+	if !ok {
+		return nil, nil
+	}
+
+	ghCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ghCtx, "gh", "pr", "list", "--repo", repo, "--state", "open",
+		"--json", "number,title,author", "--limit", "20")
+	cmd.WaitDelay = 2 * time.Second
+
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, nil //nolint:nilerr // degrade gracefully: gh missing/unauthed/timeout is not a segment error
+	}
+
+	var prs []githubPR
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return nil, nil //nolint:nilerr // degrade gracefully: unexpected gh output is not a segment error
+	}
+
+	frags := []Fragment{
+		NewTile("github", "open PRs", strconv.Itoa(len(prs))),
+	}
+
+	if len(prs) == 0 {
+		return frags, nil
+	}
+
+	cards := make([]Card, 0, len(prs))
+	for _, pr := range prs {
+		desc := pr.Author.Login
+		if desc != "" {
+			desc = "@" + desc
+		}
+		cards = append(cards, Card{
+			Title: "#" + strconv.Itoa(pr.Number) + " " + pr.Title,
+			Desc:  desc,
+		})
+	}
+
+	frags = append(frags, Group{
+		V:       schemaVersion,
+		Type:    "group",
+		Section: "github",
+		Title:   "pull requests",
+		Cards:   cards,
+	})
+
 	return frags, nil
 }
