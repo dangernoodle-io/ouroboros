@@ -11,8 +11,12 @@ MCP server for project knowledge base and backlog management. Persists decisions
 ```bash
 make build    # CGO_ENABLED=0 go build
 make test     # go test ./...
+make acc      # ACC_OUROBOROS=1 go test ./integration/...
+make cover    # coverage profile + func summary
 make lint     # golangci-lint run
 ```
+
+`make acc` runs the MCP wire acceptance harness (`integration/mcp_acc_test.go`): spawns the built server over stdio and drives initialize→tools/list→tools/call against the 5 tools. Skipped by default (`internal/testutil.SkipUnlessAcc`) unless `ACC_OUROBOROS=1` is set.
 
 ## Project layout
 
@@ -27,6 +31,8 @@ make lint     # golangci-lint run
 - `internal/config/` — bootstrap config file + env var loading
 - `internal/kb/` — KB export/import, validation
 - `internal/dashboard/` — dashboard data-capture (segment providers → NDJSON contract; gated by `dashboard.enabled`)
+- `internal/testutil/` — `SkipUnlessAcc` acceptance-test gate
+- `integration/` — MCP wire acceptance harness (ACC-gated, `make acc`)
 
 ## Tools
 
