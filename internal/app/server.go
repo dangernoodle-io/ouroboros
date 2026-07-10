@@ -20,7 +20,10 @@ const (
 	descPriorityMax    = "Max priority P0-P6 (backlog only)"
 	descStatus         = "open or done (backlog only)"
 	descComponent      = "Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)"
-	descEpic           = "Epic backlog item id filter (roadmap only; single-valued — an epic IS a backlog item, see the EPIC: convention)"
+	descEpic           = "Epic backlog item id filter — that epic's children (backlog, roadmap; single-valued — an epic IS a backlog item, see the EPIC: convention)"
+	descEpicsOnly      = "List only epic items, EPIC:-titled (backlog only); takes precedence over epic"
+	descSince          = `Created-time window for backlog items: a duration (24h, 7d), a date (2006-01-02), or an RFC3339 timestamp (backlog only)`
+	descSort           = `"created" sorts backlog items newest-first (backlog only)`
 	descRoadmapBy      = `Grouping axis: "component" (default) or "epic"; the other axis renders as an inline chip (roadmap get format=md|html only)`
 	descFormat         = "structured, md, or html, default structured (roadmap only)"
 	descRoadmapOp      = `Required: "add", "update", "move", "reorder", "done", or "remove"`
@@ -58,6 +61,9 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 		mcp.WithString("status", mcp.Description(descStatus)),
 		mcp.WithString("component", mcp.Description(descComponent)),
 		mcp.WithString("epic", mcp.Description(descEpic)),
+		mcp.WithBoolean("epics_only", mcp.Description(descEpicsOnly)),
+		mcp.WithString("since", mcp.Description(descSince)),
+		mcp.WithString("sort", mcp.Description(descSort)),
 		mcp.WithString("by", mcp.Description(descRoadmapBy)),
 		mcp.WithNumber("limit", mcp.Description(descLimit)),
 		mcp.WithBoolean("verbose", mcp.Description(descVerbose)),
@@ -77,6 +83,10 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 		mcp.WithString("priority_max", mcp.Description(descPriorityMax)),
 		mcp.WithString("status", mcp.Description(descStatus)),
 		mcp.WithString("component", mcp.Description(descComponent)),
+		mcp.WithString("epic", mcp.Description(descEpic)),
+		mcp.WithBoolean("epics_only", mcp.Description(descEpicsOnly)),
+		mcp.WithString("since", mcp.Description(descSince)),
+		mcp.WithString("sort", mcp.Description(descSort)),
 		mcp.WithNumber("limit", mcp.Description(descLimit)),
 		toolAnnotation(mcp.ToBoolPtr(true), nil, nil),
 	), withRecover(handleSearch(db)))

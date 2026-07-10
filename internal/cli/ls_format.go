@@ -36,6 +36,9 @@ func formatItemDetail(out io.Writer, item *backlog.Item, projectName string) {
 	if item.Component != "" {
 		fmt.Fprintf(out, "Component: %s\n", item.Component)
 	}
+	if item.Epic != "" {
+		fmt.Fprintf(out, "Epic:      %s\n", item.Epic)
+	}
 	fmt.Fprintf(out, "Title:     %s\n", item.Title)
 
 	if item.Description != "" {

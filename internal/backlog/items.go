@@ -331,7 +331,21 @@ type ItemFilter struct {
 	PriorityMax *int
 	Status      *string
 	Component   *string
-	Limit       int
+	// Epic filters to items whose Epic field equals this epic item id
+	// (an epic's children). Mutually exclusive with EpicsOnly in practice
+	// — if both are set, EpicsOnly wins (see buildItemFilterWhere).
+	Epic *string
+	// EpicsOnly filters to epic items themselves (title has the "EPIC:"
+	// prefix convention — see epicLabel).
+	EpicsOnly bool
+	// CreatedSince filters to items created at/after this RFC3339 (UTC)
+	// timestamp — a string compare is sufficient since RFC3339-UTC sorts
+	// lexicographically in chronological order.
+	CreatedSince *string
+	// SortByCreated switches ListItems' ordering from the default
+	// (priority, id) to created DESC (newest first) when true.
+	SortByCreated bool
+	Limit         int
 }
 
 // buildItemFilterWhere renders the shared ItemFilter predicates (project/priority/status/component)
@@ -367,6 +381,16 @@ func buildItemFilterWhere(f ItemFilter, colPrefix string) (string, []interface{}
 		clause.WriteString(" AND " + colPrefix + "component = ?")
 		args = append(args, *f.Component)
 	}
+	if f.EpicsOnly {
+		clause.WriteString(" AND " + colPrefix + "title LIKE 'EPIC:%'")
+	} else if f.Epic != nil {
+		clause.WriteString(" AND " + colPrefix + "epic = ?")
+		args = append(args, *f.Epic)
+	}
+	if f.CreatedSince != nil {
+		clause.WriteString(" AND " + colPrefix + "created >= ?")
+		args = append(args, *f.CreatedSince)
+	}
 
 	return clause.String(), args
 }
@@ -390,7 +414,11 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 	whereClause, args := buildItemFilterWhere(f, "")
 	query += whereClause
 
-	query += " ORDER BY CAST(SUBSTR(priority, 2) AS INTEGER), id"
+	if f.SortByCreated {
+		query += " ORDER BY created DESC, id"
+	} else {
+		query += " ORDER BY CAST(SUBSTR(priority, 2) AS INTEGER), id"
+	}
 
 	query += " LIMIT ?"
 	args = append(args, store.ClampLimit(f.Limit, 10, 500))
@@ -405,7 +433,9 @@ func ListItems(d *sql.DB, f ItemFilter) ([]Item, error) {
 }
 
 // SearchItems performs an FTS5 search over backlog items (title, description,
-// notes), honoring the same ItemFilter as ListItems, ordered by relevance (bm25).
+// notes), honoring the same ItemFilter as ListItems, ordered by relevance
+// (bm25) by default — or created DESC (newest first) when f.SortByCreated,
+// mirroring ListItems' override of its own default ordering.
 func SearchItems(d *sql.DB, query string, f ItemFilter) ([]Item, error) {
 	ftsQuery := store.FtsEscape(query)
 	if ftsQuery == "" {
@@ -422,7 +452,11 @@ func SearchItems(d *sql.DB, query string, f ItemFilter) ([]Item, error) {
 	q += whereClause
 	args = append(args, filterArgs...)
 
-	q += " ORDER BY bm25(items_fts)"
+	if f.SortByCreated {
+		q += " ORDER BY items.created DESC, items.id"
+	} else {
+		q += " ORDER BY bm25(items_fts)"
+	}
 
 	q += " LIMIT ?"
 	args = append(args, store.ClampLimit(f.Limit, 10, 500))

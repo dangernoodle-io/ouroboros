@@ -48,8 +48,12 @@
             "type": "string"
           },
           "epic": {
-            "description": "Epic backlog item id filter (roadmap only; single-valued — an epic IS a backlog item, see the EPIC: convention)",
+            "description": "Epic backlog item id filter — that epic's children (backlog, roadmap; single-valued — an epic IS a backlog item, see the EPIC: convention)",
             "type": "string"
+          },
+          "epics_only": {
+            "description": "List only epic items, EPIC:-titled (backlog only); takes precedence over epic",
+            "type": "boolean"
           },
           "format": {
             "description": "structured, md, or html, default structured (roadmap only)",
@@ -77,6 +81,14 @@
           },
           "query": {
             "description": "Full-text search (kb only)",
+            "type": "string"
+          },
+          "since": {
+            "description": "Created-time window for backlog items: a duration (24h, 7d), a date (2006-01-02), or an RFC3339 timestamp (backlog only)",
+            "type": "string"
+          },
+          "sort": {
+            "description": "\"created\" sorts backlog items newest-first (backlog only)",
             "type": "string"
           },
           "status": {
@@ -223,6 +235,14 @@
             "description": "Required: \"kb\", \"backlog\", or \"roadmap\"",
             "type": "string"
           },
+          "epic": {
+            "description": "Epic backlog item id filter — that epic's children (backlog, roadmap; single-valued — an epic IS a backlog item, see the EPIC: convention)",
+            "type": "string"
+          },
+          "epics_only": {
+            "description": "List only epic items, EPIC:-titled (backlog only); takes precedence over epic",
+            "type": "boolean"
+          },
           "limit": {
             "description": "Limit, default 10, max 500",
             "type": "number"
@@ -245,6 +265,14 @@
           },
           "query": {
             "description": "Single query",
+            "type": "string"
+          },
+          "since": {
+            "description": "Created-time window for backlog items: a duration (24h, 7d), a date (2006-01-02), or an RFC3339 timestamp (backlog only)",
+            "type": "string"
+          },
+          "sort": {
+            "description": "\"created\" sorts backlog items newest-first (backlog only)",
             "type": "string"
           },
           "status": {
