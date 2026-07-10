@@ -1,10 +1,13 @@
-.PHONY: build test cover bench lint clean install
+.PHONY: build test acc cover bench lint clean install
 
 build:
 	go build -o ouroboros ./
 
 test:
 	go test ./...
+
+acc:
+	ACC_OUROBOROS=1 go test -timeout=120s ./integration/...
 
 cover:
 	go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -1
