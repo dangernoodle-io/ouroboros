@@ -80,6 +80,71 @@ func TestGitSegment_UncommittedChange(t *testing.T) {
 	assert.Equal(t, "1", uncommittedTile.Value)
 }
 
+func TestGitSegment_Worktrees(t *testing.T) {
+	dir := initGitRepo(t)
+	db := newDashboardTestDB(t)
+
+	wtDir := filepath.Join(t.TempDir(), "wt2")
+	runGit(t, dir, "worktree", "add", wtDir, "-b", "wt2")
+
+	frags, err := gitSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 3)
+
+	group, ok := frags[2].(Group)
+	require.True(t, ok)
+	assert.Equal(t, "git", group.Section)
+	assert.Equal(t, "worktrees", group.Title)
+	require.Len(t, group.Cards, 2)
+
+	mainCard := group.Cards[0]
+	assert.Equal(t, filepath.Base(dir), mainCard.Title)
+	assert.Equal(t, "main", mainCard.State)
+
+	wtCard := group.Cards[1]
+	assert.Equal(t, "wt2", wtCard.Title)
+	assert.Equal(t, "wt2", wtCard.Desc)
+	assert.Empty(t, wtCard.State)
+}
+
+func TestGitSegment_DetachedWorktree(t *testing.T) {
+	dir := initGitRepo(t)
+	db := newDashboardTestDB(t)
+
+	wtDir := filepath.Join(t.TempDir(), "wt-detached")
+	runGit(t, dir, "worktree", "add", "--detach", wtDir, "HEAD")
+
+	frags, err := gitSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 3)
+
+	group, ok := frags[2].(Group)
+	require.True(t, ok)
+	require.Len(t, group.Cards, 2)
+
+	mainCard := group.Cards[0]
+	assert.Equal(t, "main", mainCard.State)
+
+	detachedCard := group.Cards[1]
+	assert.Equal(t, "wt-detached", detachedCard.Title)
+	assert.Equal(t, "detached", detachedCard.Desc)
+	assert.Empty(t, detachedCard.State)
+}
+
+func TestGitSegment_NoLinkedWorktrees(t *testing.T) {
+	dir := initGitRepo(t)
+	db := newDashboardTestDB(t)
+
+	frags, err := gitSegment(Context{Repo: dir}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 2)
+
+	for _, f := range frags {
+		_, isGroup := f.(Group)
+		assert.False(t, isGroup, "expected no worktrees group with only one worktree")
+	}
+}
+
 func TestGitSegment_NonGitDir(t *testing.T) {
 	dir := t.TempDir()
 	db := newDashboardTestDB(t)
