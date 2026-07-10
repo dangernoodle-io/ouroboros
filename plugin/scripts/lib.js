@@ -157,18 +157,17 @@ const ALREADY_PERSISTED_PATTERNS = [
   /mcp__[^"]*__kb[^"]*"action":\s*"(create|update)"/i, // tool_result payload
 ];
 
-// Tier-1: decision language patterns that warrant a nudge
+// Tier-1: strong decision-language patterns — phrasings that mean a decision
+// was actually MADE this turn and is worth persisting. Deliberately excludes
+// incidental topic words (architecture, approach:, rationale, trade-off) that
+// fire on ordinary technical discussion/summaries without a decision.
 const DECISION_PATTERNS = [
   /\bdecided to\b/i,
   /\bchose .+ over\b/i,
-  /\btrade-?off/i,
-  /\barchitect(ure|ural)\b/i,
   /\bdesign decision/i,
   /\bgoing with\b/i,
-  /\bapproach(?: is|:)/i,
   /\bwe('|')ll use\b/i,
   /\binstead of\b.{0,30}\bbecause\b/i,
-  /\brationale\b/i,
 ];
 
 // checkNudgePatterns runs the tier-2 and tier-1 checks on a message and returns

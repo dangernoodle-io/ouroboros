@@ -170,6 +170,39 @@ test('stop: no kb block + tier-1 decision language → exit 0, decision:block on
   }
 });
 
+test('stop: no kb block + incidental topic words only (architecture/approach:/rationale/trade-off) → exit 0, no stdout (no nudge)', () => {
+  const transcript = writeTranscript([{
+    text: 'This message discusses architecture and approach: considerations, including rationale and trade-off analysis, without stating any decision made this turn',
+  }]);
+  const input = JSON.stringify({ session_id: 'sesstopiconly1', transcript_path: transcript });
+  const result = runScript(input);
+  assert.strictEqual(result.status, 0);
+  assert.strictEqual(result.stdout.trim(), '');
+});
+
+test('stop: no kb block + "design decision:" strong phrasing → exit 0, decision:block on stdout', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-designdec-clean-'));
+  try {
+    const transcript = writeTranscript([{
+      text: 'This is a long main-context message with enough content. design decision: use SQLite for storage going forward in this project',
+    }]);
+    const input = JSON.stringify({ session_id: 'sessdesigndec1', transcript_path: transcript });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], {
+      input: input,
+      encoding: 'utf-8',
+      env: envVars,
+      cwd: path.join(__dirname, '..'),
+    });
+    assert.strictEqual(result.status, 0);
+    const decision = JSON.parse(result.stdout.trim());
+    assert.strictEqual(decision.decision, 'block');
+    assert.match(decision.reason, /tier-1 nudge fired/);
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
 test('stop: no kb block + neutral content → exit 0, no stdout', () => {
   const transcript = writeTranscript([{
     text: 'This is just a simple neutral message that talks about how the weather is nice and contains no decision language or kb blocks',

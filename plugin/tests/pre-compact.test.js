@@ -119,7 +119,7 @@ test('pre-compact - no kb-blocks, ≥1 persisted docs via tool → allow', async
   fs.rmSync(binDir, { recursive: true });
 });
 
-test('pre-compact - no kb-blocks, 0 persisted docs, decision language present → block', async () => {
+test('pre-compact - no kb-blocks, 0 persisted docs, decision language present → advisory only, never blocks', async () => {
   const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3);
   const gitDir = makeTmpGit();
   const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
@@ -138,17 +138,14 @@ test('pre-compact - no kb-blocks, 0 persisted docs, decision language present �
   );
 
   assert.strictEqual(result.code, 0);
-  assert(result.stdout.length > 0);
-  const output = JSON.parse(result.stdout);
-  assert.strictEqual(output.decision, 'block');
-  assert(output.reason.includes('unpersisted decisions'));
+  assert(!result.stdout.includes('"decision":"block"'));
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
   fs.rmSync(binDir, { recursive: true });
 });
 
-test('pre-compact - no kb-blocks, no session_id → heuristic (decision language)', async () => {
+test('pre-compact - no kb-blocks, no session_id → heuristic (decision language), never blocks', async () => {
   const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3);
   const gitDir = makeTmpGit();
 
@@ -160,16 +157,13 @@ test('pre-compact - no kb-blocks, no session_id → heuristic (decision language
   });
 
   assert.strictEqual(result.code, 0);
-  assert(result.stdout.length > 0);
-  const output = JSON.parse(result.stdout);
-  assert.strictEqual(output.decision, 'block');
-  assert(output.reason.includes('unpersisted decisions'));
+  assert(!result.stdout.includes('"decision":"block"'));
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
 });
 
-test('pre-compact - no kb-blocks, query error → heuristic (decision language)', async () => {
+test('pre-compact - no kb-blocks, query error → heuristic (decision language), never blocks', async () => {
   const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3);
   const gitDir = makeTmpGit();
   const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
@@ -192,10 +186,7 @@ test('pre-compact - no kb-blocks, query error → heuristic (decision language)'
   );
 
   assert.strictEqual(result.code, 0);
-  assert(result.stdout.length > 0);
-  const output = JSON.parse(result.stdout);
-  assert.strictEqual(output.decision, 'block');
-  assert(output.reason.includes('unpersisted decisions'));
+  assert(!result.stdout.includes('"decision":"block"'));
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
@@ -258,7 +249,7 @@ test('pre-compact - no kb-blocks, 2 decision turns, auto trigger (threshold=3) �
   fs.rmSync(gitDir, { recursive: true });
 });
 
-test('pre-compact - no kb-blocks, 3 decision turns, auto trigger (threshold=3) → block', async () => {
+test('pre-compact - no kb-blocks, 3 decision turns, auto trigger (threshold=3) → advisory only, never blocks', async () => {
   const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3);
   const gitDir = makeTmpGit();
 
@@ -270,9 +261,7 @@ test('pre-compact - no kb-blocks, 3 decision turns, auto trigger (threshold=3) �
   });
 
   assert.strictEqual(result.code, 0);
-  assert(result.stdout.length > 0);
-  const output = JSON.parse(result.stdout);
-  assert.strictEqual(output.decision, 'block');
+  assert(!result.stdout.includes('"decision":"block"'));
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
@@ -316,7 +305,7 @@ test('pre-compact - no kb-blocks, 1-2 decision turns, manual trigger (threshold=
   fs.rmSync(gitDir, { recursive: true });
 });
 
-test('pre-compact - no kb-blocks, 3+ decision turns, manual trigger (threshold=3) → block', async () => {
+test('pre-compact - no kb-blocks, 3+ decision turns, manual trigger (threshold=3) → advisory only, never blocks', async () => {
   const { tmpDir, transcriptPath } = makeTranscriptNoBlocks(3, 'We decided to use TypeScript');
   const gitDir = makeTmpGit();
 
@@ -328,10 +317,7 @@ test('pre-compact - no kb-blocks, 3+ decision turns, manual trigger (threshold=3
   });
 
   assert.strictEqual(result.code, 0);
-  assert(result.stdout.length > 0);
-  const output = JSON.parse(result.stdout);
-  assert.strictEqual(output.decision, 'block');
-  assert(output.reason.includes('unpersisted decisions'));
+  assert(!result.stdout.includes('"decision":"block"'));
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
@@ -391,7 +377,7 @@ test('pre-compact - kb-blocks present, more persisted than blocks → allow', as
   fs.rmSync(binDir, { recursive: true });
 });
 
-test('pre-compact - kb-blocks present, fewer persisted than blocks → block', async () => {
+test('pre-compact - kb-blocks present, fewer persisted than blocks → advisory only, never blocks', async () => {
   const { tmpDir, transcriptPath } = makeTranscriptWithKbBlocks(3);
   const gitDir = makeTmpGit();
   const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
@@ -410,17 +396,14 @@ test('pre-compact - kb-blocks present, fewer persisted than blocks → block', a
   );
 
   assert.strictEqual(result.code, 0);
-  assert(result.stdout.length > 0);
-  const output = JSON.parse(result.stdout);
-  assert.strictEqual(output.decision, 'block');
-  assert(output.reason.includes('2 of 3 kb-blocks unpersisted'));
+  assert(!result.stdout.includes('"decision":"block"'));
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
   fs.rmSync(binDir, { recursive: true });
 });
 
-test('pre-compact - kb-blocks present, zero persisted → block', async () => {
+test('pre-compact - kb-blocks present, zero persisted → advisory only, never blocks', async () => {
   const { tmpDir, transcriptPath } = makeTranscriptWithKbBlocks(2);
   const gitDir = makeTmpGit();
   const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'precompact-bin-'));
@@ -439,10 +422,7 @@ test('pre-compact - kb-blocks present, zero persisted → block', async () => {
   );
 
   assert.strictEqual(result.code, 0);
-  assert(result.stdout.length > 0);
-  const output = JSON.parse(result.stdout);
-  assert.strictEqual(output.decision, 'block');
-  assert(output.reason.includes('2 of 2 kb-blocks unpersisted'));
+  assert(!result.stdout.includes('"decision":"block"'));
 
   fs.rmSync(tmpDir, { recursive: true });
   fs.rmSync(gitDir, { recursive: true });
