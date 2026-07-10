@@ -22,6 +22,25 @@ func Section(f Fragment) string {
 	return f.sec()
 }
 
+// FragmentProject returns a fragment's stamped project (may be empty, e.g.
+// before StampProject runs).
+func FragmentProject(f Fragment) string {
+	switch v := f.(type) {
+	case Tile:
+		return v.Project
+	case Bar:
+		return v.Project
+	case Group:
+		return v.Project
+	case Note:
+		return v.Project
+	case HTML:
+		return v.Project
+	default:
+		return ""
+	}
+}
+
 // Card is a single card rendered inside a Group fragment.
 type Card struct {
 	Title string   `json:"title"`

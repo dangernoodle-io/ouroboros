@@ -553,15 +553,35 @@ func refreshOneView(out io.Writer, db *sql.DB, dbPath string, v dashboard.View, 
 		return fmt.Errorf("dashboard refresh: close output file: %w", closeErr)
 	}
 
+	htmlPath := dashboardHTMLPath(outputPath)
+	// ViewCooldown/ParseCooldown already floor the cooldown at MinCooldown
+	// (30s), so refreshSecs is always >=30 here — no separate floor needed.
+	refreshSecs := int(dashboard.ViewCooldown(db, v).Seconds())
+	page := dashboard.RenderHTML(v.Name, accumulated, refreshSecs)
+	if err := os.WriteFile(htmlPath, []byte(page), 0o644); err != nil { //nolint:gosec // dashboard page, world-readable is fine
+		return fmt.Errorf("dashboard refresh: write html: %w", err)
+	}
+
 	if !adhoc {
 		if err := dashboard.SetViewLastRefresh(db, v.Name, now.Format(time.RFC3339)); err != nil {
 			return fmt.Errorf("dashboard refresh: save last_refresh: %w", err)
 		}
 	}
 
-	fmt.Fprintf(out, "refreshed view %s (%d projects): %d fragments (%d dropped) -> %s\n",
-		v.Name, len(v.Projects), len(accumulated), len(drops), outputPath)
+	fmt.Fprintf(out, "refreshed view %s (%d projects): %d fragments (%d dropped) -> %s + %s\n",
+		v.Name, len(v.Projects), len(accumulated), len(drops), outputPath, htmlPath)
 	return nil
+}
+
+// dashboardHTMLPath derives a view's HTML output path from its NDJSON output
+// path: the ".ndjson" extension (if present) is swapped for ".html";
+// otherwise ".html" is appended, so a custom --output without that suffix
+// still gets a sensible sibling file rather than colliding with it.
+func dashboardHTMLPath(outputPath string) string {
+	if ext := filepath.Ext(outputPath); ext == ".ndjson" {
+		return strings.TrimSuffix(outputPath, ext) + ".html"
+	}
+	return outputPath + ".html"
 }
 
 // splitCSV splits a comma-separated list, trimming whitespace and dropping

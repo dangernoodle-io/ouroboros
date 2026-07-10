@@ -388,10 +388,15 @@ func TestDashboardRefreshCmd_ViewForceWritesOutput(t *testing.T) {
 	dbPath := setupDashboardDB(t)
 	enableDashboard(t)
 
-	dir := t.TempDir()
-	runGitCmd(t, dir, "init")
+	wsRoot := t.TempDir()
+	repo := filepath.Join(wsRoot, "breadboard")
+	require.NoError(t, os.Mkdir(repo, 0o755))
+	initTestRepo(t, repo, "demo-branch")
 
 	require.NoError(t, withDB(func(db *sql.DB) error {
+		if err := backlog.SetConfig(db, dashboard.KeyWorkspaceRoot, wsRoot); err != nil {
+			return err
+		}
 		return dashboard.SetView(db, dashboard.View{Name: "miner", Projects: []string{"breadboard"}})
 	}))
 
@@ -409,6 +414,18 @@ func TestDashboardRefreshCmd_ViewForceWritesOutput(t *testing.T) {
 	data, statErr := os.ReadFile(outPath)
 	require.NoError(t, statErr)
 	assert.Contains(t, string(data), `"project":"breadboard"`)
+
+	htmlPath := filepath.Join(filepath.Dir(dbPath), "dashboards", "miner.html")
+	htmlData, htmlErr := os.ReadFile(htmlPath)
+	require.NoError(t, htmlErr)
+	assert.Contains(t, string(htmlData), "<!DOCTYPE html>")
+	assert.Contains(t, string(htmlData), "demo-branch")
+	assert.Contains(t, buf.String(), htmlPath)
+}
+
+func TestDashboardHTMLPath(t *testing.T) {
+	assert.Equal(t, "/tmp/dashboards/demo.html", dashboardHTMLPath("/tmp/dashboards/demo.ndjson"))
+	assert.Equal(t, "/tmp/custom-view.html", dashboardHTMLPath("/tmp/custom-view"))
 }
 
 func TestDashboardRefreshCmd_UnknownView(t *testing.T) {
@@ -638,6 +655,38 @@ func TestDashboardRefreshCmd_ExecSegmentUnsupported(t *testing.T) {
 	err := dashboardRefreshCmd.RunE(dashboardRefreshCmd, []string{})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "1 dropped")
+}
+
+// TestDashboardRefreshCmd_HTMLWriteError forces the html-write step to fail
+// without disturbing the ndjson write: the html target path is pre-occupied
+// by a directory, so os.WriteFile(htmlPath) errors with "is a directory"
+// while demo.ndjson (a distinct path) still writes successfully.
+func TestDashboardRefreshCmd_HTMLWriteError(t *testing.T) {
+	resetDashboardFlags()
+	dir := t.TempDir()
+	t.Setenv("PROJECT_KB_PATH", filepath.Join(dir, "dashboard.db"))
+	enableDashboard(t)
+
+	outPath := filepath.Join(dir, "demo.ndjson")
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		return dashboard.SetView(db, dashboard.View{Name: "demo", Projects: []string{"breadboard"}, Output: outPath})
+	}))
+
+	htmlPath := filepath.Join(dir, "demo.html")
+	require.NoError(t, os.Mkdir(htmlPath, 0o755))
+
+	dashboardRefreshView = "demo"
+	dashboardRefreshForce = true
+	defer resetDashboardFlags()
+
+	var buf bytes.Buffer
+	dashboardRefreshCmd.SetOut(&buf)
+	err := dashboardRefreshCmd.RunE(dashboardRefreshCmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write html")
+
+	_, statErr := os.Stat(outPath)
+	require.NoError(t, statErr)
 }
 
 func TestDashboardRefreshCmd_ExplicitOutputPath(t *testing.T) {
