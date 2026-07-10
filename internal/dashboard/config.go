@@ -358,6 +358,7 @@ func DefaultSegments() []SegmentSpec {
 		{ID: "git", Builtin: "git"},
 		{ID: "roadmap", Builtin: "roadmap"},
 		{ID: "tickets", Builtin: "tickets"},
+		{ID: "kb", Builtin: "kb"},
 	}
 }
 
