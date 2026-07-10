@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 )
 
@@ -25,7 +26,15 @@ var builtins = map[string]Provider{
 	"git":     gitSegment,
 	"roadmap": roadmapSegment,
 	"github":  githubSegment,
+	"tickets": ticketsSegment,
 }
+
+// ticketsRecentLimit bounds the recent-tickets card list. The "open" tile
+// reports the open-item count up to the backlog ListItems clamp ceiling
+// (500); a project with more than 500 open items renders 500 — an accepted
+// limitation, since an at-a-glance tile doesn't need an exact count beyond
+// that.
+const ticketsRecentLimit = 5
 
 // Builtin looks up a built-in segment provider by name.
 func Builtin(name string) (Provider, bool) {
@@ -284,6 +293,65 @@ func githubSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
 		Type:    "group",
 		Section: "github",
 		Title:   "pull requests",
+		Cards:   cards,
+	})
+
+	return frags, nil
+}
+
+// ticketsSegment reports ctx.Project's newest open backlog tickets: an
+// "open" tile with the open count (see ticketsRecentLimit for the clamp
+// ceiling), plus a "recent tickets" group
+// carrying up to ticketsRecentLimit cards (newest first). It degrades to
+// (nil, nil) whenever ctx.Project is unset, the project doesn't exist, or
+// the backlog read fails — never an error return.
+func ticketsSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
+	if ctx.Project == "" {
+		return nil, nil
+	}
+
+	proj, err := backlog.GetProjectByName(db, ctx.Project)
+	if err != nil {
+		return nil, nil //nolint:nilerr // degrade gracefully: unknown project is not a segment error
+	}
+
+	status := "open"
+	items, err := backlog.ListItems(db, backlog.ItemFilter{
+		ProjectIDs:    []int64{proj.ID},
+		Status:        &status,
+		SortByCreated: true,
+		Limit:         500,
+	})
+	if err != nil {
+		return nil, nil //nolint:nilerr // degrade gracefully: backlog read failure is not a segment error
+	}
+
+	frags := []Fragment{
+		NewTile("tickets", "open", strconv.Itoa(len(items))),
+	}
+
+	if len(items) == 0 {
+		return frags, nil
+	}
+
+	recent := items
+	if len(recent) > ticketsRecentLimit {
+		recent = recent[:ticketsRecentLimit]
+	}
+
+	cards := make([]Card, 0, len(recent))
+	for _, item := range recent {
+		cards = append(cards, Card{
+			Title: item.ID + " " + item.Title,
+			Desc:  item.Priority,
+		})
+	}
+
+	frags = append(frags, Group{
+		V:       schemaVersion,
+		Type:    "group",
+		Section: "tickets",
+		Title:   "recent tickets",
 		Cards:   cards,
 	})
 
