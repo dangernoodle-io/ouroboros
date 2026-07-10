@@ -78,6 +78,33 @@ func TestParseCooldown(t *testing.T) {
 	}
 }
 
+func TestParseRefreshTimeout(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want time.Duration
+	}{
+		{"empty defaults to 90s", "", 90 * time.Second},
+		{"invalid defaults to 90s", "not-a-duration", 90 * time.Second},
+		{"floors below minimum", "1s", MinRefreshTimeout},
+		{"passes through valid value above floor", "3m", 3 * time.Minute},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, ParseRefreshTimeout(tc.in))
+		})
+	}
+}
+
+func TestRefreshTimeout_Global(t *testing.T) {
+	db := newTestDB(t)
+	assert.Equal(t, 90*time.Second, RefreshTimeout(db))
+
+	require.NoError(t, backlog.SetConfig(db, KeyRefreshTimeout, "2m"))
+	assert.Equal(t, 2*time.Minute, RefreshTimeout(db))
+}
+
 // ── views ────────────────────────────────────────────────────────────────────
 
 func TestSetViewGetView_RoundTrip(t *testing.T) {

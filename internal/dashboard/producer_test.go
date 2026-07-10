@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -59,7 +60,7 @@ func TestRunSegment_ExecSuccess(t *testing.T) {
 	db := newDashboardTestDB(t)
 	spec := SegmentSpec{ID: "e", Exec: []string{"printf", "%s", `{"v":1,"type":"tile","section":"x","label":"l","value":"v"}`}}
 
-	stdout, stderr, err := RunSegment(db, spec, Context{Schema: 1})
+	stdout, stderr, err := RunSegment(context.Background(), db, spec, Context{Schema: 1})
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
 
@@ -75,7 +76,7 @@ func TestRunSegment_ShellSuccess(t *testing.T) {
 	db := newDashboardTestDB(t)
 	spec := SegmentSpec{ID: "s", Shell: `printf '{"v":1,"type":"note","text":"hi"}'`}
 
-	stdout, _, err := RunSegment(db, spec, Context{Schema: 1})
+	stdout, _, err := RunSegment(context.Background(), db, spec, Context{Schema: 1})
 	require.NoError(t, err)
 
 	res, perr := Parse(strings.NewReader(string(stdout)))
@@ -91,7 +92,7 @@ func TestRunSegment_StdinDelivery(t *testing.T) {
 	inv := Context{Schema: 1, Project: "acme-corp", Now: "2026-07-08T00:00:00Z"}
 	spec := SegmentSpec{ID: "cat", Shell: "cat"}
 
-	stdout, _, err := RunSegment(db, spec, inv)
+	stdout, _, err := RunSegment(context.Background(), db, spec, inv)
 	require.NoError(t, err)
 
 	want, merr := json.Marshal(inv)
@@ -104,7 +105,7 @@ func TestRunSegment_CmdDir(t *testing.T) {
 	repo := t.TempDir()
 	spec := SegmentSpec{ID: "pwd", Shell: "pwd"}
 
-	stdout, _, err := RunSegment(db, spec, Context{Schema: 1, Repo: repo})
+	stdout, _, err := RunSegment(context.Background(), db, spec, Context{Schema: 1, Repo: repo})
 	require.NoError(t, err)
 
 	gotDir, gerr := filepath.EvalSymlinks(strings.TrimSpace(string(stdout)))
@@ -118,7 +119,7 @@ func TestRunSegment_NonzeroExit(t *testing.T) {
 	db := newDashboardTestDB(t)
 	spec := SegmentSpec{ID: "f", Exec: []string{"false"}}
 
-	stdout, _, err := RunSegment(db, spec, Context{Schema: 1})
+	stdout, _, err := RunSegment(context.Background(), db, spec, Context{Schema: 1})
 	require.Error(t, err)
 	assert.Nil(t, stdout)
 	assert.Contains(t, err.Error(), "producer failed")
@@ -129,7 +130,7 @@ func TestRunSegment_Timeout(t *testing.T) {
 	spec := SegmentSpec{ID: "slow", Shell: "sleep 5", Timeout: "100ms"}
 
 	start := time.Now()
-	_, _, err := RunSegment(db, spec, Context{Schema: 1})
+	_, _, err := RunSegment(context.Background(), db, spec, Context{Schema: 1})
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -137,11 +138,55 @@ func TestRunSegment_Timeout(t *testing.T) {
 	assert.Less(t, elapsed, 2*time.Second)
 }
 
+func TestRunSegment_BuiltinAlreadyCancelledCtx(t *testing.T) {
+	db := newDashboardTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	spec := SegmentSpec{ID: "roadmap", Builtin: "roadmap"}
+	stdout, stderr, err := RunSegment(ctx, db, spec, Context{Schema: 1, Project: "acme-corp"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, stdout)
+	assert.Empty(t, stderr)
+}
+
+func TestRunSegment_SubprocessAlreadyCancelledCtx(t *testing.T) {
+	db := newDashboardTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	spec := SegmentSpec{ID: "cat", Shell: "cat"}
+	_, _, err := RunSegment(ctx, db, spec, Context{Schema: 1})
+	require.Error(t, err)
+	// The parent is already Canceled (not DeadlineExceeded), so this hits
+	// the generic "producer failed" path rather than the timeout
+	// classification — either way the subprocess never runs.
+	assert.Contains(t, err.Error(), "context canceled")
+}
+
+func TestRunSegment_ParentDeadlineShorterThanSpecTimeout(t *testing.T) {
+	db := newDashboardTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	spec := SegmentSpec{ID: "slow", Shell: "sleep 5", Timeout: "10s"}
+
+	start := time.Now()
+	_, _, err := RunSegment(ctx, db, spec, Context{Schema: 1})
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timeout")
+	// bounded by the parent's 100ms deadline, not the spec's 10s timeout
+	assert.Less(t, elapsed, 2*time.Second)
+}
+
 func TestRunSegment_UnknownBuiltin(t *testing.T) {
 	db := newDashboardTestDB(t)
 	spec := SegmentSpec{ID: "nope", Builtin: "nope"}
 
-	_, _, err := RunSegment(db, spec, Context{Schema: 1})
+	_, _, err := RunSegment(context.Background(), db, spec, Context{Schema: 1})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown builtin "nope"`)
 }
@@ -149,10 +194,10 @@ func TestRunSegment_UnknownBuiltin(t *testing.T) {
 func TestRunSegment_FormError(t *testing.T) {
 	db := newDashboardTestDB(t)
 
-	_, _, err := RunSegment(db, SegmentSpec{ID: "zero"}, Context{})
+	_, _, err := RunSegment(context.Background(), db, SegmentSpec{ID: "zero"}, Context{})
 	require.Error(t, err)
 
-	_, _, err = RunSegment(db, SegmentSpec{ID: "two", Builtin: "git", Shell: "x"}, Context{})
+	_, _, err = RunSegment(context.Background(), db, SegmentSpec{ID: "two", Builtin: "git", Shell: "x"}, Context{})
 	require.Error(t, err)
 }
 
@@ -164,7 +209,7 @@ func TestRunSegment_BuiltinRoadmap(t *testing.T) {
 	}))
 
 	spec := SegmentSpec{ID: "roadmap", Builtin: "roadmap"}
-	stdout, stderr, err := RunSegment(db, spec, Context{Schema: 1, Project: "acme-corp"})
+	stdout, stderr, err := RunSegment(context.Background(), db, spec, Context{Schema: 1, Project: "acme-corp"})
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
 
@@ -182,7 +227,7 @@ func TestRunSegment_BuiltinProviderError(t *testing.T) {
 	require.NoError(t, db.Close()) // force roadmapSegment's store query to fail
 
 	spec := SegmentSpec{ID: "roadmap", Builtin: "roadmap"}
-	_, _, err := RunSegment(db, spec, Context{Schema: 1, Project: "acme-corp"})
+	_, _, err := RunSegment(context.Background(), db, spec, Context{Schema: 1, Project: "acme-corp"})
 	require.Error(t, err)
 }
 
@@ -191,7 +236,7 @@ func TestRunSegment_LongStderrTruncatedInFailure(t *testing.T) {
 	long := strings.Repeat("x", 600)
 	spec := SegmentSpec{ID: "loud", Shell: `printf '` + long + `' >&2; exit 1`}
 
-	_, stderr, err := RunSegment(db, spec, Context{Schema: 1})
+	_, stderr, err := RunSegment(context.Background(), db, spec, Context{Schema: 1})
 	require.Error(t, err)
 	assert.Len(t, stderr, 600)
 	assert.Contains(t, err.Error(), "…")

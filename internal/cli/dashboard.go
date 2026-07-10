@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -310,6 +311,7 @@ func runDashboardStatus(out io.Writer, db *sql.DB) error {
 	fmt.Fprintf(out, "dashboard.enabled: %s\n", enabled)
 	fmt.Fprintf(out, "output_dir: %s\n", outputDir)
 	fmt.Fprintf(out, "workspace_root: %s\n", workspaceRoot)
+	fmt.Fprintf(out, "refresh_timeout: %s\n", dashboard.RefreshTimeout(db))
 
 	views, err := dashboard.ListViews(db)
 	if err != nil {
@@ -471,6 +473,14 @@ func refreshOneView(out io.Writer, db *sql.DB, dbPath string, v dashboard.View, 
 	var accumulated []dashboard.Fragment
 	var drops []string
 
+	// refreshCtx bounds this view's TOTAL segment wall clock (OU-248): a
+	// view with several slow exec/shell producers can't run for
+	// N x per-segment-timeout — every RunSegment call shares this one
+	// deadline, so a segment in flight when it fires is cut too.
+	refreshTimeout := dashboard.RefreshTimeout(db)
+	refreshCtx, cancel := context.WithTimeout(context.Background(), refreshTimeout)
+	defer cancel()
+
 	for _, project := range v.Projects {
 		specs, err := dashboard.EffectiveSegments(db, project)
 		if err != nil {
@@ -497,7 +507,16 @@ func refreshOneView(out io.Writer, db *sql.DB, dbPath string, v dashboard.View, 
 				continue
 			}
 
-			stdout, stderr, err := dashboard.RunSegment(db, spec, ctx)
+			// The aggregate deadline may already have fired (an earlier
+			// segment or project ran long) — record EVERY remaining
+			// enabled segment as skipped rather than silently truncating
+			// the view's output.
+			if refreshCtx.Err() != nil {
+				drops = append(drops, fmt.Sprintf("%s/%s: skipped: view refresh deadline (%s) exceeded", project, spec.ID, refreshTimeout))
+				continue
+			}
+
+			stdout, stderr, err := dashboard.RunSegment(refreshCtx, db, spec, ctx)
 			if err != nil {
 				drops = append(drops, fmt.Sprintf("%s/%s: %s", project, spec.ID, err.Error()))
 				continue
