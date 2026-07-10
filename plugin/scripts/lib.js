@@ -144,6 +144,95 @@ function extractAllKbBlocks(transcriptPath, opts = { maxLines: 2000 }) {
   return { blocks, turns };
 }
 
+// OUROBOROS_WRITE_TOOL_RE matches a tool_use name that is one of the ouroboros
+// MCP write tools (kb, backlog, roadmap, and legacy put/item — pre-rename
+// names from before the tools were renamed put->kb / item->backlog), served
+// under an "ouroboros" MCP server namespace, e.g. mcp__ouroboros-mcp__kb or
+// mcp__plugin_ouroboros-mcp_ouroboros__backlog.
+const OUROBOROS_WRITE_TOOL_RE = /(^|_)(kb|backlog|roadmap|put|item)$/i;
+
+function isOuroborosWriteTool(name) {
+  if (!name || typeof name !== 'string') return false;
+  if (!/ouroboros/i.test(name)) return false;
+  return OUROBOROS_WRITE_TOOL_RE.test(name);
+}
+
+// isGenuineUserTurnBoundary distinguishes a real human-submitted user message
+// from a tool_result "user" record (the Anthropic API represents tool results
+// as role:"user" messages). A record is a genuine user-turn boundary if it
+// has role:user and at least one non-tool_result content block; a pure
+// tool_result record is a synthetic tool-response turn, not a boundary.
+function isGenuineUserTurnBoundary(obj) {
+  const content = obj.message && obj.message.content;
+  if (typeof content === 'string') return true;
+  if (!Array.isArray(content)) return true;
+  if (content.length === 0) return true;
+  return !content.every(b => b && b.type === 'tool_result');
+}
+
+// turnAlreadyPersisted scans a transcript JSONL backwards from the end, within
+// the CURRENT turn only (stopping at the most recent genuine user-prompt
+// record), looking for a signal that the session already persisted knowledge
+// this turn: either an ouroboros MCP KB/backlog write tool_use, or a prior
+// emitted ```kb fenced block in an earlier assistant message this turn.
+// Fail-open: returns false (i.e. "not persisted") on any read/parse failure,
+// so callers fall through to unchanged behavior.
+function turnAlreadyPersisted(transcriptPath, opts = { maxLines: 2000 }) {
+  const maxLines = opts.maxLines || 2000;
+  let raw;
+  try {
+    const stat = fs.statSync(transcriptPath);
+    const fileSize = stat.size;
+    if (fileSize > MAX_TAIL_BYTES) {
+      const fd = fs.openSync(transcriptPath, 'r');
+      const buf = Buffer.allocUnsafe(MAX_TAIL_BYTES);
+      const bytesRead = fs.readSync(fd, buf, 0, MAX_TAIL_BYTES, fileSize - MAX_TAIL_BYTES);
+      fs.closeSync(fd);
+      const tail = buf.slice(0, bytesRead).toString('utf-8');
+      const firstNewline = tail.indexOf('\n');
+      raw = firstNewline >= 0 ? tail.slice(firstNewline + 1) : tail;
+    } else {
+      raw = fs.readFileSync(transcriptPath, 'utf-8');
+    }
+  } catch (e) {
+    return false;
+  }
+
+  const lines = raw.split('\n').filter(line => line.trim());
+  const startIdx = Math.max(0, lines.length - maxLines);
+
+  for (let i = lines.length - 1; i >= startIdx; i--) {
+    let obj;
+    try {
+      obj = JSON.parse(lines[i]);
+    } catch (e) {
+      continue;
+    }
+
+    if (obj.type === 'user') {
+      if (isGenuineUserTurnBoundary(obj)) {
+        break; // reached the start of the current turn
+      }
+      continue; // tool_result pseudo-turn — still part of the current turn
+    }
+
+    if (obj.type !== 'assistant') continue;
+
+    const content = (obj.message && obj.message.content) || [];
+    for (const block of content) {
+      if (!block) continue;
+      if (block.type === 'tool_use' && isOuroborosWriteTool(block.name)) {
+        return true;
+      }
+      if (block.type === 'text' && typeof block.text === 'string' && extractKbBlock(block.text).matched) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function matchesAnyPattern(message, patterns) {
   if (!patterns || patterns.length === 0) {
     return false;
@@ -594,4 +683,4 @@ function queryKb(project, opts = {}) {
   }
 }
 
-module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, checkNudgePatterns, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, readLastMainAssistantText, persistKbBlock, queryKb };
+module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, checkNudgePatterns, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, readLastMainAssistantText, persistKbBlock, queryKb, isOuroborosWriteTool, turnAlreadyPersisted };

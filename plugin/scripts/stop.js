@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { readStdin, projectFromPath, checkNudgePatterns, logHookEvent, readLastMainAssistantText, persistKbBlock } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, checkNudgePatterns, logHookEvent, readLastMainAssistantText, persistKbBlock, turnAlreadyPersisted } = require(__dirname + '/lib');
 
 async function main() {
   try {
@@ -64,6 +64,15 @@ async function main() {
       hookName: 'stop',
     });
     if (nudge) {
+      // Tier-1 fires on decision language with no kb block in the FINAL
+      // message — but the session may have already persisted earlier THIS
+      // TURN (an ouroboros MCP write tool_use, or a prior ```kb block).
+      // Suppress only the tier-1 nudge in that case; tier-2 (self-claim) is
+      // unaffected since it already implies persistence was referenced.
+      if (/tier-1/.test(nudge.reason) && turnAlreadyPersisted(transcriptPath)) {
+        logHookEvent({ hook: 'stop', kind: 'suppressed', session_id: sessionId, project, reason: 'tier-1-persisted-this-turn' });
+        process.exit(0);
+      }
       process.stdout.write(JSON.stringify(nudge) + '\n');
       process.exit(0);
     }

@@ -429,6 +429,127 @@ test('stop: kb block without sentinel → kb fires normally', () => {
   assert.match(result.stderr, /persisted 1 entries/);
 });
 
+// writeRawTranscript writes an array of raw JSONL record objects verbatim,
+// for tests that need tool_use blocks / user-turn boundaries that
+// writeTranscript's simple text-turn helper doesn't model.
+function writeRawTranscript(records) {
+  const file = path.join(tempDir, `transcript-raw-${Date.now()}-${Math.random()}.jsonl`);
+  fs.writeFileSync(file, records.map(r => JSON.stringify(r)).join('\n') + '\n');
+  return file;
+}
+
+test('stop: session-persistence-aware suppression — ouroboros write tool_use this turn + decision language final message → suppressed, no nudge', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-suppress-tool-'));
+  try {
+    const transcript = writeRawTranscript([
+      { type: 'user', message: { content: 'please do the task' } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__ouroboros-mcp__kb', input: { title: 'x' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'This is a long main-context message where we decided to adopt a new approach: for the system based on rationale' }] } },
+    ]);
+    const input = JSON.stringify({ session_id: 'sesssuppress1', transcript_path: transcript });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], { input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..') });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '');
+    assert(!result.stdout.includes('tier-1'));
+    assert(!result.stdout.includes('nudge fired'));
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const suppressed = lines.find(l => { try { return JSON.parse(l).kind === 'suppressed'; } catch (e) { return false; } });
+    assert(suppressed, 'should have logged a suppressed event');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('stop: session-persistence-aware suppression — ouroboros roadmap write tool_use this turn + decision language final message → suppressed, no nudge', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-suppress-roadmap-'));
+  try {
+    const transcript = writeRawTranscript([
+      { type: 'user', message: { content: 'please do the task' } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__plugin_ouroboros-mcp_ouroboros__roadmap', input: { op: 'add' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', content: 'ok' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'This is a long main-context message where we decided to adopt a new approach: for the system based on rationale' }] } },
+    ]);
+    const input = JSON.stringify({ session_id: 'sesssuppressroadmap1', transcript_path: transcript });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], { input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..') });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '');
+    assert(!result.stdout.includes('tier-1'));
+    assert(!result.stdout.includes('nudge fired'));
+
+    const logFile = path.join(testHomeDir, '.ouroboros', 'hooks.log');
+    const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+    const suppressed = lines.find(l => { try { return JSON.parse(l).kind === 'suppressed'; } catch (e) { return false; } });
+    assert(suppressed, 'should have logged a suppressed event');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('stop: session-persistence-aware suppression — prior kb block emitted earlier this turn + decision language final message → suppressed', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-suppress-kb-'));
+  try {
+    const transcript = writeRawTranscript([
+      { type: 'user', message: { content: 'please do the task' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Earlier this turn I persisted:\n```kb\n[{"type":"note","title":"earlier"}]\n```' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'This is a long main-context message where we decided to adopt a new approach: for the system based on rationale' }] } },
+    ]);
+    const input = JSON.stringify({ session_id: 'sesssuppress2', transcript_path: transcript });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], { input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..') });
+    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.stdout.trim(), '');
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('stop: regression — persist signal exists only in a PREVIOUS turn (before user boundary) → tier-1 still nudges', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-prevturn-'));
+  try {
+    const transcript = writeRawTranscript([
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'mcp__ouroboros-mcp__kb', input: { title: 'earlier turn' } }] } },
+      { type: 'user', message: { content: 'a new prompt starting a new turn' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'This is a long main-context message where we decided to adopt a new approach: for the system based on rationale' }] } },
+    ]);
+    const input = JSON.stringify({ session_id: 'sessprevturn1', transcript_path: transcript });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], { input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..') });
+    assert.strictEqual(result.status, 0);
+    const decision = JSON.parse(result.stdout.trim());
+    assert.strictEqual(decision.decision, 'block');
+    assert.match(decision.reason, /tier-1 nudge fired/);
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
+test('stop: fail-open — unparseable lines within current turn do not crash, decision language still nudges', () => {
+  const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-stop-failopen-'));
+  try {
+    const file = path.join(tempDir, `transcript-garbage-${Date.now()}.jsonl`);
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'please do the task' } }),
+      '{not valid json at all',
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'This is a long main-context message where we decided to adopt a new approach: for the system based on rationale' }] } }),
+    ];
+    fs.writeFileSync(file, lines.join('\n') + '\n');
+    const input = JSON.stringify({ session_id: 'sessfailopen1', transcript_path: file });
+    const envVars = { ...process.env, PATH: `${tempDir}:${process.env.PATH}`, HOME: testHomeDir };
+    const result = spawnSync('node', [SCRIPT_PATH], { input, encoding: 'utf-8', env: envVars, cwd: path.join(__dirname, '..') });
+    assert.strictEqual(result.status, 0);
+    const decision = JSON.parse(result.stdout.trim());
+    assert.strictEqual(decision.decision, 'block');
+    assert.match(decision.reason, /tier-1 nudge fired/);
+  } finally {
+    fs.rmSync(testHomeDir, { recursive: true });
+  }
+});
+
 test('cleanup: remove temp stub dir and HOME', () => {
   if (tempDir && fs.existsSync(tempDir)) {
     fs.rmSync(tempDir, { recursive: true });
