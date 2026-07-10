@@ -15,6 +15,7 @@ import (
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/roadmap"
+	"dangernoodle.io/ouroboros/internal/store"
 )
 
 // Provider produces fragments for one segment, given the invocation context
@@ -27,6 +28,7 @@ var builtins = map[string]Provider{
 	"roadmap": roadmapSegment,
 	"github":  githubSegment,
 	"tickets": ticketsSegment,
+	"kb":      kbSegment,
 }
 
 // ticketsRecentLimit bounds the recent-tickets card list. The "open" tile
@@ -356,4 +358,39 @@ func ticketsSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
 	})
 
 	return frags, nil
+}
+
+// kbSegment reports ctx.Project's total KB entry count as a single "entries"
+// tile. It degrades to (nil, nil) whenever ctx.Project is unset, the project
+// doesn't exist, or the KB count read fails — never an error return.
+//
+// kbSegment counts KB documents whose `project` exactly matches the backlog
+// project's canonical name. KB entries and backlog projects share the same
+// repo-derived project string in practice, so this is accurate; a KB entry
+// written under a case-divergent project string would be counted separately
+// (store.CountDocumentsByType is case-sensitive, unlike GetProjectByName) —
+// a known limitation tracked in the backlog.
+func kbSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
+	if ctx.Project == "" {
+		return nil, nil
+	}
+
+	proj, err := backlog.GetProjectByName(db, ctx.Project)
+	if err != nil {
+		return nil, nil //nolint:nilerr // degrade gracefully: unknown project is not a segment error
+	}
+
+	counts, err := store.CountDocumentsByType(db, []string{proj.Name})
+	if err != nil {
+		return nil, nil //nolint:nilerr // degrade gracefully: KB count failure is not a segment error
+	}
+
+	total := 0
+	for _, tc := range counts {
+		total += tc.Count
+	}
+
+	return []Fragment{
+		NewTile("kb", "entries", strconv.Itoa(total)),
+	}, nil
 }

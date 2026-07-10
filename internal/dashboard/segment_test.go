@@ -222,10 +222,12 @@ func TestBuiltinAndBuiltinNames(t *testing.T) {
 	assert.True(t, ok)
 	_, ok = Builtin("tickets")
 	assert.True(t, ok)
+	_, ok = Builtin("kb")
+	assert.True(t, ok)
 	_, ok = Builtin("nonexistent")
 	assert.False(t, ok)
 
-	assert.Equal(t, []string{"git", "github", "roadmap", "tickets"}, BuiltinNames())
+	assert.Equal(t, []string{"git", "github", "kb", "roadmap", "tickets"}, BuiltinNames())
 }
 
 // stubGh writes an executable "gh" script to a temp dir and prepends that
@@ -455,6 +457,64 @@ func TestTicketsSegment_ListItemsError(t *testing.T) {
 	require.NoError(t, err)
 
 	frags, err := ticketsSegment(Context{Project: "acme-corp"}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestKBSegment_EmptyProject(t *testing.T) {
+	db := newDashboardTestDB(t)
+
+	frags, err := kbSegment(Context{Project: ""}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestKBSegment_UnknownProject(t *testing.T) {
+	db := newDashboardTestDB(t)
+
+	frags, err := kbSegment(Context{Project: "no-such-project"}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestKBSegment_EntryCount(t *testing.T) {
+	db := newDashboardTestDB(t)
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	docs := []store.Document{
+		{Type: "decision", Project: "acme-corp", Title: "api-design", Content: "RESTful API"},
+		{Type: "fact", Project: "acme-corp", Title: "endpoint", Content: "api.example.com"},
+		{Type: "note", Project: "acme-corp", Title: "meeting", Content: "Q2 planning"},
+		{Type: "fact", Project: "other-corp", Title: "other-fact", Content: "unrelated"},
+	}
+	for _, doc := range docs {
+		_, err := store.UpsertDocument(db, doc)
+		require.NoError(t, err)
+	}
+
+	frags, err := kbSegment(Context{Project: "acme-corp"}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 1)
+
+	tile, ok := frags[0].(Tile)
+	require.True(t, ok)
+	assert.Equal(t, "kb", tile.Section)
+	assert.Equal(t, "entries", tile.Label)
+	assert.Equal(t, "3", tile.Value)
+}
+
+func TestKBSegment_CountDocumentsError(t *testing.T) {
+	db := newDashboardTestDB(t)
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	// Break the KB read after the project lookup succeeds: dropping the
+	// documents table forces CountDocumentsByType to error.
+	_, err = db.Exec("DROP TABLE documents")
+	require.NoError(t, err)
+
+	frags, err := kbSegment(Context{Project: "acme-corp"}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
