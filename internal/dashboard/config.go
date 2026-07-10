@@ -324,15 +324,19 @@ const MinCooldown = 30 * time.Second
 // defaultCooldown is used when dashboard.cooldown is unset or invalid.
 const defaultCooldown = 60 * time.Second
 
-// SegmentSpec declares one segment producer: either a built-in (Builtin) or
-// an external command (Exec/Shell — not yet executed in this slice).
+// SegmentSpec declares one segment producer: exactly one of a built-in
+// (Builtin), an argv command (Exec — execve, no shell), or a shell pipeline
+// (Shell — opt-in "sh -c").
 type SegmentSpec struct {
 	ID string `json:"id"`
-	// Every/Timeout are reserved for the lifecycle slice (per-segment
-	// cadence + exec/shell producer timeout); not enforced yet — only the
-	// global dashboard.cooldown gate applies in this slice.
-	Every   string   `json:"every,omitempty"`
-	Enabled *bool    `json:"enabled,omitempty"`
+	// Every is reserved for the lifecycle slice (per-segment cadence); not
+	// enforced yet — only the global dashboard.cooldown gate applies in
+	// this slice.
+	Every   string `json:"every,omitempty"`
+	Enabled *bool  `json:"enabled,omitempty"`
+	// Timeout bounds an exec/shell producer's run time (dashboard.ParseTimeout):
+	// defaults to 5s when empty/invalid, clamped to [1s, 30s]. Ignored for
+	// Builtin (in-process, no subprocess timeout).
 	Timeout string   `json:"timeout,omitempty"`
 	Builtin string   `json:"builtin,omitempty"`
 	Exec    []string `json:"exec,omitempty"`

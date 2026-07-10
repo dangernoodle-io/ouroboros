@@ -497,33 +497,19 @@ func refreshOneView(out io.Writer, db *sql.DB, dbPath string, v dashboard.View, 
 				continue
 			}
 
-			if spec.Builtin == "" {
-				drops = append(drops, fmt.Sprintf("%s/%s: exec/shell producers not yet supported", project, spec.ID))
-				continue
-			}
-
-			prov, ok := dashboard.Builtin(spec.Builtin)
-			if !ok {
-				drops = append(drops, fmt.Sprintf("%s/%s: unknown builtin: %s", project, spec.ID, spec.Builtin))
-				continue
-			}
-
-			frags, err := prov(ctx, db)
+			stdout, stderr, err := dashboard.RunSegment(db, spec, ctx)
 			if err != nil {
 				drops = append(drops, fmt.Sprintf("%s/%s: %s", project, spec.ID, err.Error()))
 				continue
 			}
-			if len(frags) == 0 {
+			if strings.TrimSpace(stderr) != "" {
+				drops = append(drops, fmt.Sprintf("%s/%s: stderr: %s", project, spec.ID, truncateStr(stderr, 200)))
+			}
+			if len(stdout) == 0 {
 				continue
 			}
 
-			var buf bytes.Buffer
-			if err := dashboard.Emit(&buf, frags); err != nil {
-				drops = append(drops, fmt.Sprintf("%s/%s: emit: %s", project, spec.ID, err.Error()))
-				continue
-			}
-
-			res, err := dashboard.Parse(&buf)
+			res, err := dashboard.Parse(bytes.NewReader(stdout))
 			if err != nil {
 				drops = append(drops, fmt.Sprintf("%s/%s: parse: %s", project, spec.ID, err.Error()))
 				continue
@@ -582,6 +568,16 @@ func dashboardHTMLPath(outputPath string) string {
 		return strings.TrimSuffix(outputPath, ext) + ".html"
 	}
 	return outputPath + ".html"
+}
+
+// truncateStr shortens s to at most max bytes, appending an ellipsis marker
+// when truncated.
+func truncateStr(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit] + "…"
 }
 
 // splitCSV splits a comma-separated list, trimming whitespace and dropping

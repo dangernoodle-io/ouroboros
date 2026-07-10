@@ -632,7 +632,11 @@ func TestDashboardRefreshCmd_ResolveRepoErrorSoftDegrades(t *testing.T) {
 	assert.NotContains(t, string(data), `"project":"bad-project"`)
 }
 
-func TestDashboardRefreshCmd_ExecSegmentUnsupported(t *testing.T) {
+// TestDashboardRefreshCmd_ExecSegmentMalformedOutputDropped exercises the
+// exec producer path with a non-NDJSON stdout: the subprocess runs fine, but
+// its output fails to parse as a fragment, so it's counted as a drop rather
+// than the (removed) "exec/shell producers not yet supported" stub.
+func TestDashboardRefreshCmd_ExecSegmentMalformedOutputDropped(t *testing.T) {
 	resetDashboardFlags()
 	setupDashboardDB(t)
 	enableDashboard(t)
@@ -655,6 +659,75 @@ func TestDashboardRefreshCmd_ExecSegmentUnsupported(t *testing.T) {
 	err := dashboardRefreshCmd.RunE(dashboardRefreshCmd, []string{})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "1 dropped")
+}
+
+// TestDashboardRefreshCmd_ShellSegmentProducesNDJSON is the wiring smoke
+// test: a shell-form segment producer emitting a valid NDJSON tile line ends
+// up in the view's output file, stamped with the producing project.
+func TestDashboardRefreshCmd_ShellSegmentProducesNDJSON(t *testing.T) {
+	resetDashboardFlags()
+	dbPath := setupDashboardDB(t)
+	enableDashboard(t)
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		if err := dashboard.SetView(db, dashboard.View{Name: "d", Projects: []string{"demoproj"}}); err != nil {
+			return err
+		}
+		return dashboard.SetProjectConfig(db, "demoproj", dashboard.ProjectConfig{
+			Segments: []dashboard.SegmentSpec{{
+				ID:    "echo",
+				Shell: `printf '{"v":1,"type":"tile","section":"custom","label":"hello","value":"world"}'`,
+			}},
+		})
+	}))
+
+	dashboardRefreshView = "d"
+	dashboardRefreshForce = true
+	defer resetDashboardFlags()
+
+	var buf bytes.Buffer
+	dashboardRefreshCmd.SetOut(&buf)
+	err := dashboardRefreshCmd.RunE(dashboardRefreshCmd, []string{})
+	require.NoError(t, err)
+
+	outPath := filepath.Join(filepath.Dir(dbPath), "dashboards", "d.ndjson")
+	data, statErr := os.ReadFile(outPath)
+	require.NoError(t, statErr)
+	assert.Contains(t, string(data), `"label":"hello"`)
+	assert.Contains(t, string(data), `"value":"world"`)
+	assert.Contains(t, string(data), `"project":"demoproj"`)
+}
+
+// TestDashboardRefreshCmd_StderrOnSuccessDropped exercises the
+// stderr-noted-but-not-fatal path: a segment succeeds (valid NDJSON stdout)
+// but also writes to stderr, which is counted as an extra drop alongside
+// the accepted fragment.
+func TestDashboardRefreshCmd_StderrOnSuccessDropped(t *testing.T) {
+	resetDashboardFlags()
+	setupDashboardDB(t)
+	enableDashboard(t)
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		if err := dashboard.SetView(db, dashboard.View{Name: "miner", Projects: []string{"breadboard"}}); err != nil {
+			return err
+		}
+		return dashboard.SetProjectConfig(db, "breadboard", dashboard.ProjectConfig{
+			Segments: []dashboard.SegmentSpec{{
+				ID:    "noisy",
+				Shell: `printf 'warn' >&2; printf '{"v":1,"type":"note","text":"hi"}'`,
+			}},
+		})
+	}))
+
+	dashboardRefreshView = "miner"
+	dashboardRefreshForce = true
+	defer resetDashboardFlags()
+
+	var buf bytes.Buffer
+	dashboardRefreshCmd.SetOut(&buf)
+	err := dashboardRefreshCmd.RunE(dashboardRefreshCmd, []string{})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "1 fragments (1 dropped)")
 }
 
 // TestDashboardRefreshCmd_HTMLWriteError forces the html-write step to fail
