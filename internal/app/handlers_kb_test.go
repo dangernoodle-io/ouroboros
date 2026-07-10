@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -1689,6 +1690,273 @@ func TestHandleGet_DomainBacklog_ComponentFilter(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, textContent.Text, "api")
 	assert.Contains(t, textContent.Text, "API task")
+}
+
+// TestHandleGet_DomainBacklog_EpicFilter verifies domain=backlog get filters
+// to a single epic's children.
+func TestHandleGet_DomainBacklog_EpicFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "child of demo", "", "", "", epic.ID)
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "unrelated", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"acme-corp"},
+		"epic":     epic.ID,
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "child of demo")
+	assert.NotContains(t, textContent.Text, "unrelated")
+}
+
+// TestHandleGet_DomainBacklog_EpicsOnlyFilter verifies domain=backlog get
+// epics_only=true returns only EPIC:-titled items, taking precedence over epic.
+func TestHandleGet_DomainBacklog_EpicsOnlyFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "regular task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":     "backlog",
+		"projects":   []interface{}{"acme-corp"},
+		"epics_only": true,
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "EPIC: demo")
+	assert.NotContains(t, textContent.Text, "regular task")
+}
+
+// TestHandleGet_DomainBacklog_SinceFilter verifies domain=backlog get since=
+// filters to items created at/after the cutoff.
+func TestHandleGet_DomainBacklog_SinceFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	old, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "old item", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2020-01-01T00:00:00Z", old.ID)
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "recent item", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"acme-corp"},
+		"since":    "24h",
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "recent item")
+	assert.NotContains(t, textContent.Text, "old item")
+}
+
+// TestHandleGet_DomainBacklog_SortCreated verifies domain=backlog get
+// sort=created orders newest-first.
+func TestHandleGet_DomainBacklog_SortCreated(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	older, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "older", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2025-01-01T00:00:00Z", older.ID)
+	require.NoError(t, err)
+	newer, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P6", "newer", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2026-01-01T00:00:00Z", newer.ID)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"acme-corp"},
+		"sort":     "created",
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	newerIdx := strings.Index(textContent.Text, "newer")
+	olderIdx := strings.Index(textContent.Text, "older")
+	require.NotEqual(t, -1, newerIdx)
+	require.NotEqual(t, -1, olderIdx)
+	assert.Less(t, newerIdx, olderIdx, "newest-first: newer must appear before older")
+}
+
+// TestHandleGet_DomainBacklog_SortInvalid_Errors verifies an unrecognized
+// sort value errors rather than silently ignoring it.
+func TestHandleGet_DomainBacklog_SortInvalid_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"acme-corp"},
+		"sort":     "bogus",
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleGet_DomainBacklog_SinceInvalid_Errors verifies an unparseable
+// since value errors rather than silently ignoring it.
+func TestHandleGet_DomainBacklog_SinceInvalid_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain":   "backlog",
+		"projects": []interface{}{"acme-corp"},
+		"since":    "not-a-date",
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+}
+
+// TestHandleSearch_DomainBacklog_EpicFilter verifies domain=backlog search
+// honors the epic filter (LOW review nit — epic filter was previously only
+// tested via handleGet, not search).
+func TestHandleSearch_DomainBacklog_EpicFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "findableterm child of demo", "", "", "", epic.ID)
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "findableterm unrelated", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"query":  "findableterm",
+		"epic":   epic.ID,
+	})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "findableterm child of demo")
+	assert.NotContains(t, textContent.Text, "findableterm unrelated")
+}
+
+// TestHandleSearch_DomainBacklog_SinceFilter verifies domain=backlog search
+// honors the since filter.
+func TestHandleSearch_DomainBacklog_SinceFilter(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	old, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "findableterm old item", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2020-01-01T00:00:00Z", old.ID)
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "findableterm recent item", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"query":  "findableterm",
+		"since":  "24h",
+	})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "findableterm recent item")
+	assert.NotContains(t, textContent.Text, "findableterm old item")
+}
+
+// TestHandleSearch_DomainBacklog_SortCreated verifies domain=backlog search
+// sort=created overrides the default bm25-relevance ordering with
+// newest-first.
+func TestHandleSearch_DomainBacklog_SortCreated(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	older, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "findableterm older", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2025-01-01T00:00:00Z", older.ID)
+	require.NoError(t, err)
+	newer, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "findableterm newer", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2026-01-01T00:00:00Z", newer.ID)
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"query":  "findableterm",
+		"sort":   "created",
+	})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	newerIdx := strings.Index(textContent.Text, "findableterm newer")
+	olderIdx := strings.Index(textContent.Text, "findableterm older")
+	require.NotEqual(t, -1, newerIdx)
+	require.NotEqual(t, -1, olderIdx)
+	assert.Less(t, newerIdx, olderIdx, "newest-first: newer must appear before older")
+}
+
+// TestHandleSearch_DomainBacklog_SortInvalid_Errors verifies an unrecognized
+// sort value errors on search too.
+func TestHandleSearch_DomainBacklog_SortInvalid_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"query":  "anything",
+		"sort":   "bogus",
+	})
+	result, err := handleSearch(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
 }
 
 // TestHandleGet_DomainBacklog_NonexistentProject_Errors verifies error when filtering by bad project.

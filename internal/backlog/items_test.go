@@ -270,6 +270,62 @@ func TestListItemsWithLimit(t *testing.T) {
 	assert.Len(t, items, 2)
 }
 
+// setItemCreated backdoors an item's created timestamp for deterministic
+// created-time filter/sort tests (mirrors the raw-SQL pattern used elsewhere
+// in this file for item_id_aliases setup).
+func setItemCreated(t *testing.T, d *sql.DB, id, created string) {
+	t.Helper()
+	_, err := d.Exec("UPDATE items SET created = ? WHERE id = ?", created, id)
+	require.NoError(t, err)
+}
+
+// TestListItemsFilterCreatedSince verifies ItemFilter.CreatedSince returns
+// only items created at/after the cutoff.
+func TestListItemsFilterCreatedSince(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	old, err := backlog.AddItem(d, p.ID, "AC", "P1", "old item", "", "", "", "")
+	require.NoError(t, err)
+	setItemCreated(t, d, old.ID, "2020-01-01T00:00:00Z")
+
+	recent, err := backlog.AddItem(d, p.ID, "AC", "P1", "recent item", "", "", "", "")
+	require.NoError(t, err)
+	setItemCreated(t, d, recent.ID, "2026-01-01T00:00:00Z")
+
+	cutoff := "2025-01-01T00:00:00Z"
+	items, err := backlog.ListItems(d, backlog.ItemFilter{CreatedSince: &cutoff})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "recent item", items[0].Title)
+}
+
+// TestListItemsSortByCreated verifies SortByCreated orders newest-first,
+// overriding the default priority ordering.
+func TestListItemsSortByCreated(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	first, err := backlog.AddItem(d, p.ID, "AC", "P0", "first", "", "", "", "")
+	require.NoError(t, err)
+	setItemCreated(t, d, first.ID, "2024-01-01T00:00:00Z")
+
+	second, err := backlog.AddItem(d, p.ID, "AC", "P6", "second", "", "", "", "")
+	require.NoError(t, err)
+	setItemCreated(t, d, second.ID, "2025-01-01T00:00:00Z")
+
+	third, err := backlog.AddItem(d, p.ID, "AC", "P3", "third", "", "", "", "")
+	require.NoError(t, err)
+	setItemCreated(t, d, third.ID, "2026-01-01T00:00:00Z")
+
+	items, err := backlog.ListItems(d, backlog.ItemFilter{SortByCreated: true})
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.Equal(t, "third", items[0].Title)
+	assert.Equal(t, "second", items[1].Title)
+	assert.Equal(t, "first", items[2].Title)
+}
+
 func TestListItemsFilterProject(t *testing.T) {
 	d := testDB(t)
 	p1 := createTestProject(t, d)
@@ -471,6 +527,84 @@ func TestListItemsFilterComponent(t *testing.T) {
 	assert.Len(t, items, 2)
 	assert.Equal(t, "AC-1", items[0].ID)
 	assert.Equal(t, "AC-3", items[1].ID)
+}
+
+// TestListItemsFilterEpic verifies ItemFilter.Epic returns only that
+// epic's children, leaving unrelated items and other epics' children out.
+func TestListItemsFilterEpic(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	epic, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	otherEpic, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: other", "", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "child of demo", "", "", "", epic.ID)
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "child of other", "", "", "", otherEpic.ID)
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "no epic", "", "", "", "")
+	require.NoError(t, err)
+
+	items, err := backlog.ListItems(d, backlog.ItemFilter{Epic: &epic.ID})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "child of demo", items[0].Title)
+}
+
+// TestListItemsFilterEpicEmptyUnaffected verifies an unset (nil) Epic filter
+// leaves ListItems' result set unaffected.
+func TestListItemsFilterEpicEmptyUnaffected(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "item1", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "item2", "", "", "", "AC-1")
+	require.NoError(t, err)
+
+	items, err := backlog.ListItems(d, backlog.ItemFilter{})
+	require.NoError(t, err)
+	assert.Len(t, items, 2)
+}
+
+// TestListItemsFilterEpicsOnly verifies ItemFilter.EpicsOnly returns only
+// EPIC:-titled items.
+func TestListItemsFilterEpicsOnly(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: other", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "regular item", "", "", "", "")
+	require.NoError(t, err)
+
+	items, err := backlog.ListItems(d, backlog.ItemFilter{EpicsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	for _, item := range items {
+		assert.Contains(t, item.Title, "EPIC:")
+	}
+}
+
+// TestListItemsFilterEpicsOnlyTakesPrecedence verifies EpicsOnly wins when
+// both Epic and EpicsOnly are set (they can't sensibly combine).
+func TestListItemsFilterEpicsOnlyTakesPrecedence(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	epic, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "child", "", "", "", epic.ID)
+	require.NoError(t, err)
+
+	items, err := backlog.ListItems(d, backlog.ItemFilter{Epic: &epic.ID, EpicsOnly: true})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "EPIC: demo", items[0].Title)
 }
 
 func TestUpdateItemComponent(t *testing.T) {
@@ -769,6 +903,27 @@ func TestSearchItemsWithFilters(t *testing.T) {
 	items, err = backlog.SearchItems(d, "sharedterm", backlog.ItemFilter{Component: &component})
 	require.NoError(t, err)
 	assert.Len(t, items, 2)
+}
+
+// TestSearchItemsSortByCreated verifies SearchItems' SortByCreated override
+// orders newest-first instead of the default bm25-relevance ordering.
+func TestSearchItemsSortByCreated(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	older, err := backlog.AddItem(d, p.ID, "AC", "P1", "sortableterm older", "", "", "", "")
+	require.NoError(t, err)
+	setItemCreated(t, d, older.ID, "2025-01-01T00:00:00Z")
+
+	newer, err := backlog.AddItem(d, p.ID, "AC", "P1", "sortableterm newer", "", "", "", "")
+	require.NoError(t, err)
+	setItemCreated(t, d, newer.ID, "2026-01-01T00:00:00Z")
+
+	items, err := backlog.SearchItems(d, "sortableterm", backlog.ItemFilter{SortByCreated: true})
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	assert.Equal(t, "sortableterm newer", items[0].Title)
+	assert.Equal(t, "sortableterm older", items[1].Title)
 }
 
 func TestSearchItemsEmptyQuery(t *testing.T) {

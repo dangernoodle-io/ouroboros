@@ -196,8 +196,38 @@ func TestHandleBacklogCreateWithNotesAndComponent(t *testing.T) {
 	assert.Equal(t, "api", item.Component)
 }
 
-// TestHandleBacklogCreateWithEpic verifies entries[].epic is persisted on create.
+// TestHandleBacklogCreateWithEpic verifies entries[].epic is persisted on
+// create when it resolves to a pre-existing item.
 func TestHandleBacklogCreateWithEpic(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "epic child",
+				"epic":     epic.ID,
+			},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	item, err := backlog.GetItem(db, "AC-2")
+	require.NoError(t, err)
+	assert.Equal(t, epic.ID, item.Epic)
+}
+
+// TestHandleBacklogCreateEpicNotFound_Errors verifies create rejects a
+// dangling/typo'd epic id — mirrors the edge target-exists check.
+func TestHandleBacklogCreateEpicNotFound_Errors(t *testing.T) {
 	resetAllDB(t)
 
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
@@ -208,18 +238,51 @@ func TestHandleBacklogCreateWithEpic(t *testing.T) {
 			map[string]interface{}{
 				"project":  "acme-corp",
 				"priority": "P1",
-				"title":    "epic child",
-				"epic":     "AC-1",
+				"title":    "orphan child",
+				"epic":     "AC-999",
+			},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, `epic item "AC-999" not found`)
+
+	// Nothing persisted: the bad epic rolls back the whole atomic create.
+	_, err = backlog.GetItem(db, "AC-1")
+	assert.Error(t, err)
+}
+
+// TestHandleBacklogCreateWithAliasResolvedEpic verifies an epic id referring
+// to a renamed item (via item_id_aliases) still validates — mirrors the
+// EpicLabels alias-fallback path.
+func TestHandleBacklogCreateWithAliasResolvedEpic(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: renamed", "", "", "", "")
+	require.NoError(t, err)
+
+	_, err = db.Exec("INSERT INTO item_id_aliases (old_id, new_id, renamed_at) VALUES (?, ?, ?)",
+		"OLD-1", epic.ID, "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "epic child via old id",
+				"epic":     "OLD-1",
 			},
 		},
 	})
 	result, err := handleBacklog(db, nil)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
-
-	item, err := backlog.GetItem(db, "AC-1")
-	require.NoError(t, err)
-	assert.Equal(t, "AC-1", item.Epic)
 }
 
 // TestHandleBacklogCreateEpicNotScalar_Errors verifies create rejects a
@@ -273,8 +336,35 @@ func TestHandleBacklogUpdateComponent(t *testing.T) {
 	assert.Equal(t, "widget", updated.Component)
 }
 
-// TestHandleBacklogUpdateEpic verifies entries[].epic patches an existing item.
+// TestHandleBacklogUpdateEpic verifies entries[].epic patches an existing
+// item when it resolves to a pre-existing epic item.
 func TestHandleBacklogUpdateEpic(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"id": item.ID, "epic": epic.ID},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, epic.ID, updated.Epic)
+}
+
+// TestHandleBacklogUpdateEpicNotFound_Errors verifies update rejects a
+// dangling/typo'd epic id and rolls back the whole write.
+func TestHandleBacklogUpdateEpicNotFound_Errors(t *testing.T) {
 	resetAllDB(t)
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
@@ -284,7 +374,37 @@ func TestHandleBacklogUpdateEpic(t *testing.T) {
 
 	req := makeRequest(map[string]interface{}{
 		"entries": []interface{}{
-			map[string]interface{}{"id": item.ID, "epic": "AC-9"},
+			map[string]interface{}{"id": item.ID, "priority": "P3", "epic": "AC-999"},
+		},
+	})
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, `epic item "AC-999" not found`)
+
+	// Nothing changed: the bad epic rolls back the priority change too.
+	unchanged, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "P1", unchanged.Priority)
+	assert.Empty(t, unchanged.Epic)
+}
+
+// TestHandleBacklogUpdateEpicClear verifies passing an empty epic on update
+// is allowed (no validation on empty — clearing stays a no-op given epic is
+// only set when non-empty, matching the component field's convention).
+func TestHandleBacklogUpdateEpicClear(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"id": item.ID, "priority": "P2", "epic": ""},
 		},
 	})
 	result, err := handleBacklog(db, nil)(context.TODO(), req)
@@ -293,7 +413,8 @@ func TestHandleBacklogUpdateEpic(t *testing.T) {
 
 	updated, err := backlog.GetItem(db, item.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "AC-9", updated.Epic)
+	assert.Equal(t, "P2", updated.Priority)
+	assert.Empty(t, updated.Epic)
 }
 
 // TestHandleBacklogUpdateEpicNotScalar_Errors verifies update rejects a

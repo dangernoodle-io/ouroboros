@@ -34,15 +34,15 @@ MCP surface is intentionally narrow (5 tools); operator-style ops are CLI-only. 
 
 | Tool | Type | Description |
 |------|------|-------------|
-| get | Read | Fetch entries by ID or filters (requires `domain`: kb\|backlog\|roadmap); roadmap supports `format=md\|html` |
-| search | Read | Full-text search (requires `domain`: kb\|backlog\|roadmap) |
+| get | Read | Fetch entries by ID or filters (requires `domain`: kb\|backlog\|roadmap); roadmap supports `format=md\|html`; backlog: `epic`/`epics_only`, `since` (duration/date/RFC3339 creation-time cutoff), `sort=created` (newest-first) |
+| search | Read | Full-text search (requires `domain`: kb\|backlog\|roadmap); backlog shares get's `epic`/`epics_only`/`since`/`sort=created` filters |
 | kb | Write | Create or update (by id) knowledge entries (id absent: upserts by type+project+category+title) |
 | backlog | Write | Create, update, or delete backlog items |
 | roadmap | Write | Mutate per-project roadmap (now/next/deferred/parked/dropped/done sections; items carry two single-valued grouping axes, component + epic, plus optional position; via op=add\|update\|move\|reorder\|done\|remove) |
 
 Cross-reference edges (`blocks`\|`relates`\|`explains`, item/kb endpoints) are not a 6th tool — they fold into the existing surface: `backlog` write entries[].edges[] (inline, primary path), `kb` write `[[Title]]` autolinks, `get` verbose=true edges sidecar. CLI `link`/`unlink`/`ls edges` are for retrofits. Epic membership stays a scalar field (`items.epic`), not an edge.
 
-CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete <id>...` (multiple ids, all-or-nothing), `export`, `import`, `roadmap` (show/add/update/move/reorder/done/remove/seed), `link`/`unlink` (edges), `dashboard` (segment/view/project/status/refresh — views are named project sets, each refreshing to its own NDJSON output plus a self-contained `.html` page (theme-aware, meta-refresh at the view's cooldown); `project set --segments`/`--repo` set per-project segment/repo-path overrides, read-modify-write; a project's on-disk repo resolves via its `--repo` override else `dashboard.workspace_root`/`<project>`, else cwd auto-detect). Browse with `ls items`, `ls kb`, `ls plans`, `ls projects`, `ls edges`.
+CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/delete), `plan` (create/get/list/update), `config` (get/set), `kb delete <id>...` (multiple ids, all-or-nothing), `export`, `import`, `roadmap` (show/add/update/move/reorder/done/remove/seed), `link`/`unlink` (edges), `dashboard` (segment/view/project/status/refresh — views are named project sets, each refreshing to its own NDJSON output plus a self-contained `.html` page (theme-aware, meta-refresh at the view's cooldown); `project set --segments`/`--repo` set per-project segment/repo-path overrides, read-modify-write; a project's on-disk repo resolves via its `--repo` override else `dashboard.workspace_root`/`<project>`, else cwd auto-detect). Browse with `ls items` (`--epic <id>` = that epic's children, `--epics` = list epics — mutually exclusive, `--epics` wins; `--since <dur|date>` = created at/after cutoff, e.g. `24h`, `7d`, `2026-01-01`, or RFC3339; `--sort created` = newest-first, default is priority order; `created` shown in output rows), `ls kb`, `ls plans`, `ls projects`, `ls edges`. Backlog write's `epic` field is now validated (alias-aware): must resolve to an existing item, or the write errors and rolls back; clearing (empty) is always allowed.
 
 ## Configuration
 

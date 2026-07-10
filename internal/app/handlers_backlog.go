@@ -66,6 +66,22 @@ func parseEdgeSpecs(e map[string]interface{}) ([]edgeSpec, error) {
 	return specs, nil
 }
 
+// validateEpicTx confirms a non-empty epic value resolves to an existing
+// backlog item (alias-aware, via backlog.GetItem — the same resolution path
+// EpicLabels uses, so a renamed epic still validates), mirroring
+// linkEdgesTx's target-exists check for edges: a typo'd/dangling epic id
+// must not be silently accepted. An empty epic (clearing the field) is
+// always allowed and skips validation.
+func validateEpicTx(tx *sql.Tx, epic string) error {
+	if epic == "" {
+		return nil
+	}
+	if _, err := backlog.GetItem(tx, epic); err != nil {
+		return fmt.Errorf("epic item %q not found: %w", epic, err)
+	}
+	return nil
+}
+
 // linkEdgesTx creates each spec as an item->item edge sourced from itemID,
 // on the given transaction so the edge links commit atomically with the
 // item write that produced them (see handleBacklog). Validates each
@@ -136,6 +152,28 @@ func parseItemFilter(d *sql.DB, req mcp.CallToolRequest) (backlog.ItemFilter, er
 	}
 	if v, ok := req.GetArguments()["component"].(string); ok {
 		f.Component = &v
+	}
+	// epics_only takes precedence over epic when both are set — they
+	// can't sensibly combine (see ItemFilter.EpicsOnly/Epic).
+	if v, ok := req.GetArguments()["epics_only"].(bool); ok && v {
+		f.EpicsOnly = true
+	} else if v, ok := req.GetArguments()["epic"].(string); ok && v != "" {
+		f.Epic = &v
+	}
+	if v, ok := req.GetArguments()["since"].(string); ok && v != "" {
+		cutoff, err := backlog.ParseSinceCutoff(v)
+		if err != nil {
+			return f, err
+		}
+		f.CreatedSince = &cutoff
+	}
+	if v, ok := req.GetArguments()["sort"].(string); ok && v != "" {
+		switch v {
+		case "created":
+			f.SortByCreated = true
+		default:
+			return f, fmt.Errorf("invalid sort value %q: expected \"created\"", v)
+		}
 	}
 	if v, ok := req.GetArguments()["limit"].(float64); ok {
 		f.Limit = int(v)
@@ -308,6 +346,10 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 						}
 						defer tx.Rollback() //nolint:errcheck
 
+						if err := validateEpicTx(tx, epic); err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
+
 						var item *backlog.Item
 						if len(fields) > 0 {
 							item, err = backlog.UpdateItemTx(tx, entryID, fields)
@@ -382,6 +424,10 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 							return mcp.NewToolResultError(err.Error()), nil
 						}
 						defer tx.Rollback() //nolint:errcheck
+
+						if err := validateEpicTx(tx, epic); err != nil {
+							return mcp.NewToolResultError(err.Error()), nil
+						}
 
 						item, err := backlog.AddItemTx(tx, proj.ID, proj.Prefix, priority, title, desc, notes, component, epic)
 						if err != nil {

@@ -16,6 +16,10 @@ var (
 	lsItemsStatusFlag    string
 	lsItemsPriorityFlag  string
 	lsItemsComponentFlag string
+	lsItemsEpicFlag      string
+	lsItemsEpicsFlag     bool
+	lsItemsSinceFlag     string
+	lsItemsSortFlag      string
 	lsItemsLimitFlag     int
 	lsItemsJSONFlag      bool
 )
@@ -29,7 +33,7 @@ var lsItemsCmd = &cobra.Command{
 			if len(args) == 1 {
 				return runLSItemDetail(cmd.OutOrStdout(), db, args[0], lsItemsJSONFlag)
 			}
-			return runLSItems(cmd.OutOrStdout(), db, lsItemsProjectFlag, lsItemsStatusFlag, lsItemsPriorityFlag, lsItemsComponentFlag, lsItemsLimitFlag, lsItemsJSONFlag)
+			return runLSItems(cmd.OutOrStdout(), db, lsItemsProjectFlag, lsItemsStatusFlag, lsItemsPriorityFlag, lsItemsComponentFlag, lsItemsEpicFlag, lsItemsEpicsFlag, lsItemsSinceFlag, lsItemsSortFlag, lsItemsLimitFlag, lsItemsJSONFlag)
 		})
 	},
 }
@@ -39,11 +43,15 @@ func init() {
 	lsItemsCmd.Flags().StringVar(&lsItemsStatusFlag, "status", "", "Status filter (open or done)")
 	lsItemsCmd.Flags().StringVar(&lsItemsPriorityFlag, "priority", "", "Priority filter (P0-P6)")
 	lsItemsCmd.Flags().StringVar(&lsItemsComponentFlag, "component", "", "Component filter")
+	lsItemsCmd.Flags().StringVar(&lsItemsEpicFlag, "epic", "", "Epic item id filter (that epic's children)")
+	lsItemsCmd.Flags().BoolVar(&lsItemsEpicsFlag, "epics", false, "List only epic items (EPIC:-titled); takes precedence over --epic")
+	lsItemsCmd.Flags().StringVar(&lsItemsSinceFlag, "since", "", "Only items created at/after this cutoff: a duration (24h, 7d) or a date (2006-01-02) or RFC3339 timestamp")
+	lsItemsCmd.Flags().StringVar(&lsItemsSortFlag, "sort", "", `Sort order: "created" (newest first); default priority`)
 	lsItemsCmd.Flags().IntVar(&lsItemsLimitFlag, "limit", 20, "Maximum number of results")
 	lsItemsCmd.Flags().BoolVar(&lsItemsJSONFlag, "json", false, "Output as JSON")
 }
 
-func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, component string, limit int, asJSON bool) error {
+func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, component, epic string, epicsOnly bool, since, sort string, limit int, asJSON bool) error {
 	// Build project filter
 	var projectIDs []int64
 	if projectName != "" {
@@ -53,7 +61,7 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 			if asJSON {
 				return printJSON(out, []backlog.Item{})
 			}
-			return printTable(out, []string{"ID", "PRIORITY", "STATUS", "PROJECT", "COMPONENT", "TITLE"}, [][]string{})
+			return printTable(out, []string{"ID", "PRIORITY", "STATUS", "PROJECT", "COMPONENT", "EPIC", "CREATED", "TITLE"}, [][]string{})
 		}
 		projectIDs = []int64{project.ID}
 	} else {
@@ -74,6 +82,28 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 	}
 	if component != "" {
 		filter.Component = &component
+	}
+	// --epics takes precedence over --epic when both are given — they
+	// can't sensibly combine (epics-only vs. one epic's children).
+	if epicsOnly {
+		filter.EpicsOnly = true
+	} else if epic != "" {
+		filter.Epic = &epic
+	}
+	if since != "" {
+		cutoff, err := backlog.ParseSinceCutoff(since)
+		if err != nil {
+			return fmt.Errorf("ls backlog: %w", err)
+		}
+		filter.CreatedSince = &cutoff
+	}
+	switch sort {
+	case "":
+		// default ordering (priority)
+	case "created":
+		filter.SortByCreated = true
+	default:
+		return fmt.Errorf("ls backlog: invalid --sort value %q: expected \"created\"", sort)
 	}
 	if priority != "" {
 		// Parse priority: P0 -> 0, P6 -> 6
@@ -113,11 +143,13 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 			item.Status,
 			projectMap[item.ProjectID],
 			item.Component,
+			item.Epic,
+			item.Created,
 			item.Title,
 		})
 	}
 
-	return printTable(out, []string{"ID", "PRIORITY", "STATUS", "PROJECT", "COMPONENT", "TITLE"}, rows)
+	return printTable(out, []string{"ID", "PRIORITY", "STATUS", "PROJECT", "COMPONENT", "EPIC", "CREATED", "TITLE"}, rows)
 }
 
 func runLSItemDetail(out io.Writer, db *sql.DB, id string, asJSON bool) error {

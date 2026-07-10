@@ -23,7 +23,7 @@ func TestLSItemsList(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "", "", "", 20, false)
+	err = runLSItems(&buf, db, "", "", "", "", "", false, "", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -43,7 +43,7 @@ func TestLSItemsListJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "", "", "", 20, true)
+	err = runLSItems(&buf, db, "", "", "", "", "", false, "", "", 20, true)
 	require.NoError(t, err)
 
 	var items []backlog.Item
@@ -67,7 +67,7 @@ func TestLSItemsProjectFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "acme-corp", "", "", "", 20, false)
+	err = runLSItems(&buf, db, "acme-corp", "", "", "", "", false, "", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -89,7 +89,7 @@ func TestLSItemsStatusFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "done", "", "", 20, false)
+	err = runLSItems(&buf, db, "", "done", "", "", "", false, "", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -108,7 +108,7 @@ func TestLSItemsPriorityFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "", "P0", "", 20, false)
+	err = runLSItems(&buf, db, "", "", "P0", "", "", false, "", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
@@ -127,12 +127,193 @@ func TestLSItemsComponentFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "", "", "", "auth", 20, false)
+	err = runLSItems(&buf, db, "", "", "", "auth", "", false, "", "", 20, false)
 	require.NoError(t, err)
 
 	output := buf.String()
 	assert.Contains(t, output, "AC-1")
 	assert.NotContains(t, output, "AC-2")
+}
+
+func TestLSItemsEpicFilter(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "child of demo", "", "", "", epic.ID)
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "unrelated", "", "", "", "")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runLSItems(&buf, db, "", "", "", "", epic.ID, false, "", "", 20, false)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "child of demo")
+	assert.Contains(t, output, epic.ID)
+	assert.NotContains(t, output, "unrelated")
+}
+
+func TestLSItemsEpicsOnlyFilter(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "regular task", "", "", "", "")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runLSItems(&buf, db, "", "", "", "", "", true, "", "", 20, false)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "EPIC: demo")
+	assert.NotContains(t, output, "regular task")
+}
+
+func TestLSItemsCreatedShownInRows(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2026-03-01T00:00:00Z", item.ID)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runLSItems(&buf, db, "", "", "", "", "", false, "", "", 20, false)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "CREATED")
+	assert.Contains(t, output, "2026-03-01T00:00:00Z")
+}
+
+func TestLSItemsSortCreated(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	older, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "older", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2025-01-01T00:00:00Z", older.ID)
+	require.NoError(t, err)
+
+	newer, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P6", "newer", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2026-01-01T00:00:00Z", newer.ID)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runLSItems(&buf, db, "", "", "", "", "", false, "", "created", 20, false)
+	require.NoError(t, err)
+
+	output := buf.String()
+	newerIdx := strings.Index(output, "newer")
+	olderIdx := strings.Index(output, "older")
+	require.NotEqual(t, -1, newerIdx)
+	require.NotEqual(t, -1, olderIdx)
+	assert.Less(t, newerIdx, olderIdx, "newest-first: newer row must appear before older")
+}
+
+func TestLSItemsSortInvalid_Errors(t *testing.T) {
+	db := newTestDB(t)
+
+	var buf bytes.Buffer
+	err := runLSItems(&buf, db, "", "", "", "", "", false, "", "bogus", 20, false)
+	assert.Error(t, err)
+}
+
+func TestLSItemsSinceDuration(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	old, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "old item", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2020-01-01T00:00:00Z", old.ID)
+	require.NoError(t, err)
+
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "recent item", "", "", "", "")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runLSItems(&buf, db, "", "", "", "", "", false, "24h", "", 20, false)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "recent item")
+	assert.NotContains(t, output, "old item")
+}
+
+func TestLSItemsSinceDate(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	old, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "old item", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2020-01-01T00:00:00Z", old.ID)
+	require.NoError(t, err)
+
+	recent, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "recent item", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2026-06-01T00:00:00Z", recent.ID)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runLSItems(&buf, db, "", "", "", "", "", false, "2026-01-01", "", 20, false)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "recent item")
+	assert.NotContains(t, output, "old item")
+}
+
+func TestLSItemsSinceInvalid_Errors(t *testing.T) {
+	db := newTestDB(t)
+
+	var buf bytes.Buffer
+	err := runLSItems(&buf, db, "", "", "", "", "", false, "not-a-date", "", 20, false)
+	assert.Error(t, err)
+}
+
+// TestLSItemsEpicWithSortCreated verifies --epic combined with --sort
+// created: that epic's children, newest-first.
+func TestLSItemsEpicWithSortCreated(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+
+	older, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "older child", "", "", "", epic.ID)
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2025-01-01T00:00:00Z", older.ID)
+	require.NoError(t, err)
+
+	newer, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "newer child", "", "", "", epic.ID)
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", "2026-01-01T00:00:00Z", newer.ID)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runLSItems(&buf, db, "", "", "", "", epic.ID, false, "", "created", 20, false)
+	require.NoError(t, err)
+
+	output := buf.String()
+	newerIdx := strings.Index(output, "newer child")
+	olderIdx := strings.Index(output, "older child")
+	require.NotEqual(t, -1, newerIdx)
+	require.NotEqual(t, -1, olderIdx)
+	assert.Less(t, newerIdx, olderIdx)
 }
 
 func TestLSItemsDetailJSON(t *testing.T) {
@@ -181,7 +362,7 @@ func TestLSItemsProjectNotFound(t *testing.T) {
 	db := newTestDB(t)
 
 	var buf bytes.Buffer
-	err := runLSItems(&buf, db, "nonexistent", "", "", "", 20, false)
+	err := runLSItems(&buf, db, "nonexistent", "", "", "", "", false, "", "", 20, false)
 	require.NoError(t, err)
 
 	output := strings.TrimSpace(buf.String())
@@ -200,7 +381,7 @@ func TestLSItemsLimit(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err = runLSItems(&buf, db, "acme-corp", "open", "", "", 3, true)
+	err = runLSItems(&buf, db, "acme-corp", "open", "", "", "", false, "", "", 3, true)
 	require.NoError(t, err)
 
 	var items []backlog.Item
