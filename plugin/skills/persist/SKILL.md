@@ -15,7 +15,7 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
 3. **Search before kb.** Collect all candidate titles, then call `search` once with `queries: [title1, title2, ...]` and `projects: ["<project>"]`. The response is positional — `results[i]` corresponds to `queries[i]`. If a matching entry exists for the same project, reuse its title verbatim — the server upserts on `type+project+category+title`. Only skip if existing content is already identical.
 
 4. **Store via `kb`** with these fields:
-   - `type`, `project`, `title` (concise, searchable — used as the upsert key)
+   - `type`, `project`, `title` (concise, searchable — used as the upsert key). If step 3 found a near-match needing a retitle or correction (e.g. fixing an earlier duplicate) rather than a fresh entry, pass that entry's `id` to update it in place instead of creating another one.
    - `content` — terse, ≤300 chars target / 500 hard cap. Structured:
      ```
      Rule: <the thing>
@@ -38,3 +38,7 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
 ## Be selective
 
 Skip trivial implementation details, anything derivable from code, temporary debugging notes, and obvious/redundant details.
+
+**KB = knowledge only.** Do not persist work status, task tracking, or TODO-like material to the KB — that belongs in backlog tickets, not a `decision`/`note`/`plan` entry.
+
+**Multi-unit work → tickets, not a KB entry.** If the material describes more than one or two units of work, it's an epic (`EPIC: <name>` parent + child tickets) filed via the backlog, not KB content. Redirect it there instead of storing it here.
