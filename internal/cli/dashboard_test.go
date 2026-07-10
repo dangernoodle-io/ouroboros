@@ -594,6 +594,55 @@ func TestDashboardRefreshCmd_UnknownBuiltinSegmentDropped(t *testing.T) {
 	assert.Contains(t, buf.String(), "0 fragments (1 dropped)")
 }
 
+// TestDashboardRefreshCmd_AggregateDeadlineSkipsRemainingSegments exercises
+// OU-248: a view whose refresh_timeout is floored at MinRefreshTimeout
+// bounds the TOTAL wall clock across every segment. A slow segment that
+// blows the aggregate deadline is cut (dropped as a timeout), and any
+// segment still pending after the deadline is recorded as skipped rather
+// than run — asserted via the drop count (and a wall-clock ceiling well
+// under what N x per-segment timeouts would take), not exact timing, to
+// avoid flakiness.
+func TestDashboardRefreshCmd_AggregateDeadlineSkipsRemainingSegments(t *testing.T) {
+	resetDashboardFlags()
+	setupDashboardDB(t)
+	enableDashboard(t)
+
+	require.NoError(t, withDB(func(db *sql.DB) error {
+		if err := dashboard.SetView(db, dashboard.View{Name: "miner", Projects: []string{"breadboard"}}); err != nil {
+			return err
+		}
+		if err := backlog.SetConfig(db, dashboard.KeyRefreshTimeout, "10s"); err != nil {
+			return err
+		}
+		return dashboard.SetProjectConfig(db, "breadboard", dashboard.ProjectConfig{
+			Segments: []dashboard.SegmentSpec{
+				{ID: "fast", Exec: []string{"true"}},
+				{ID: "slow", Shell: "sleep 12", Timeout: "20s"},
+				{ID: "never", Exec: []string{"true"}},
+			},
+		})
+	}))
+
+	dashboardRefreshView = "miner"
+	dashboardRefreshForce = true
+	defer resetDashboardFlags()
+
+	var buf bytes.Buffer
+	dashboardRefreshCmd.SetOut(&buf)
+	start := time.Now()
+	err := dashboardRefreshCmd.RunE(dashboardRefreshCmd, []string{})
+	elapsed := time.Since(start)
+	require.NoError(t, err)
+
+	// "slow" is cut at the 10s aggregate deadline (not its own 20s
+	// Timeout) and dropped as a timeout; "never" is then skipped outright
+	// since the deadline has already fired — two drops total.
+	assert.Contains(t, buf.String(), "2 dropped")
+	// Bounded by the aggregate deadline, not the sum of per-segment
+	// timeouts (which would be >= 20s here).
+	assert.Less(t, elapsed, 20*time.Second)
+}
+
 func TestDashboardRefreshCmd_ResolveRepoErrorSoftDegrades(t *testing.T) {
 	resetDashboardFlags()
 	dbPath := setupDashboardDB(t)

@@ -16,11 +16,12 @@ import (
 // Config keys under which the dashboard layer stores its settings in the
 // backlog config table.
 const (
-	KeyEnabled       = "dashboard.enabled"
-	KeySegments      = "dashboard.segments"
-	KeyCooldown      = "dashboard.cooldown"
-	KeyOutputDir     = "dashboard.output_dir"
-	KeyWorkspaceRoot = "dashboard.workspace_root"
+	KeyEnabled        = "dashboard.enabled"
+	KeySegments       = "dashboard.segments"
+	KeyCooldown       = "dashboard.cooldown"
+	KeyOutputDir      = "dashboard.output_dir"
+	KeyWorkspaceRoot  = "dashboard.workspace_root"
+	KeyRefreshTimeout = "dashboard.refresh_timeout"
 
 	// ViewKeyPrefix/ProjectKeyPrefix/RuntimeKeyPrefix key one JSON blob per
 	// entity: dashboard.view.<name>, dashboard.project.<name>,
@@ -384,4 +385,43 @@ func ParseCooldown(s string) time.Duration {
 		d = MinCooldown
 	}
 	return d
+}
+
+// MinRefreshTimeout floors any configured dashboard.refresh_timeout.
+const MinRefreshTimeout = 10 * time.Second
+
+// defaultRefreshTimeout is used when dashboard.refresh_timeout is unset or
+// invalid.
+const defaultRefreshTimeout = 90 * time.Second
+
+// ParseRefreshTimeout parses a dashboard.refresh_timeout duration string,
+// defaulting to defaultRefreshTimeout when empty or invalid, and flooring
+// the result at MinRefreshTimeout. This bounds a view's sequential segment
+// loop, independent of each segment's own per-segment ParseTimeout cap: once
+// it fires, no further segment starts, and an exec/shell producer already
+// in flight is cut (it shares the parent context). A builtin already
+// running its own internal subprocess is NOT preempted — today only the
+// "github" builtin does this (its `gh pr list` call, capped at ~10s
+// internally) — so total wall clock can still exceed refresh_timeout by up
+// to that builtin's internal cap. Tracked for tightening in the backlog.
+func ParseRefreshTimeout(s string) time.Duration {
+	d := defaultRefreshTimeout
+	if s != "" {
+		if parsed, err := time.ParseDuration(s); err == nil {
+			d = parsed
+		}
+	}
+	if d < MinRefreshTimeout {
+		d = MinRefreshTimeout
+	}
+	return d
+}
+
+// RefreshTimeout resolves the aggregate view-refresh timeout: the global
+// dashboard.refresh_timeout if set, else the default (ParseRefreshTimeout
+// handles empty/invalid input). Global only — there is no per-view
+// override.
+func RefreshTimeout(db *sql.DB) time.Duration {
+	raw, _ := backlog.GetConfig(db, KeyRefreshTimeout)
+	return ParseRefreshTimeout(raw)
 }
