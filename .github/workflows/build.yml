@@ -12,5 +12,16 @@ jobs:
     uses: dangernoodle-io/.github/.github/workflows/go-build.yml@main
     secrets: inherit
 
+  acc:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make acc
+
   plugin:
     uses: dangernoodle-io/.github/.github/workflows/plugin-test.yml@main
