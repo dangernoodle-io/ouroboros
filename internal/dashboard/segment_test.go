@@ -2,16 +2,20 @@ package dashboard
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	_ "modernc.org/sqlite"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -216,10 +220,12 @@ func TestBuiltinAndBuiltinNames(t *testing.T) {
 	assert.True(t, ok)
 	_, ok = Builtin("github")
 	assert.True(t, ok)
+	_, ok = Builtin("tickets")
+	assert.True(t, ok)
 	_, ok = Builtin("nonexistent")
 	assert.False(t, ok)
 
-	assert.Equal(t, []string{"git", "github", "roadmap"}, BuiltinNames())
+	assert.Equal(t, []string{"git", "github", "roadmap", "tickets"}, BuiltinNames())
 }
 
 // stubGh writes an executable "gh" script to a temp dir and prepends that
@@ -358,6 +364,99 @@ func TestGitHubSegment_ResolvesDirFromCwd(t *testing.T) {
 	group, ok := frags[1].(Group)
 	require.True(t, ok)
 	require.Len(t, group.Cards, 2)
+}
+
+func TestTicketsSegment_EmptyProject(t *testing.T) {
+	db := newDashboardTestDB(t)
+
+	frags, err := ticketsSegment(Context{Project: ""}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestTicketsSegment_UnknownProject(t *testing.T) {
+	db := newDashboardTestDB(t)
+
+	frags, err := ticketsSegment(Context{Project: "no-such-project"}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
+}
+
+func TestTicketsSegment_NoOpenItems(t *testing.T) {
+	db := newDashboardTestDB(t)
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	frags, err := ticketsSegment(Context{Project: "acme-corp"}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 1)
+
+	tile, ok := frags[0].(Tile)
+	require.True(t, ok)
+	assert.Equal(t, "tickets", tile.Section)
+	assert.Equal(t, "open", tile.Label)
+	assert.Equal(t, "0", tile.Value)
+}
+
+func TestTicketsSegment_RecentTickets(t *testing.T) {
+	db := newDashboardTestDB(t)
+	p, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	// Seed 6 open items with distinct, ascending created times, plus one
+	// done item that must never surface.
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var ids []string
+	for i := 0; i < 6; i++ {
+		item, err := backlog.AddItem(db, p.ID, "AC", "P2", fmt.Sprintf("open task %d", i), "", "", "", "")
+		require.NoError(t, err)
+		ids = append(ids, item.ID)
+		created := base.Add(time.Duration(i) * time.Hour).Format(time.RFC3339)
+		_, err = db.Exec("UPDATE items SET created = ? WHERE id = ?", created, item.ID)
+		require.NoError(t, err)
+	}
+
+	doneItem, err := backlog.AddItem(db, p.ID, "AC", "P1", "done task", "", "", "", "")
+	require.NoError(t, err)
+	require.NoError(t, backlog.MarkDone(db, doneItem.ID))
+
+	frags, err := ticketsSegment(Context{Project: "acme-corp"}, db)
+	require.NoError(t, err)
+	require.Len(t, frags, 2)
+
+	tile, ok := frags[0].(Tile)
+	require.True(t, ok)
+	assert.Equal(t, "tickets", tile.Section)
+	assert.Equal(t, "open", tile.Label)
+	assert.Equal(t, "6", tile.Value)
+
+	group, ok := frags[1].(Group)
+	require.True(t, ok)
+	assert.Equal(t, "tickets", group.Section)
+	assert.Equal(t, "recent tickets", group.Title)
+	require.Len(t, group.Cards, 5)
+
+	// Newest-first: item index 5 (last created) down to index 1.
+	for rank, wantIdx := range []int{5, 4, 3, 2, 1} {
+		wantID := ids[wantIdx]
+		assert.Equal(t, wantID+" open task "+strconv.Itoa(wantIdx), group.Cards[rank].Title)
+		assert.Equal(t, "P2", group.Cards[rank].Desc)
+	}
+}
+
+func TestTicketsSegment_ListItemsError(t *testing.T) {
+	db := newDashboardTestDB(t)
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	// Break the backlog read after the project lookup succeeds: dropping
+	// the items table forces ListItems to error.
+	_, err = db.Exec("DROP TABLE items")
+	require.NoError(t, err)
+
+	frags, err := ticketsSegment(Context{Project: "acme-corp"}, db)
+	require.NoError(t, err)
+	assert.Nil(t, frags)
 }
 
 func TestParseGitHubRepo(t *testing.T) {

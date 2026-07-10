@@ -26,11 +26,13 @@ func newTestDB(t *testing.T) *sql.DB {
 
 func TestDefaultSegments(t *testing.T) {
 	segs := DefaultSegments()
-	require.Len(t, segs, 2)
+	require.Len(t, segs, 3)
 	assert.Equal(t, "git", segs[0].ID)
 	assert.Equal(t, "git", segs[0].Builtin)
 	assert.Equal(t, "roadmap", segs[1].ID)
 	assert.Equal(t, "roadmap", segs[1].Builtin)
+	assert.Equal(t, "tickets", segs[2].ID)
+	assert.Equal(t, "tickets", segs[2].Builtin)
 }
 
 func TestParseSegments(t *testing.T) {
