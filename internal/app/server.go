@@ -93,13 +93,13 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 
 	s.AddTool(mcp.NewTool("kb",
 		mcp.WithDescription("Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb."),
-		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?")),
+		mcp.WithArray("entries", mcp.Required(), mcp.Description("Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?. content max 500 chars; put narrative in notes")),
 		toolAnnotation(nil, nil, mcp.ToBoolPtr(true)),
 	), withRecover(handleKB(db)))
 
 	s.AddTool(mcp.NewTool("backlog",
 		mcp.WithDescription("Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. Reads live under get/search domain=backlog."),
-		mcp.WithArray("entries", mcp.Description("Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id)")),
+		mcp.WithArray("entries", mcp.Description("Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes")),
 		mcp.WithArray("delete_ids", mcp.Description("Item IDs to delete")),
 		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
 	), withRecover(handleBacklog(db, bk)))
