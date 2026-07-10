@@ -489,6 +489,107 @@ test('checkStatusline: ok when the referenced script exists', () => {
   });
 });
 
+// --- stale subagent-stop.js guard (OU-254) ----------------------------------
+
+test('isStaleSubagentHook: false on the current clean subagent-stop.js', () => {
+  const contents = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'subagent-stop.js'), 'utf8');
+  assert.equal(bootstrap.isStaleSubagentHook(contents), false);
+});
+
+test('isStaleSubagentHook: true on a stale pre-OU-222 fixture containing "tier-1 nudge fired"', () => {
+  const stale = fs.readFileSync(path.join(__dirname, 'fixtures', 'stale-subagent-stop.js'), 'utf8');
+  assert.equal(bootstrap.isStaleSubagentHook(stale), true);
+});
+
+test('isStaleSubagentHook: false on non-string input', () => {
+  assert.equal(bootstrap.isStaleSubagentHook(undefined), false);
+  assert.equal(bootstrap.isStaleSubagentHook(null), false);
+});
+
+test('checkSubagentHookStale: ok on the real plugin scripts/subagent-stop.js', () => {
+  const pluginRoot = path.resolve(__dirname, '..');
+  const result = bootstrap.checkSubagentHookStale(pluginRoot);
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, undefined);
+});
+
+test('checkSubagentHookStale: not ok when subagent-stop.js is the stale fixture', () => {
+  withTmpDir(tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    fs.mkdirSync(path.join(pluginRoot, 'scripts'), { recursive: true });
+    const staleContents = fs.readFileSync(path.join(__dirname, 'fixtures', 'stale-subagent-stop.js'), 'utf8');
+    fs.writeFileSync(path.join(pluginRoot, 'scripts', 'subagent-stop.js'), staleContents);
+
+    const result = bootstrap.checkSubagentHookStale(pluginRoot);
+    assert.equal(result.ok, false);
+  });
+});
+
+test('checkSubagentHookStale: skipped when pluginRoot unset or file unreadable', () => {
+  assert.equal(bootstrap.checkSubagentHookStale(undefined).skipped, true);
+  withTmpDir(tmpDir => {
+    const result = bootstrap.checkSubagentHookStale(tmpDir); // no scripts/subagent-stop.js
+    assert.equal(result.skipped, true);
+  });
+});
+
+test('bootstrap: warns when subagent-stop.js is stale, still exits ok (fail-open)', async () => {
+  await withTmpDir(async tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    buildPluginRoot(pluginRoot, { scripts: ['bootstrap.js'] });
+    const staleContents = fs.readFileSync(path.join(__dirname, 'fixtures', 'stale-subagent-stop.js'), 'utf8');
+    fs.writeFileSync(path.join(pluginRoot, 'scripts', 'subagent-stop.js'), staleContents);
+    fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
+    writeExecutable(path.join(pluginData, 'bin', 'ouroboros'));
+    const configDir = path.join(tmpDir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+
+    const result = await bootstrap.bootstrap({ CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PLUGIN_DATA: pluginData, CLAUDE_CONFIG_DIR: configDir });
+    assert.equal(result.subagentHook.ok, false);
+  });
+});
+
+test('bootstrap: no warning when subagent-stop.js is clean', async () => {
+  await withTmpDir(async tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    buildPluginRoot(pluginRoot, { scripts: ['bootstrap.js'] });
+    fs.writeFileSync(
+      path.join(pluginRoot, 'scripts', 'subagent-stop.js'),
+      fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'subagent-stop.js'), 'utf8')
+    );
+    fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
+    writeExecutable(path.join(pluginData, 'bin', 'ouroboros'));
+    const configDir = path.join(tmpDir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+
+    const result = await bootstrap.bootstrap({ CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PLUGIN_DATA: pluginData, CLAUDE_CONFIG_DIR: configDir });
+    assert.equal(result.subagentHook.ok, true);
+  });
+});
+
+test('CLI: warns to stderr on stale subagent-stop.js fixture, still exits 0', () => {
+  withTmpDir(tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    buildPluginRoot(pluginRoot, { scripts: ['bootstrap.js'] });
+    const staleContents = fs.readFileSync(path.join(__dirname, 'fixtures', 'stale-subagent-stop.js'), 'utf8');
+    fs.writeFileSync(path.join(pluginRoot, 'scripts', 'subagent-stop.js'), staleContents);
+    fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
+    writeExecutable(path.join(pluginData, 'bin', 'ouroboros'));
+    const configDir = path.join(tmpDir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+
+    const result = spawnSync('node', [scriptPath], {
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PLUGIN_DATA: pluginData, CLAUDE_CONFIG_DIR: configDir },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stderr, /STALE subagent-stop\.js detected/);
+  });
+});
+
 // --- bootstrap() orchestration (in-process) -----------------------------------
 
 test('bootstrap: binary + scripts + statusline all present -> no repair triggered', async () => {
