@@ -84,7 +84,7 @@ func ImportJSON(db *sql.DB, defaultProject string, data []byte) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	if err := store.RebuildFTS(db); err != nil {
+	if err := rebuildFTS(db); err != nil {
 		return fmt.Errorf("failed to rebuild FTS: %w", err)
 	}
 

@@ -45,7 +45,7 @@ func runLSPlans(out io.Writer, db *sql.DB, projectName, status string, asJSON bo
 		if project == nil {
 			// No match; print empty results
 			if asJSON {
-				return printJSON(out, []backlog.Plan{})
+				return printJSON(out, []backlog.PlanSummary{})
 			}
 			return printTable(out, []string{"ID", "STATUS", "PROJECT", "TITLE"}, [][]string{})
 		}

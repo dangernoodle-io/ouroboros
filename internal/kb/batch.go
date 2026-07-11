@@ -10,6 +10,11 @@ import (
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
+// rebuildFTS is a test seam over store.RebuildFTS: tests swap this for a
+// counter to assert a batch call rebuilds the FTS index exactly once, not
+// once per row (mirrors the backupCommitFn seam in internal/app).
+var rebuildFTS = store.RebuildFTS
+
 // validateEntries validates every create/upsert entry, returning the first
 // validation failure (index-annotated). No DB interaction.
 func validateEntries(entries []Entry, projectFlag string) error {
@@ -197,7 +202,7 @@ func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, e
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	if err := store.RebuildFTS(db); err != nil {
+	if err := rebuildFTS(db); err != nil {
 		return nil, fmt.Errorf("failed to rebuild FTS: %w", err)
 	}
 
@@ -238,7 +243,7 @@ func UpdateBatch(db *sql.DB, updates []EntryUpdate) ([]PutResult, error) {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	if err := store.RebuildFTS(db); err != nil {
+	if err := rebuildFTS(db); err != nil {
 		return nil, fmt.Errorf("failed to rebuild FTS: %w", err)
 	}
 
@@ -283,7 +288,7 @@ func WriteAndUpdateBatch(db *sql.DB, entries []Entry, updates []EntryUpdate, pro
 		return nil, nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	if err := store.RebuildFTS(db); err != nil {
+	if err := rebuildFTS(db); err != nil {
 		return nil, nil, fmt.Errorf("failed to rebuild FTS: %w", err)
 	}
 

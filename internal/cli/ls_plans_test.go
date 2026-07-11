@@ -45,12 +45,13 @@ func TestLSPlansListJSON(t *testing.T) {
 	err = runLSPlans(&buf, db, "", "", true)
 	require.NoError(t, err)
 
-	var plans []backlog.Plan
+	var plans []backlog.PlanSummary
 	err = json.Unmarshal(buf.Bytes(), &plans)
 	require.NoError(t, err)
 	require.Len(t, plans, 1)
 	assert.Equal(t, "Q1 planning", plans[0].Title)
 	assert.Equal(t, "draft", plans[0].Status)
+	assert.NotContains(t, buf.String(), "Plan content", "list mode must not dump plan content")
 }
 
 func TestLSPlansProjectFilter(t *testing.T) {
