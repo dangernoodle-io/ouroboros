@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strconv"
 
@@ -11,17 +10,18 @@ import (
 	"dangernoodle.io/ouroboros/internal/kb"
 )
 
-// errKBEntriesRequired is the verbatim message handleKB's empty-entries
-// check returns (handlers_kb.go:21-23) for both an omitted entries key and
+// errKBEntriesRequired is the verbatim message the old kb write handler's
+// empty-entries check returned for both an omitted entries key and
 // an empty entries[] array (see kbInput.Entries's comment).
 const errKBEntriesRequired = "entries array is required (batch-only mode)"
 
-// handleKBV2 is the mcpkit-typed counterpart to handleKB: splits entries[]
-// on id presence (create/natural-key-upsert vs id-addressed partial update)
-// and delegates the whole batch to kb.WriteAndUpdateBatch for the atomic
-// single-tx write + [[Title]] autolink + FTS rebuild (see internal/kb/batch.go
-// -- not reimplemented here).
-func handleKBV2(db *sql.DB) mcpx.Handler[kbInput, any] {
+// handleKBV2 splits entries[] on id presence (create/natural-key-upsert vs
+// id-addressed partial update) and delegates the whole batch to
+// kb.WriteAndUpdateBatch for the atomic single-tx write + [[Title]] autolink
+// + FTS rebuild (see internal/kb/batch.go -- not reimplemented here). st.db
+// is read at call time (not at construction time) — see serverState's doc
+// comment.
+func handleKBV2(st *serverState) mcpx.Handler[kbInput, any] {
 	return func(_ context.Context, _ *mcpx.CallToolRequest, in kbInput) (*mcpx.CallToolResult, any, error) {
 		if len(in.Entries) == 0 {
 			return mcpx.ErrorResult(errKBEntriesRequired), nil, nil
@@ -32,9 +32,9 @@ func handleKBV2(db *sql.DB) mcpx.Handler[kbInput, any] {
 		for _, e := range in.Entries {
 			id, present, err := parseKBIDV2(e.ID)
 			if err != nil {
-				// Abort the whole call before any DB write -- matches
-				// handlers_kb.go:34-37 (the create/update slices built so
-				// far are never passed to kb.WriteAndUpdateBatch).
+				// Abort the whole call before any DB write -- the
+				// create/update slices built so far are never passed to
+				// kb.WriteAndUpdateBatch.
 				return mcpx.ErrorResult(err.Error()), nil, nil
 			}
 			if !present {
@@ -44,7 +44,7 @@ func handleKBV2(db *sql.DB) mcpx.Handler[kbInput, any] {
 			updates = append(updates, kbEntryUpdateV2(id, e))
 		}
 
-		createResults, updateResults, err := kb.WriteAndUpdateBatch(db, creates, updates, "")
+		createResults, updateResults, err := kb.WriteAndUpdateBatch(st.db, creates, updates, "")
 		if err != nil {
 			return mcpx.ErrorResult(err.Error()), nil, nil
 		}

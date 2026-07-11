@@ -6,17 +6,111 @@
       },
       "description": "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. Reads live under get/search domain=backlog.",
       "inputSchema": {
+        "additionalProperties": false,
         "properties": {
           "delete_ids": {
             "description": "Item IDs to delete",
-            "type": "array"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "entries": {
             "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent",
-            "type": "array"
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "component": {
+                  "description": "Single-valued component tag",
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "description": {
+                  "description": "Max 500 chars; put narrative in notes",
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "edges": {
+                  "description": "Inline edges to create from this item: [{label,target}], label: blocks|relates|explains, target: item id",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "target": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "epic": {
+                  "description": "Epic backlog item id, single-valued; may be \"$N\", a back-reference to entries[N] earlier in this same write",
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "id": {
+                  "description": "Item id to update in place; omit to create",
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "notes": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "priority": {
+                  "description": "P0-P6",
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "project": {
+                  "description": "Project name (create only)",
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "status": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
-        "required": [],
         "type": "object"
       },
       "name": "backlog"
@@ -27,6 +121,7 @@
       },
       "description": "Fetch entries by ID or filters (required domain: kb|backlog|roadmap). ids[] returns exact matches; omit ids for a filtered list.",
       "inputSchema": {
+        "additionalProperties": false,
         "properties": {
           "by": {
             "description": "Grouping axis: \"component\" (default) or \"epic\"; the other axis renders as an inline chip (roadmap get format=md|html only)",
@@ -37,7 +132,10 @@
             "items": {
               "type": "string"
             },
-            "type": "array"
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "component": {
             "description": "Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)",
@@ -61,11 +159,15 @@
           },
           "ids": {
             "description": "IDs to fetch (kb: document IDs, backlog: item IDs)",
-            "type": "array"
+            "items": true,
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "limit": {
             "description": "Limit, default 10, max 500",
-            "type": "number"
+            "type": "integer"
           },
           "priority_max": {
             "description": "Max priority P0-P6 (backlog only)",
@@ -77,7 +179,13 @@
           },
           "projects": {
             "description": "Filter by project names",
-            "type": "array"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "query": {
             "description": "Full-text search (kb only)",
@@ -97,23 +205,29 @@
           },
           "tags": {
             "description": "Filter by tags, all match (kb only)",
-            "type": "array"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "types": {
             "description": "Filter by types (kb only)",
             "items": {
               "type": "string"
             },
-            "type": "array"
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "verbose": {
             "description": "Include notes on ids[] fetch only, default false; filter/list results are always compact regardless",
             "type": "boolean"
           }
         },
-        "required": [
-          "domain"
-        ],
         "type": "object"
       },
       "name": "get"
@@ -124,15 +238,79 @@
       },
       "description": "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb.",
       "inputSchema": {
+        "additionalProperties": false,
         "properties": {
           "entries": {
             "description": "Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?. content max 500 chars; put narrative in notes",
-            "type": "array"
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "category": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "content": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "id": {
+                  "description": "Document id (integer or numeric string) to update in place; omit to create/upsert by type+project+category+title"
+                },
+                "metadata": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
+                "notes": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "project": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "tags": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "type": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
-        "required": [
-          "entries"
-        ],
         "type": "object"
       },
       "name": "kb"
@@ -143,30 +321,70 @@
       },
       "description": "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done sections) via op=add|update|move|reorder|done|remove. Items carry two single-valued grouping axes: component (structural) and epic (optional; an epic IS a backlog item). Reads live under get/search domain=roadmap.",
       "inputSchema": {
+        "additionalProperties": false,
         "properties": {
           "blocked_by": {
             "description": "Cross-project blockers: {project,ref,note} (add/update)",
-            "type": "array"
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "note": {
+                  "description": "Optional note",
+                  "type": "string"
+                },
+                "project": {
+                  "description": "Blocking project name",
+                  "type": "string"
+                },
+                "ref": {
+                  "description": "Blocking item/ticket ref",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "body": {
             "description": "Item body (add/update)",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "component": {
             "description": "Component tag, single-valued (add/update)",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "epic": {
             "description": "Epic backlog item id, single-valued (add/update)",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "id": {
             "description": "Item ID (update/move/reorder/done/remove)",
-            "type": "number"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "kb": {
             "description": "Related KB doc IDs (add/update)",
-            "type": "array"
+            "items": {
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "op": {
             "description": "Required: \"add\", \"update\", \"move\", \"reorder\", \"done\", or \"remove\"",
@@ -174,7 +392,10 @@
           },
           "position": {
             "description": "Sort position within the section (add/move/reorder; required for reorder)",
-            "type": "number"
+            "type": [
+              "null",
+              "number"
+            ]
           },
           "project": {
             "description": "Project name (roadmap singleton)",
@@ -182,7 +403,10 @@
           },
           "resume_trigger": {
             "description": "Resume trigger (add/update)",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "section": {
             "description": "now|next|deferred|parked|dropped|done (add only)",
@@ -190,11 +414,20 @@
           },
           "ticket": {
             "description": "Ticket refs (add/update)",
-            "type": "array"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "title": {
             "description": "Item title (add/update)",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "to": {
             "description": "now|next|deferred|parked|dropped|done (move only)",
@@ -202,13 +435,12 @@
           },
           "why": {
             "description": "Why parked (add/update)",
-            "type": "string"
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
-        "required": [
-          "op",
-          "project"
-        ],
         "type": "object"
       },
       "name": "roadmap"
@@ -219,13 +451,17 @@
       },
       "description": "Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes).",
       "inputSchema": {
+        "additionalProperties": false,
         "properties": {
           "categories": {
             "description": "Filter by categories (kb only)",
             "items": {
               "type": "string"
             },
-            "type": "array"
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "component": {
             "description": "Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)",
@@ -245,7 +481,7 @@
           },
           "limit": {
             "description": "Limit, default 10, max 500",
-            "type": "number"
+            "type": "integer"
           },
           "priority_max": {
             "description": "Max priority P0-P6 (backlog only)",
@@ -257,11 +493,23 @@
           },
           "projects": {
             "description": "Filter by project names",
-            "type": "array"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "queries": {
             "description": "Batch queries sharing filters, kb only; response is positional [[...], [...]]",
-            "type": "array"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "query": {
             "description": "Single query",
@@ -284,12 +532,12 @@
             "items": {
               "type": "string"
             },
-            "type": "array"
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
-        "required": [
-          "domain"
-        ],
         "type": "object"
       },
       "name": "search"

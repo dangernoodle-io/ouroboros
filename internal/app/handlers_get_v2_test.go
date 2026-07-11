@@ -16,7 +16,7 @@ import (
 
 func callGetV2(t *testing.T, in getInput) *mcpx.CallToolResult {
 	t.Helper()
-	res, out, err := handleGetV2(db)(context.TODO(), &mcpx.CallToolRequest{}, in)
+	res, out, err := handleGetV2(&serverState{db: db})(context.TODO(), &mcpx.CallToolRequest{}, in)
 	require.NoError(t, err)
 	require.Nil(t, out)
 	return res

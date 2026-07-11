@@ -11,19 +11,20 @@ import (
 	"dangernoodle.io/ouroboros/internal/edges"
 )
 
-// errBacklogEntriesOrDeleteIDsRequired is the verbatim message handleBacklog
-// returns (handlers_backlog.go:340) when neither delete_ids nor entries is
+// errBacklogEntriesOrDeleteIDsRequired is the verbatim message the old
+// backlog write handler returned when neither delete_ids nor entries was
 // present -- reproduced here since backlogInput schema-declares both
 // omitempty (see backlogInput's comment).
 const errBacklogEntriesOrDeleteIDsRequired = "delete_ids or entries is required"
 
-// handleBacklogV2 is the mcpkit-typed counterpart to handleBacklog. delete_ids
-// takes PRIORITY over entries (matching handleBacklog's dispatch order); the
-// entries[] batch reuses handleBacklogEntriesV2's single-transaction write.
-func handleBacklogV2(db *sql.DB) mcpx.Handler[backlogInput, any] {
+// handleBacklogV2 is the backlog write tool handler. delete_ids takes
+// PRIORITY over entries; the entries[] batch reuses
+// handleBacklogEntriesV2's single-transaction write. st.db is read at call
+// time (not at construction time) — see serverState's doc comment.
+func handleBacklogV2(st *serverState) mcpx.Handler[backlogInput, any] {
 	return func(_ context.Context, _ *mcpx.CallToolRequest, in backlogInput) (*mcpx.CallToolResult, any, error) {
 		if len(in.DeleteIDs) > 0 {
-			affected, err := backlog.DeleteItems(db, in.DeleteIDs)
+			affected, err := backlog.DeleteItems(st.db, in.DeleteIDs)
 			if err != nil {
 				return mcpx.ErrorResult(err.Error()), nil, nil
 			}
@@ -33,7 +34,7 @@ func handleBacklogV2(db *sql.DB) mcpx.Handler[backlogInput, any] {
 		}
 
 		if len(in.Entries) > 0 {
-			return handleBacklogEntriesV2(db, in.Entries)
+			return handleBacklogEntriesV2(st.db, in.Entries)
 		}
 
 		return mcpx.ErrorResult(errBacklogEntriesOrDeleteIDsRequired), nil, nil

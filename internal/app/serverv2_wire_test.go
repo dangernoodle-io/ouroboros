@@ -29,7 +29,7 @@ import (
 func TestWireGetV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -44,7 +44,7 @@ func TestWireGetV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
 func TestWireSearchV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -62,7 +62,7 @@ func TestWireSearchV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
 func TestWireKBV2_OmittedEntries_ReturnsVerbatimMessage(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -84,7 +84,7 @@ func TestWireKBV2_OmittedEntries_ReturnsVerbatimMessage(t *testing.T) {
 func TestWireKBV2_Create_RoundTripsThroughRealCodec(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -115,7 +115,7 @@ func TestWireKBV2_Create_RoundTripsThroughRealCodec(t *testing.T) {
 func TestWireKBV2_UpdateByNumericID_RoundTripsThroughRealCodec(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -160,7 +160,7 @@ func TestWireKBV2_UpdateByNumericID_RoundTripsThroughRealCodec(t *testing.T) {
 func TestWireKBV2_UpdateByStringID_RoundTripsThroughRealCodec(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -208,7 +208,7 @@ func TestWireKBV2_UpdateByStringID_RoundTripsThroughRealCodec(t *testing.T) {
 func TestWireBacklogV2_BothOmitted_ReturnsVerbatimMessage(t *testing.T) {
 	resetAllDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -229,7 +229,7 @@ func TestWireBacklogV2_Create_RoundTripsThroughRealCodec(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -263,7 +263,7 @@ func TestWireBacklogV2_EpicBackrefSameBatchCreate_RoundTripsThroughRealCodec(t *
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -306,7 +306,7 @@ func TestWireBacklogV2_EdgeMissingLabel_ReturnsVerbatimMessage(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -336,7 +336,7 @@ func TestWireBacklogV2_EdgeInvalidLabel_ReturnsVerbatimMessage(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -369,7 +369,7 @@ func TestWireBacklogV2_ComponentNotScalar_Errors(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -396,7 +396,7 @@ func TestWireBacklogV2_ComponentNotScalar_Errors(t *testing.T) {
 func TestWireRoadmapV2_OmittedOp_ReturnsVerbatimMessage(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -413,7 +413,7 @@ func TestWireRoadmapV2_OmittedOp_ReturnsVerbatimMessage(t *testing.T) {
 func TestWireRoadmapV2_OmittedProject_ReturnsVerbatimMessage(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -431,7 +431,7 @@ func TestWireRoadmapV2_OmittedProject_ReturnsVerbatimMessage(t *testing.T) {
 func TestWireRoadmapV2_Add_RoundTripsThroughRealCodec(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -456,7 +456,7 @@ func TestWireRoadmapV2_Add_RoundTripsThroughRealCodec(t *testing.T) {
 func TestWireRoadmapV2_UpdatePresentEmpty_ClearsField(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -490,7 +490,7 @@ func TestWireRoadmapV2_UpdatePresentEmpty_ClearsField(t *testing.T) {
 func TestWireRoadmapV2_UpdateEmptyArray_ClearsKB(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -524,7 +524,7 @@ func TestWireRoadmapV2_UpdateEmptyArray_ClearsKB(t *testing.T) {
 func TestWireRoadmapV2_UpdateNullKB_LeavesUnchanged(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -558,7 +558,7 @@ func TestWireRoadmapV2_UpdateNullKB_LeavesUnchanged(t *testing.T) {
 func TestWireV2_ServerInstructions_AdvertisedAtInitialize(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	serverT, clientT := mcpx.InMemoryPair()
@@ -585,7 +585,7 @@ func TestWireV2_ServerInstructions_AdvertisedAtInitialize(t *testing.T) {
 func TestWireV2_ToolAnnotations_MatchOldServerMapping(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
@@ -621,7 +621,7 @@ func TestWireV2_ToolAnnotations_MatchOldServerMapping(t *testing.T) {
 func TestWireRoadmapV2_ComponentNotScalar_Errors(t *testing.T) {
 	resetDB(t)
 
-	app, err := buildServerV2(db, "test")
+	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)

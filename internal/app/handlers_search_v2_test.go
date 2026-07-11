@@ -31,7 +31,7 @@ func brokenFTSDB(t *testing.T) *sql.DB {
 
 func callSearchV2(t *testing.T, in searchInput) *mcpx.CallToolResult {
 	t.Helper()
-	res, out, err := handleSearchV2(db)(context.TODO(), &mcpx.CallToolRequest{}, in)
+	res, out, err := handleSearchV2(&serverState{db: db})(context.TODO(), &mcpx.CallToolRequest{}, in)
 	require.NoError(t, err)
 	require.Nil(t, out)
 	return res
@@ -231,7 +231,7 @@ func TestHandleSearchV2_DomainKB_WithLimit(t *testing.T) {
 // error path a broken FTS index triggers, for the single-query branch.
 func TestHandleSearchV2_DomainKB_SingleQueryError(t *testing.T) {
 	bdb := brokenFTSDB(t)
-	res, out, err := handleSearchV2(bdb)(context.TODO(), &mcpx.CallToolRequest{}, searchInput{Domain: "kb", Query: "widget"})
+	res, out, err := handleSearchV2(&serverState{db: bdb})(context.TODO(), &mcpx.CallToolRequest{}, searchInput{Domain: "kb", Query: "widget"})
 	require.NoError(t, err)
 	require.Nil(t, out)
 	assert.True(t, res.IsError)
@@ -241,7 +241,7 @@ func TestHandleSearchV2_DomainKB_SingleQueryError(t *testing.T) {
 // for the queries[] batch branch.
 func TestHandleSearchV2_DomainKB_QueriesBatchError(t *testing.T) {
 	bdb := brokenFTSDB(t)
-	res, out, err := handleSearchV2(bdb)(context.TODO(), &mcpx.CallToolRequest{}, searchInput{Domain: "kb", Queries: []string{"widget"}})
+	res, out, err := handleSearchV2(&serverState{db: bdb})(context.TODO(), &mcpx.CallToolRequest{}, searchInput{Domain: "kb", Queries: []string{"widget"}})
 	require.NoError(t, err)
 	require.Nil(t, out)
 	assert.True(t, res.IsError)
@@ -250,7 +250,7 @@ func TestHandleSearchV2_DomainKB_QueriesBatchError(t *testing.T) {
 // TestHandleSearchV2_DomainRoadmap_Error mirrors TestHandleSearch_DomainRoadmap_Error.
 func TestHandleSearchV2_DomainRoadmap_Error(t *testing.T) {
 	bdb := brokenFTSDB(t)
-	res, out, err := handleSearchV2(bdb)(context.TODO(), &mcpx.CallToolRequest{}, searchInput{Domain: "roadmap", Query: "widget"})
+	res, out, err := handleSearchV2(&serverState{db: bdb})(context.TODO(), &mcpx.CallToolRequest{}, searchInput{Domain: "roadmap", Query: "widget"})
 	require.NoError(t, err)
 	require.Nil(t, out)
 	assert.True(t, res.IsError)

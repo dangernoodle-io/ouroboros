@@ -34,7 +34,7 @@ func TestHandleRoadmapV2_Add(t *testing.T) {
 		BlockedBy:     &[]blockerInput{{Project: "other-repo", Ref: "OR-9", Note: "waiting"}},
 	}
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, in)
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, in)
 	require.NoError(t, err)
 	require.False(t, res.IsError)
 
@@ -59,7 +59,7 @@ func TestHandleRoadmapV2_Add(t *testing.T) {
 func TestHandleRoadmapV2_Add_InvalidSection(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "bogus", Title: strPtrV2("x"),
 	})
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestHandleRoadmapV2_Add_InvalidSection(t *testing.T) {
 func TestHandleRoadmapV2_Add_BlockedByMissingProject(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("x"),
 		BlockedBy: &[]blockerInput{{Project: "", Ref: "OR-9"}},
 	})
@@ -85,7 +85,7 @@ func TestHandleRoadmapV2_Add_BlockedByMissingProject(t *testing.T) {
 func TestHandleRoadmapV2_Add_BlockedByMissingRef(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("x"),
 		BlockedBy: &[]blockerInput{{Project: "other-repo", Ref: ""}},
 	})
@@ -99,12 +99,12 @@ func TestHandleRoadmapV2_Add_BlockedByMissingRef(t *testing.T) {
 func TestHandleRoadmapV2_Update_BlockedByMissingProject(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("x"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "update", Project: "acme-corp", ID: intPtrV2(1),
 		BlockedBy: &[]blockerInput{{Project: "", Ref: "OR-9"}},
 	})
@@ -117,12 +117,12 @@ func TestHandleRoadmapV2_Update_BlockedByMissingProject(t *testing.T) {
 func TestHandleRoadmapV2_Update(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("Original"), Body: strPtrV2("orig body"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "update", Project: "acme-corp", ID: intPtrV2(1), Title: strPtrV2("Updated title"),
 	})
 	require.NoError(t, err)
@@ -139,12 +139,12 @@ func TestHandleRoadmapV2_Update(t *testing.T) {
 func TestHandleRoadmapV2_Update_SliceFields(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("Original"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "update", Project: "acme-corp", ID: intPtrV2(1),
 		KB:        &[]int{7},
 		Ticket:    &[]string{"TK-9"},
@@ -170,7 +170,7 @@ func TestHandleRoadmapV2_Update_SliceFields(t *testing.T) {
 func TestHandleRoadmapV2_Update_ClearFields(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("Original"),
 		Body:      strPtrV2("orig body"),
 		Component: strPtrV2("widget"),
@@ -179,7 +179,7 @@ func TestHandleRoadmapV2_Update_ClearFields(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "update", Project: "acme-corp", ID: intPtrV2(1),
 		Body:      strPtrV2(""),
 		Component: strPtrV2(""),
@@ -204,7 +204,7 @@ func TestHandleRoadmapV2_Update_ClearFields(t *testing.T) {
 func TestHandleRoadmapV2_Update_NotFound(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "update", Project: "acme-corp", ID: intPtrV2(999), Title: strPtrV2("x"),
 	})
 	require.NoError(t, err)
@@ -215,12 +215,12 @@ func TestHandleRoadmapV2_Update_NotFound(t *testing.T) {
 func TestHandleRoadmapV2_Move(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("Move me"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "move", Project: "acme-corp", ID: intPtrV2(1), To: "parked",
 	})
 	require.NoError(t, err)
@@ -240,12 +240,12 @@ func TestHandleRoadmapV2_Move(t *testing.T) {
 func TestHandleRoadmapV2_Move_InvalidSection(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("x"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "move", Project: "acme-corp", ID: intPtrV2(1), To: "bogus",
 	})
 	require.NoError(t, err)
@@ -256,12 +256,12 @@ func TestHandleRoadmapV2_Move_InvalidSection(t *testing.T) {
 func TestHandleRoadmapV2_Move_WithPosition(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("Move me"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "move", Project: "acme-corp", ID: intPtrV2(1), To: "deferred", Position: float64PtrV2(6),
 	})
 	require.NoError(t, err)
@@ -277,7 +277,7 @@ func TestHandleRoadmapV2_Move_WithPosition(t *testing.T) {
 func TestHandleRoadmapV2_Move_NotFound(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "move", Project: "acme-corp", ID: intPtrV2(9999), To: "parked",
 	})
 	require.NoError(t, err)
@@ -288,12 +288,12 @@ func TestHandleRoadmapV2_Move_NotFound(t *testing.T) {
 func TestHandleRoadmapV2_Done(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("Finish me"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "done", Project: "acme-corp", ID: intPtrV2(1),
 	})
 	require.NoError(t, err)
@@ -308,7 +308,7 @@ func TestHandleRoadmapV2_Done(t *testing.T) {
 func TestHandleRoadmapV2_Done_NotFound(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "done", Project: "acme-corp", ID: intPtrV2(9999),
 	})
 	require.NoError(t, err)
@@ -319,12 +319,12 @@ func TestHandleRoadmapV2_Done_NotFound(t *testing.T) {
 func TestHandleRoadmapV2_Remove(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("Delete me"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "remove", Project: "acme-corp", ID: intPtrV2(1),
 	})
 	require.NoError(t, err)
@@ -342,7 +342,7 @@ func TestHandleRoadmapV2_Remove(t *testing.T) {
 func TestHandleRoadmapV2_Remove_NotFound(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "remove", Project: "acme-corp", ID: intPtrV2(9999),
 	})
 	require.NoError(t, err)
@@ -353,7 +353,7 @@ func TestHandleRoadmapV2_Remove_NotFound(t *testing.T) {
 func TestHandleRoadmapV2_MissingProject_Errors(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Section: "now", Title: strPtrV2("x"),
 	})
 	require.NoError(t, err)
@@ -365,7 +365,7 @@ func TestHandleRoadmapV2_MissingProject_Errors(t *testing.T) {
 func TestHandleRoadmapV2_InvalidOp_Errors(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "bogus", Project: "acme-corp",
 	})
 	require.NoError(t, err)
@@ -378,7 +378,7 @@ func TestHandleRoadmapV2_MissingID_Errors(t *testing.T) {
 	resetDB(t)
 
 	for _, op := range []string{"update", "move", "done", "remove"} {
-		res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+		res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 			Op: op, Project: "acme-corp",
 		})
 		require.NoError(t, err)
@@ -392,7 +392,7 @@ func TestHandleRoadmapV2_Singleton(t *testing.T) {
 	resetDB(t)
 
 	for i := 0; i < 2; i++ {
-		_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+		_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 			Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("item"),
 		})
 		require.NoError(t, err)
@@ -416,7 +416,7 @@ func TestHandleRoadmapV2_Add_MutateError(t *testing.T) {
 	_, err = brokenDB.Exec("DROP TABLE documents")
 	require.NoError(t, err)
 
-	res, _, callErr := handleRoadmapV2(brokenDB)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, callErr := handleRoadmapV2(&serverState{db: brokenDB})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("x"),
 	})
 	require.NoError(t, callErr)
@@ -427,16 +427,16 @@ func TestHandleRoadmapV2_Add_MutateError(t *testing.T) {
 func TestHandleRoadmapV2_Reorder(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("stays first"),
 	})
 	require.NoError(t, err)
-	_, _, err = handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err = handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("reorder me"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "reorder", Project: "acme-corp", ID: intPtrV2(2), Position: float64PtrV2(4),
 	})
 	require.NoError(t, err)
@@ -456,12 +456,12 @@ func TestHandleRoadmapV2_Reorder(t *testing.T) {
 func TestHandleRoadmapV2_Reorder_MissingPosition(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("x"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "reorder", Project: "acme-corp", ID: intPtrV2(1),
 	})
 	require.NoError(t, err)
@@ -473,7 +473,7 @@ func TestHandleRoadmapV2_Reorder_MissingPosition(t *testing.T) {
 func TestHandleRoadmapV2_Reorder_MissingID(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "reorder", Project: "acme-corp", Position: float64PtrV2(1),
 	})
 	require.NoError(t, err)
@@ -485,7 +485,7 @@ func TestHandleRoadmapV2_Reorder_MissingID(t *testing.T) {
 func TestHandleRoadmapV2_Reorder_NotFound(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "reorder", Project: "acme-corp", ID: intPtrV2(9999), Position: float64PtrV2(1),
 	})
 	require.NoError(t, err)
@@ -496,12 +496,12 @@ func TestHandleRoadmapV2_Reorder_NotFound(t *testing.T) {
 func TestHandleRoadmapV2_Add_EpicAndPosition(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("existing"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("x"),
 		Epic: strPtrV2("BB-707"), Position: float64PtrV2(0),
 	})
@@ -523,12 +523,12 @@ func TestHandleRoadmapV2_Add_EpicAndPosition(t *testing.T) {
 func TestHandleRoadmapV2_Add_NoPosition_AppendsLast(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("first"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("second"),
 	})
 	require.NoError(t, err)
@@ -546,12 +546,12 @@ func TestHandleRoadmapV2_Add_NoPosition_AppendsLast(t *testing.T) {
 func TestHandleRoadmapV2_Update_Epic(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	_, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "add", Project: "acme-corp", Section: "now", Title: strPtrV2("x"),
 	})
 	require.NoError(t, err)
 
-	res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+	res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 		Op: "update", Project: "acme-corp", ID: intPtrV2(1), Epic: strPtrV2("BB-707"),
 	})
 	require.NoError(t, err)
@@ -569,7 +569,7 @@ func TestHandleRoadmapV2_Add_DeferredAndDropped(t *testing.T) {
 	resetDB(t)
 
 	for _, section := range []string{"deferred", "dropped"} {
-		res, _, err := handleRoadmapV2(db)(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
+		res, _, err := handleRoadmapV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, roadmapInput{
 			Op: "add", Project: "acme-corp", Section: section, Title: strPtrV2("item " + section),
 		})
 		require.NoError(t, err)
