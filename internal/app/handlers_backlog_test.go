@@ -712,6 +712,258 @@ func TestHandleBacklogBatchCreateSequentialIDs(t *testing.T) {
 	assert.Equal(t, "AC-2", resp[1]["id"])
 }
 
+// ============ $N intra-batch epic back-reference tests ============
+
+// TestHandleBacklogBatchEpicBackref_SameBatchCreate verifies a batch that
+// creates an epic and, in the same write, creates children pointing at it
+// via "$0" (the epic's own batch position) — the whole point of the
+// feature: children can reference a not-yet-created, server-assigned epic
+// id within one call.
+func TestHandleBacklogBatchEpicBackref_SameBatchCreate(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "EPIC: X",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "child 1",
+				"epic":     "$0",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "child 2",
+				"epic":     "$0",
+			},
+		},
+	})
+	result, err := handleBacklog(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resp []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	require.Len(t, resp, 3)
+	epicID, ok := resp[0]["id"].(string)
+	require.True(t, ok)
+	child1ID, ok := resp[1]["id"].(string)
+	require.True(t, ok)
+	child2ID, ok := resp[2]["id"].(string)
+	require.True(t, ok)
+
+	child1, err := backlog.GetItem(db, child1ID)
+	require.NoError(t, err)
+	assert.Equal(t, epicID, child1.Epic)
+
+	child2, err := backlog.GetItem(db, child2ID)
+	require.NoError(t, err)
+	assert.Equal(t, epicID, child2.Epic)
+}
+
+// TestHandleBacklogBatchEpicBackref_UpdateReparent verifies "$N" also
+// resolves in the update path: a pre-existing item (created out of band, in
+// an earlier call) gets re-parented onto a brand-new epic created earlier
+// in THIS same batch — the bottom-up "promote to epic" flow.
+func TestHandleBacklogBatchEpicBackref_UpdateReparent(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	existing, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "pre-existing task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "EPIC: Y",
+			},
+			map[string]interface{}{
+				"id":   existing.ID,
+				"epic": "$0",
+			},
+		},
+	})
+	result, err := handleBacklog(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resp []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	require.Len(t, resp, 2)
+	epicID, ok := resp[0]["id"].(string)
+	require.True(t, ok)
+
+	reparented, err := backlog.GetItem(db, existing.ID)
+	require.NoError(t, err)
+	assert.Equal(t, epicID, reparented.Epic)
+}
+
+// TestHandleBacklogBatchEpicBackref_ForwardRef_Errors verifies a forward
+// reference ("$1" pointing at a LATER entry) is rejected and the whole
+// batch rolls back, including entries that would otherwise have succeeded.
+func TestHandleBacklogBatchEpicBackref_ForwardRef_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "child (forward ref)",
+				"epic":     "$1",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "EPIC: later",
+			},
+		},
+	})
+	result, err := handleBacklog(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "must point to an earlier entry")
+
+	// Nothing persisted for the whole batch, including the epic entry that
+	// (in isolation) would have succeeded.
+	_, err = backlog.GetItem(db, "AC-1")
+	assert.Error(t, err)
+	_, err = backlog.GetItem(db, "AC-2")
+	assert.Error(t, err)
+}
+
+// TestHandleBacklogBatchEpicBackref_SelfRef_Errors verifies an entry can't
+// back-reference its own batch position.
+func TestHandleBacklogBatchEpicBackref_SelfRef_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "self-ref",
+				"epic":     "$0",
+			},
+		},
+	})
+	result, err := handleBacklog(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "must point to an earlier entry")
+}
+
+// TestHandleBacklogBatchEpicBackref_OutOfRange_Errors verifies a "$N"
+// referencing an index outside the batch is rejected.
+func TestHandleBacklogBatchEpicBackref_OutOfRange_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "EPIC: A",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "out of range ref",
+				"epic":     "$5",
+			},
+		},
+	})
+	result, err := handleBacklog(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "out of range")
+}
+
+// TestHandleBacklogBatchEpicBackref_Malformed_Errors verifies malformed "$N"
+// values ("$" with nothing after it, and non-numeric) are rejected.
+func TestHandleBacklogBatchEpicBackref_Malformed_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	for _, bad := range []string{"$", "$x"} {
+		req := makeRequest(map[string]interface{}{
+			"entries": []interface{}{
+				map[string]interface{}{
+					"project":  "acme-corp",
+					"priority": "P1",
+					"title":    "malformed ref " + bad,
+					"epic":     bad,
+				},
+			},
+		})
+		result, err := handleBacklog(db)(context.TODO(), req)
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		textContent, ok := mcp.AsTextContent(result.Content[0])
+		require.True(t, ok)
+		assert.Contains(t, textContent.Text, "invalid epic back-reference")
+	}
+}
+
+// TestHandleBacklogBatchEpicBackref_UnresolvedPosition_Errors verifies the
+// resolveEpicRef defensive guard: a "$N" that's in-range and precedes the
+// referencing entry, but whose target entry produced no item (e.g. a
+// malformed entry lacking both id and project/priority/title, which is
+// silently skipped rather than creating/updating anything), is rejected
+// rather than resolving to an empty/missing epic id.
+func TestHandleBacklogBatchEpicBackref_UnresolvedPosition_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{}, // malformed: no id, no project/priority/title — silently skipped
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "dangling ref",
+				"epic":     "$0",
+			},
+		},
+	})
+	result, err := handleBacklog(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, "refers to an entry that produced no item")
+}
+
 // TestHandleBacklogNoEntriesOrDeleteIDs_Errors verifies backlog rejects a call with neither
 // delete_ids nor entries — this is a write-only tool now, reads live under get/search.
 func TestHandleBacklogNoEntriesOrDeleteIDs_Errors(t *testing.T) {

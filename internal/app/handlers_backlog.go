@@ -85,6 +85,39 @@ func validateEpicTx(tx *sql.Tx, epic string) error {
 	return nil
 }
 
+// resolveEpicRef resolves a batch entry's raw epic value, substituting a
+// "$N" intra-batch back-reference with the item id posMap recorded for
+// entries[N] earlier in this same write — the whole point being that a
+// child can name its not-yet-created epic parent (server-assigned ids can't
+// be known in advance). N must strictly precede idx (parent-before-child;
+// rejects self/forward refs and, incidentally, one-entry cycles), and must
+// be in range. A non-"$"-prefixed value (including empty, i.e. "clear")
+// passes through unchanged. Called before validateEpicTx in both the
+// create and update paths so the substituted id gets the same existence
+// check as any ordinary epic reference.
+func resolveEpicRef(epic string, idx int, numEntries int, posMap map[int]string) (string, error) {
+	if !strings.HasPrefix(epic, "$") {
+		return epic, nil
+	}
+
+	n, err := strconv.Atoi(epic[1:])
+	if err != nil {
+		return "", fmt.Errorf("invalid epic back-reference %q: expected $N where N is an integer entry index", epic)
+	}
+	if n < 0 || n >= numEntries {
+		return "", fmt.Errorf("epic back-reference %q out of range: batch has %d entries", epic, numEntries)
+	}
+	if n >= idx {
+		return "", fmt.Errorf("epic back-reference %q must point to an earlier entry (index %d comes at or after this entry, index %d)", epic, n, idx)
+	}
+
+	id, ok := posMap[n]
+	if !ok {
+		return "", fmt.Errorf("epic back-reference %q refers to an entry that produced no item", epic)
+	}
+	return id, nil
+}
+
 // linkEdgesTx creates each spec as an item->item edge sourced from itemID,
 // on the given transaction so the edge links commit atomically with the
 // item write that produced them (see handleBacklog). Validates each
@@ -318,13 +351,19 @@ func handleBacklog(d *sql.DB) server.ToolHandlerFunc {
 func handleBacklogEntries(d *sql.DB, entries []map[string]interface{}) (*mcp.CallToolResult, error) {
 	results := make([]interface{}, 0, len(entries))
 
+	// posMap tracks, per batch position, the item id that position produced
+	// (create) or referred to (update) — populated as the loop runs so a
+	// later entry's "$N" epic value can back-reference an earlier one's
+	// server-assigned id (see resolveEpicRef).
+	posMap := make(map[int]string)
+
 	tx, err := d.Begin()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	for _, e := range entries {
+	for idx, e := range entries {
 		edgeSpecs, err := parseEdgeSpecs(e)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -332,7 +371,12 @@ func handleBacklogEntries(d *sql.DB, entries []map[string]interface{}) (*mcp.Cal
 
 		// Check if this is an update (has id) or create (no id)
 		if entryID, ok := e["id"].(string); ok && entryID != "" {
-			// Update mode
+			// Update mode. entryID is already known, so this position's
+			// item id resolves immediately (unlike create, where the id
+			// isn't assigned until AddItemTx runs below).
+			// posMap records this id even for a no-op update; validateEpicTx is the id-existence safety net for any later $N ref to it.
+			posMap[idx] = entryID
+
 			fields := make(map[string]string)
 			for _, key := range []string{"priority", "title", "description", "notes", "status"} {
 				if v, ok := e[key].(string); ok && v != "" {
@@ -353,6 +397,10 @@ func handleBacklogEntries(d *sql.DB, entries []map[string]interface{}) (*mcp.Cal
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			if epic != "" {
+				epic, err = resolveEpicRef(epic, idx, len(entries), posMap)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
 				fields["epic"] = epic
 			}
 
@@ -433,6 +481,12 @@ func handleBacklogEntries(d *sql.DB, entries []map[string]interface{}) (*mcp.Cal
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
+				if epic != "" {
+					epic, err = resolveEpicRef(epic, idx, len(entries), posMap)
+					if err != nil {
+						return mcp.NewToolResultError(err.Error()), nil
+					}
+				}
 
 				// The item create and its edges[] links participate in the
 				// batch's single shared tx — an error here aborts the whole
@@ -445,6 +499,7 @@ func handleBacklogEntries(d *sql.DB, entries []map[string]interface{}) (*mcp.Cal
 				if err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
 				}
+				posMap[idx] = item.ID
 
 				if err := linkEdgesTx(tx, item.ID, proj.ID, edgeSpecs); err != nil {
 					return mcp.NewToolResultError(err.Error()), nil
