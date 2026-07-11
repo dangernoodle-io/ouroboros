@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -108,7 +107,7 @@ func runLSItems(out io.Writer, db *sql.DB, projectName, status, priority, compon
 	if priority != "" {
 		// Parse priority: P0 -> 0, P6 -> 6
 		if len(priority) == 2 && priority[0] == 'P' {
-			if p, err := strconv.Atoi(string(priority[1])); err == nil && p >= 0 && p <= 6 {
+			if p, ok := backlog.ParsePriority(priority); ok && p >= 0 && p <= 6 {
 				filter.PriorityMin = &p
 				filter.PriorityMax = &p
 			}

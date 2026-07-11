@@ -4,19 +4,10 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	"dangernoodle.io/ouroboros/internal/store"
-	_ "modernc.org/sqlite"
+	"dangernoodle.io/ouroboros/internal/testutil"
 )
 
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	require.NoError(t, err)
-	_, err = db.Exec("PRAGMA foreign_keys=ON")
-	require.NoError(t, err)
-	require.NoError(t, store.ApplySchema(db))
-	t.Cleanup(func() { db.Close() })
-	return db
+	return testutil.TestDB(t)
 }

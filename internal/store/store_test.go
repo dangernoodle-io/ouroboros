@@ -9,15 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"dangernoodle.io/ouroboros/internal/store"
+	"dangernoodle.io/ouroboros/internal/testutil"
 )
 
 // testDB creates an in-memory database for testing.
 func testDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite", ":memory:")
-	require.NoError(t, err)
-	require.NoError(t, store.ApplySchema(db))
-	t.Cleanup(func() { db.Close() })
-	return db
+	return testutil.TestDB(t)
 }
 
 func TestUpsertAndGetDocument(t *testing.T) {

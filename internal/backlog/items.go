@@ -291,6 +291,22 @@ func EpicLabels(d *sql.DB, ids []string) map[string]string {
 	return labels
 }
 
+// BlockedEpicsFor resolves, for each epic id referenced by the roadmap,
+// whether that epic (itself a backlog item) is the target of an incoming
+// "blocks" edge — i.e. some other item blocks the epic's initiative. Used to
+// render a ⛔ marker on an epic-axis group header. A lookup failure for one
+// epic id is treated as "not blocked" rather than failing the whole render.
+func BlockedEpicsFor(d *sql.DB, epicIDs []string) map[string]bool {
+	blocked := make(map[string]bool, len(epicIDs))
+	for _, id := range epicIDs {
+		sources, err := edges.ItemsByEdge(d, edges.TypeItem, id, "blocks")
+		if err == nil && len(sources) > 0 {
+			blocked[id] = true
+		}
+	}
+	return blocked
+}
+
 // updateItemExec contains the core field-update logic, operating on any
 // Executor (db or tx). Callers own the transaction boundary (see UpdateItem
 // / UpdateItemTx).

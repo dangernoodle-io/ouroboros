@@ -10,16 +10,12 @@ import (
 
 	"dangernoodle.io/ouroboros/internal/kb"
 	"dangernoodle.io/ouroboros/internal/store"
+	"dangernoodle.io/ouroboros/internal/testutil"
 )
 
 func testDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite", ":memory:")
-	require.NoError(t, err)
-
-	err = store.ApplySchema(db)
-	require.NoError(t, err)
-
-	return db
+	t.Helper()
+	return testutil.TestDB(t)
 }
 
 func TestExportMarkdownEmpty(t *testing.T) {

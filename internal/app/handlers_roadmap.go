@@ -10,7 +10,6 @@ import (
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/backup"
-	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -394,26 +393,10 @@ func getRoadmap(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error
 		by := strArg(args, "by")
 		epicIDs := roadmap.EpicIDs(rm)
 		epicLabels := backlog.EpicLabels(db, epicIDs)
-		blockedEpics := blockedEpicsFor(db, epicIDs)
+		blockedEpics := backlog.BlockedEpicsFor(db, epicIDs)
 		return mcp.NewToolResultText(roadmap.RenderHTML(rm, by, epicLabels, blockedEpics)), nil
 	}
 	return jsonResult(rm)
-}
-
-// blockedEpicsFor resolves, for each epic id referenced by the roadmap,
-// whether that epic (itself a backlog item) is the target of an incoming
-// "blocks" edge — i.e. some other item blocks the epic's initiative. Used to
-// render a ⛔ marker on an epic-axis group header. A lookup failure for one
-// epic id is treated as "not blocked" rather than failing the whole render.
-func blockedEpicsFor(db *sql.DB, epicIDs []string) map[string]bool {
-	blocked := make(map[string]bool, len(epicIDs))
-	for _, id := range epicIDs {
-		sources, err := edges.ItemsByEdge(db, edges.TypeItem, id, "blocks")
-		if err == nil && len(sources) > 0 {
-			blocked[id] = true
-		}
-	}
-	return blocked
 }
 
 // searchRoadmap handles domain=roadmap search: FTS over documents type=roadmap,
