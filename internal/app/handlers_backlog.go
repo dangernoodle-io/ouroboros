@@ -24,7 +24,12 @@ func parsePriority(s string) (int, error) {
 	return n, nil
 }
 
-func resolveProject(d *sql.DB, name string) (*backlog.Project, error) {
+// resolveProject accepts backlog.Executor (not just *sql.DB) so a caller
+// already inside a shared transaction (e.g. the batch write in
+// handleBacklog) can resolve a project on that same connection — the store
+// enforces SetMaxOpenConns(1), so a second *sql.DB-level query while a tx
+// holds the only connection would deadlock.
+func resolveProject(d backlog.Executor, name string) (*backlog.Project, error) {
 	return backlog.GetProjectByName(d, name)
 }
 
@@ -296,162 +301,166 @@ func handleBacklog(d *sql.DB) server.ToolHandlerFunc {
 		// Check for entries[] batch write (mixed create/update)
 		entries := parseEntriesArray(req.GetArguments(), "entries")
 		if len(entries) > 0 {
-			results := make([]interface{}, 0, len(entries))
-
-			for _, e := range entries {
-				edgeSpecs, err := parseEdgeSpecs(e)
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-
-				// Check if this is an update (has id) or create (no id)
-				if entryID, ok := e["id"].(string); ok && entryID != "" {
-					// Update mode
-					fields := make(map[string]string)
-					for _, key := range []string{"priority", "title", "description", "notes", "status"} {
-						if v, ok := e[key].(string); ok && v != "" {
-							fields[key] = v
-						}
-					}
-					// component/epic are single-valued — a caller passing a
-					// list/object for either is a misuse, not a silent no-op.
-					component, err := scalarStringArg(e, "component")
-					if err != nil {
-						return mcp.NewToolResultError(err.Error()), nil
-					}
-					if component != "" {
-						fields["component"] = component
-					}
-					epic, err := scalarStringArg(e, "epic")
-					if err != nil {
-						return mcp.NewToolResultError(err.Error()), nil
-					}
-					if epic != "" {
-						fields["epic"] = epic
-					}
-
-					if len(fields) > 0 || len(edgeSpecs) > 0 {
-						// Validate priority if present
-						if p, ok := fields["priority"]; ok {
-							if _, err := parsePriority(p); err != nil {
-								return mcp.NewToolResultError(err.Error()), nil
-							}
-						}
-
-						// The field update and its edges[] links commit
-						// atomically: a failing (e.g. nonexistent-target)
-						// edge must not leave a partially-applied write.
-						tx, err := d.Begin()
-						if err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-						defer tx.Rollback() //nolint:errcheck
-
-						if err := validateEpicTx(tx, epic); err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						var item *backlog.Item
-						if len(fields) > 0 {
-							item, err = backlog.UpdateItemTx(tx, entryID, fields)
-						} else {
-							item, err = backlog.GetItem(tx, entryID)
-						}
-						if err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						if err := linkEdgesTx(tx, item.ID, item.ProjectID, edgeSpecs); err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						if err := tx.Commit(); err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						results = append(results, map[string]interface{}{
-							"id":     item.ID,
-							"action": "update",
-						})
-					}
-				} else {
-					// Create mode
-					projectName, _ := e["project"].(string)
-					priority, _ := e["priority"].(string)
-					title, _ := e["title"].(string)
-
-					if projectName != "" && priority != "" && title != "" {
-						if _, err := parsePriority(priority); err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						proj, err := resolveProject(d, projectName)
-						if err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						desc := ""
-						if v, ok := e["description"].(string); ok {
-							desc = v
-						}
-
-						if len(desc) > 500 {
-							return mcp.NewToolResultError(fmt.Sprintf("description exceeds 500 char hard cap (got %d). Move narrative into the notes field.", len(desc))), nil //nolint:nilerr
-						}
-
-						notes := ""
-						if v, ok := e["notes"].(string); ok {
-							notes = v
-						}
-
-						// component/epic are single-valued — a caller passing a
-						// list/object for either is a misuse, not a silent no-op.
-						component, err := scalarStringArg(e, "component")
-						if err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-						epic, err := scalarStringArg(e, "epic")
-						if err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						// The item create and its edges[] links commit
-						// atomically: a failing (e.g. nonexistent-target)
-						// edge must not leave a half-created item behind.
-						tx, err := d.Begin()
-						if err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-						defer tx.Rollback() //nolint:errcheck
-
-						if err := validateEpicTx(tx, epic); err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						item, err := backlog.AddItemTx(tx, proj.ID, proj.Prefix, priority, title, desc, notes, component, epic)
-						if err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						if err := linkEdgesTx(tx, item.ID, proj.ID, edgeSpecs); err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						if err := tx.Commit(); err != nil {
-							return mcp.NewToolResultError(err.Error()), nil
-						}
-
-						results = append(results, map[string]interface{}{
-							"id":     item.ID,
-							"action": "create",
-						})
-					}
-				}
-			}
-
-			return jsonResult(results)
+			return handleBacklogEntries(d, entries)
 		}
 
 		return mcp.NewToolResultError("delete_ids or entries is required"), nil //nolint:nilerr
 	}
+}
+
+// handleBacklogEntries processes a backlog write's entries[] batch (mixed
+// create/update) inside ONE shared transaction: every entry's validation,
+// write, and edge links participate in the same tx, and the whole batch
+// commits together at the end. Any entry error aborts the deferred
+// Rollback, so a mid-batch failure leaves nothing partially applied —
+// replacing the prior per-entry-transaction design where an early entry
+// could commit before a later one failed.
+func handleBacklogEntries(d *sql.DB, entries []map[string]interface{}) (*mcp.CallToolResult, error) {
+	results := make([]interface{}, 0, len(entries))
+
+	tx, err := d.Begin()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	for _, e := range entries {
+		edgeSpecs, err := parseEdgeSpecs(e)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		// Check if this is an update (has id) or create (no id)
+		if entryID, ok := e["id"].(string); ok && entryID != "" {
+			// Update mode
+			fields := make(map[string]string)
+			for _, key := range []string{"priority", "title", "description", "notes", "status"} {
+				if v, ok := e[key].(string); ok && v != "" {
+					fields[key] = v
+				}
+			}
+			// component/epic are single-valued — a caller passing a
+			// list/object for either is a misuse, not a silent no-op.
+			component, err := scalarStringArg(e, "component")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if component != "" {
+				fields["component"] = component
+			}
+			epic, err := scalarStringArg(e, "epic")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if epic != "" {
+				fields["epic"] = epic
+			}
+
+			if len(fields) > 0 || len(edgeSpecs) > 0 {
+				// Validate priority if present
+				if p, ok := fields["priority"]; ok {
+					if _, err := parsePriority(p); err != nil {
+						return mcp.NewToolResultError(err.Error()), nil
+					}
+				}
+
+				// The field update and its edges[] links participate in the
+				// batch's single shared tx — an error here aborts the whole
+				// batch via the outer deferred Rollback, not just this entry.
+				if err := validateEpicTx(tx, epic); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				var item *backlog.Item
+				if len(fields) > 0 {
+					item, err = backlog.UpdateItemTx(tx, entryID, fields)
+				} else {
+					item, err = backlog.GetItem(tx, entryID)
+				}
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				if err := linkEdgesTx(tx, item.ID, item.ProjectID, edgeSpecs); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				results = append(results, map[string]interface{}{
+					"id":     item.ID,
+					"action": "update",
+				})
+			}
+		} else {
+			// Create mode
+			projectName, _ := e["project"].(string)
+			priority, _ := e["priority"].(string)
+			title, _ := e["title"].(string)
+
+			if projectName != "" && priority != "" && title != "" {
+				if _, err := parsePriority(priority); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				// Resolve on the shared tx, not d: the store enforces
+				// SetMaxOpenConns(1), so a *sql.DB-level query while this tx
+				// holds the only connection would deadlock.
+				proj, err := resolveProject(tx, projectName)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				desc := ""
+				if v, ok := e["description"].(string); ok {
+					desc = v
+				}
+
+				if len(desc) > 500 {
+					return mcp.NewToolResultError(fmt.Sprintf("description exceeds 500 char hard cap (got %d). Move narrative into the notes field.", len(desc))), nil //nolint:nilerr
+				}
+
+				notes := ""
+				if v, ok := e["notes"].(string); ok {
+					notes = v
+				}
+
+				// component/epic are single-valued — a caller passing a
+				// list/object for either is a misuse, not a silent no-op.
+				component, err := scalarStringArg(e, "component")
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				epic, err := scalarStringArg(e, "epic")
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				// The item create and its edges[] links participate in the
+				// batch's single shared tx — an error here aborts the whole
+				// batch via the outer deferred Rollback, not just this entry.
+				if err := validateEpicTx(tx, epic); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				item, err := backlog.AddItemTx(tx, proj.ID, proj.Prefix, priority, title, desc, notes, component, epic)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				if err := linkEdgesTx(tx, item.ID, proj.ID, edgeSpecs); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				results = append(results, map[string]interface{}{
+					"id":     item.ID,
+					"action": "create",
+				})
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return jsonResult(results)
 }

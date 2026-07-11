@@ -252,6 +252,48 @@ func TestHandleBacklogCreateEpicNotFound_Errors(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestHandleBacklogBatchMidBatchError_RollsBackWholeBatch is the core new
+// guarantee of the shared-transaction refactor: a batch of [valid create,
+// bad-epic create] errors the whole call AND leaves the earlier, otherwise-
+// valid entry unpersisted — the whole batch shares one transaction, so a
+// later entry's failure rolls back everything, not just its own entry.
+func TestHandleBacklogBatchMidBatchError_RollsBackWholeBatch(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "would-be first item",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "orphan child",
+				"epic":     "AC-999",
+			},
+		},
+	})
+	result, err := handleBacklog(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	textContent, ok := mcp.AsTextContent(result.Content[0])
+	require.True(t, ok)
+	assert.Contains(t, textContent.Text, `epic item "AC-999" not found`)
+
+	// Nothing persisted for the WHOLE batch — including the first, otherwise
+	// valid entry, which the old per-entry-transaction design would have
+	// already committed by the time the second entry failed.
+	_, err = backlog.GetItem(db, "AC-1")
+	assert.Error(t, err)
+	_, err = backlog.GetItem(db, "AC-2")
+	assert.Error(t, err)
+}
+
 // TestHandleBacklogCreateWithAliasResolvedEpic verifies an epic id referring
 // to a renamed item (via item_id_aliases) still validates — mirrors the
 // EpicLabels alias-fallback path.
@@ -633,6 +675,41 @@ func TestHandleBacklogBatchCreate(t *testing.T) {
 	for _, r := range resp {
 		assert.Equal(t, "create", r["action"])
 	}
+}
+
+// TestHandleBacklogBatchCreateSequentialIDs verifies multiple creates within
+// the single shared batch transaction each get distinct, sequential ids: the
+// seq-assignment SELECT MAX(seq) query must see an earlier entry's INSERT
+// within the same (uncommitted) transaction, not just across transactions.
+func TestHandleBacklogBatchCreateSequentialIDs(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P0",
+				"title":    "first",
+			},
+			map[string]interface{}{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "second",
+			},
+		},
+	})
+	result, err := handleBacklog(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var resp []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &resp))
+	require.Len(t, resp, 2)
+	assert.Equal(t, "AC-1", resp[0]["id"])
+	assert.Equal(t, "AC-2", resp[1]["id"])
 }
 
 // TestHandleBacklogNoEntriesOrDeleteIDs_Errors verifies backlog rejects a call with neither

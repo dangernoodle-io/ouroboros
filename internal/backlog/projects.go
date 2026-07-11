@@ -73,7 +73,11 @@ func ListProjects(db *sql.DB) ([]Project, error) {
 	return projects, rows.Err()
 }
 
-func GetProjectByName(db *sql.DB, name string) (*Project, error) {
+// GetProjectByName accepts Executor (not just *sql.DB) so callers already
+// inside a shared transaction (e.g. a backlog batch write — see
+// internal/app.handleBacklog) can resolve a project without a second,
+// pool-exhausting connection (the store enforces SetMaxOpenConns(1)).
+func GetProjectByName(db Executor, name string) (*Project, error) {
 	var p Project
 	err := db.QueryRow("SELECT id, name, prefix, created FROM projects WHERE LOWER(name) = LOWER(?)", name).
 		Scan(&p.ID, &p.Name, &p.Prefix, &p.Created)
