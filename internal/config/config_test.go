@@ -18,7 +18,6 @@ func TestLoadDefaults(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	assert.Contains(t, cfg.DBPath, ".local/share/ouroboros")
-	assert.Equal(t, "none", cfg.BackupMode)
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -32,15 +31,13 @@ func TestLoadFromFile(t *testing.T) {
 
 	bootstrapFile := filepath.Join(bootstrapDir, "bootstrap.json")
 	data := []byte(`{
-  "db_path": "/custom/db.db",
-  "backup": "dedicated"
+  "db_path": "/custom/db.db"
 }`)
 	require.NoError(t, os.WriteFile(bootstrapFile, data, 0o644))
 
 	cfg, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, "/custom/db.db", cfg.DBPath)
-	assert.Equal(t, "dedicated", cfg.BackupMode)
 }
 
 func TestLoadEnvOverrides(t *testing.T) {
@@ -48,16 +45,10 @@ func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("PROJECT_KB_PATH", "/env/db.db")
 	t.Setenv("QM_DB_PATH", "/fallback/db.db")
-	t.Setenv("QM_BACKUP_MODE", "shared")
-	t.Setenv("QM_GIT_REPO", "/env/git")
-	t.Setenv("QM_SPARSE_PATH", "/sparse")
 
 	cfg, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, "/env/db.db", cfg.DBPath)
-	assert.Equal(t, "shared", cfg.BackupMode)
-	assert.Equal(t, "/env/git", cfg.GitRepo)
-	assert.Equal(t, "/sparse", cfg.SparseDir)
 }
 
 func TestLoadQMEnvFallback(t *testing.T) {
@@ -78,10 +69,7 @@ func TestSaveAndLoad(t *testing.T) {
 	t.Setenv("QM_DB_PATH", "")
 
 	original := &Config{
-		DBPath:     "/test/db.db",
-		BackupMode: "dedicated",
-		GitRepo:    "/test/git",
-		SparseDir:  "sparse",
+		DBPath: "/test/db.db",
 	}
 
 	err := Save(original)
@@ -90,9 +78,6 @@ func TestSaveAndLoad(t *testing.T) {
 	loaded, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, "/test/db.db", loaded.DBPath)
-	assert.Equal(t, "dedicated", loaded.BackupMode)
-	assert.Equal(t, "/test/git", loaded.GitRepo)
-	assert.Equal(t, "sparse", loaded.SparseDir)
 }
 
 func TestExpandHome(t *testing.T) {
@@ -157,7 +142,6 @@ func TestLoadFileOverridesDefaults(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, "/file/db.db", cfg.DBPath)
-	assert.Equal(t, "none", cfg.BackupMode) // default value
 }
 
 func TestLoadPartialFile(t *testing.T) {
@@ -170,12 +154,11 @@ func TestLoadPartialFile(t *testing.T) {
 	require.NoError(t, os.MkdirAll(bootstrapDir, 0o755))
 
 	bootstrapFile := filepath.Join(bootstrapDir, "bootstrap.json")
-	data := []byte(`{"backup": "shared"}`)
+	data := []byte(`{}`)
 	require.NoError(t, os.WriteFile(bootstrapFile, data, 0o644))
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, "shared", cfg.BackupMode)
 	assert.Contains(t, cfg.DBPath, ".local/share/ouroboros") // default
 }
 
@@ -184,8 +167,7 @@ func TestSaveCreatesDir(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	cfg := &Config{
-		DBPath:     "/test/db.db",
-		BackupMode: "dedicated",
+		DBPath: "/test/db.db",
 	}
 
 	err := Save(cfg)
@@ -204,5 +186,4 @@ func TestSaveCreatesDir(t *testing.T) {
 	err = json.Unmarshal(data, &loaded)
 	require.NoError(t, err)
 	assert.Equal(t, "/test/db.db", loaded.DBPath)
-	assert.Equal(t, "dedicated", loaded.BackupMode)
 }

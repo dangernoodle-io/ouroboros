@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/backup"
 	"dangernoodle.io/ouroboros/internal/edges"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -110,21 +108,6 @@ func resolveProjects(d *sql.DB, names []string) ([]int64, error) {
 	}
 	return ids, nil
 }
-
-func backupCommit(bk *backup.Backup, msg string) {
-	if bk == nil {
-		return
-	}
-	if err := bk.Commit(msg); err != nil {
-		log.Printf("backup: %v", err)
-	}
-}
-
-// backupCommitFn is a test seam: tests swap this to a recorder to assert
-// call count/arguments deterministically (git-log inspection alone can't
-// distinguish "committed once" from "committed N times, only the first
-// staged anything").
-var backupCommitFn = backupCommit
 
 // parseItemFilter builds a backlog.ItemFilter from projects/priority_min/priority_max/status/component
 // arguments, shared by domain=backlog reads (get list mode, search).
@@ -296,7 +279,7 @@ func searchBacklogItems(d *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult
 
 // handleBacklog is the backlog write tool (destructive): delete_ids[] batch delete,
 // or entries[] batch create/update. Reads live under get/search domain=backlog.
-func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
+func handleBacklog(d *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Check for delete_ids[] batch delete
 		deleteIDs := parseStringSlice(req.GetArguments(), "delete_ids")
@@ -305,7 +288,6 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			backupCommit(bk, fmt.Sprintf("deleted %d items", affected))
 			return jsonResult(map[string]interface{}{
 				"deleted": affected,
 			})
@@ -315,7 +297,6 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 		entries := parseEntriesArray(req.GetArguments(), "entries")
 		if len(entries) > 0 {
 			results := make([]interface{}, 0, len(entries))
-			writeCount := 0
 
 			for _, e := range entries {
 				edgeSpecs, err := parseEdgeSpecs(e)
@@ -387,8 +368,6 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 						if err := tx.Commit(); err != nil {
 							return mcp.NewToolResultError(err.Error()), nil
 						}
-
-						writeCount++
 
 						results = append(results, map[string]interface{}{
 							"id":     item.ID,
@@ -462,19 +441,12 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 							return mcp.NewToolResultError(err.Error()), nil
 						}
 
-						writeCount++
-
 						results = append(results, map[string]interface{}{
 							"id":     item.ID,
 							"action": "create",
 						})
 					}
 				}
-			}
-
-			// Single backup commit at end with batch count
-			if writeCount > 0 {
-				backupCommitFn(bk, fmt.Sprintf("batch: %d items written", writeCount))
 			}
 
 			return jsonResult(results)

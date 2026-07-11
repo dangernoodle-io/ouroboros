@@ -29,7 +29,6 @@ Project knowledge base and backlog management for Claude Code. Persist decisions
 - `OUROBOROS_DEV_BINARY` — path to local dev binary (bypasses GitHub download)
 - `PROJECT_KB_PATH` — override SQLite KB database path (default: `~/.cloak/plugins/.../ouroboros.db`)
 - `QM_DB_PATH` — override backlog database path (default: `~/.cloak/plugins/.../backlog.db`)
-- `QM_BACKUP_MODE` — backup strategy: `none`, `dedicated`, or `shared` (default: `dedicated`)
 
 ## Server
 

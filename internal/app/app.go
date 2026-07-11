@@ -8,7 +8,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"dangernoodle.io/ouroboros/internal/backup"
 	"dangernoodle.io/ouroboros/internal/config"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -28,9 +27,7 @@ func Serve(version string) error {
 		return err
 	}
 
-	var bk *backup.Backup // intentionally nil; backupCommit handles nil
-
-	s := buildServer(db, bk, version)
+	s := buildServer(db, version)
 
 	signal.Ignore(syscall.SIGPIPE)
 	sigCh := make(chan os.Signal, 1)

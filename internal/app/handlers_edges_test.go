@@ -35,7 +35,7 @@ func TestHandleBacklogCreateWithInlineEdges(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -69,7 +69,7 @@ func TestHandleBacklogUpdateWithInlineEdges(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -122,7 +122,7 @@ func TestHandleBacklogInlineEdgeInvalidLabel_Errors(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -152,7 +152,7 @@ func TestHandleBacklogInlineEdgeMissingTarget_Errors(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -186,7 +186,7 @@ func TestHandleBacklogUpdateInlineEdgeMissingTarget_Errors(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 

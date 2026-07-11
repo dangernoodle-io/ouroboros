@@ -5,8 +5,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-
-	"dangernoodle.io/ouroboros/internal/backup"
 )
 
 const (
@@ -42,7 +40,7 @@ get/search are reads (required domain: kb|backlog|roadmap); kb/backlog/roadmap a
 - Never run sqlite3/raw SQL against the ouroboros DB file — on a tool failure, stop and report rather than improvising.`
 
 // buildServer creates a new MCP server with all tools registered at startup.
-func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServer {
+func buildServer(db *sql.DB, version string) *server.MCPServer {
 	s := server.NewMCPServer("ouroboros", version,
 		server.WithToolCapabilities(true),
 		server.WithInstructions(serverInstructions),
@@ -103,7 +101,7 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 		mcp.WithArray("entries", mcp.Description("Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes")),
 		mcp.WithArray("delete_ids", mcp.Description("Item IDs to delete")),
 		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
-	), withRecover(handleBacklog(db, bk)))
+	), withRecover(handleBacklog(db)))
 
 	s.AddTool(mcp.NewTool("roadmap",
 		mcp.WithDescription("Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done sections) via op=add|update|move|reorder|done|remove. Items carry two single-valued grouping axes: component (structural) and epic (optional; an epic IS a backlog item). Reads live under get/search domain=roadmap."),
@@ -123,7 +121,7 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 		mcp.WithString("epic", mcp.Description("Epic backlog item id, single-valued (add/update)")),
 		mcp.WithNumber("position", mcp.Description("Sort position within the section (add/move/reorder; required for reorder)")),
 		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
-	), withRecover(handleRoadmap(db, bk)))
+	), withRecover(handleRoadmap(db)))
 
 	return s
 }
