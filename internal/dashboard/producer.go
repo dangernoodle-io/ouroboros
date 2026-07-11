@@ -120,13 +120,11 @@ func (c *cappedBuffer) String() string {
 // segment loop starts nothing further, and an exec/shell producer already
 // in flight is cut, since it shares this ctx as its own subprocess timeout
 // bound (along with the spec's own Timeout, whichever is shorter). A
-// builtin only checks ctx before running (it is otherwise in-process,
-// Providers being expected to be fast and not untrusted external input) —
-// if a builtin internally spawns its own subprocess with its own timeout
-// (today only the "github" builtin's `gh pr list` call, capped at ~10s
-// internally), that inner call is NOT preempted by ctx, so total wall
-// clock can still exceed the aggregate deadline by up to that builtin's
-// internal cap. Tracked for tightening in the backlog.
+// builtin also receives ctx directly (Provider takes ctx as its first
+// param), so a builtin that spawns its own subprocess (today only the
+// "github" builtin's `gh pr list` call, internally capped at 10s) derives
+// that subprocess's timeout from ctx and is cut when the aggregate
+// deadline fires, not just when its own internal cap elapses.
 func RunSegment(ctx context.Context, db *sql.DB, spec SegmentSpec, inv Context) ([]byte, string, error) {
 	form, err := spec.Form()
 	if err != nil {
@@ -144,11 +142,11 @@ func RunSegment(ctx context.Context, db *sql.DB, spec SegmentSpec, inv Context) 
 }
 
 // runBuiltinSegment skips the builtin outright if ctx's aggregate deadline
-// has already fired; otherwise it runs the provider with no timeout of its
-// own. The Provider signature takes no context.Context, so a builtin that
-// spawns its own subprocess (today only "github", via `gh pr list`) is
-// bounded solely by that subprocess's own internal timeout, not ctx — it is
-// not preempted mid-run when the aggregate deadline fires.
+// has already fired; otherwise it runs the provider, passing ctx through so
+// a builtin that spawns its own subprocess (today only "github", via
+// `gh pr list`) derives that subprocess's timeout from ctx and is preempted
+// mid-run when the aggregate deadline fires, not just bounded by its own
+// internal cap.
 func runBuiltinSegment(ctx context.Context, db *sql.DB, spec SegmentSpec, inv Context) ([]byte, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
@@ -157,7 +155,7 @@ func runBuiltinSegment(ctx context.Context, db *sql.DB, spec SegmentSpec, inv Co
 	if !ok {
 		return nil, "", fmt.Errorf("unknown builtin %q", spec.Builtin)
 	}
-	frags, err := prov(inv, db)
+	frags, err := prov(ctx, inv, db)
 	if err != nil {
 		return nil, "", err
 	}
