@@ -3,7 +3,7 @@ module dangernoodle.io/ouroboros
 go 1.26.1
 
 require (
-	github.com/dangernoodle-io/mcpkit v0.0.0-20260711191839-834dc899908b
+	github.com/dangernoodle-io/mcpkit v0.0.0-20260711230404-b64d3d506e0d
 	github.com/mark3labs/mcp-go v0.56.0
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/spf13/cobra v1.10.2

@@ -60,7 +60,7 @@ func init() {
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(unlinkCmd)
 	rootCmd.AddCommand(dashboardCmd)
-	rootCmd.AddCommand(hookCmd)
+	mcpkitcli.MountProviders(rootCmd, claudeHooksProvider())
 }
 
 // Execute runs the root command.

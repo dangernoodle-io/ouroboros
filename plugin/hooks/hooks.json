@@ -38,7 +38,7 @@
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros hook stop",
+        "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros claude hooks stop",
         "timeout": 6
       }],
       "description": "Auto-persist or nudge main-context KB blocks/decisions when a turn ends"
