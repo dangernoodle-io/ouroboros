@@ -547,6 +547,41 @@ func TestHandleGetBatch(t *testing.T) {
 	assert.Equal(t, "Fact 1", docs[1]["title"])
 }
 
+// TestHandleGetDomainKB_IdsFetchPreservesRequestOrder proves the batched
+// IN-query fetch (store.GetDocuments) re-sorts to the caller's requested
+// ids[] order, not DB/insertion order.
+func TestHandleGetDomainKB_IdsFetchPreservesRequestOrder(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"type": "decision", "project": "acme-corp", "title": "first", "content": "c1"},
+			map[string]interface{}{"type": "decision", "project": "acme-corp", "title": "second", "content": "c2"},
+		},
+	})
+	putResult, err := handleKB(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+	var putResp []map[string]interface{}
+	require.NoError(t, unmarshalResult(putResult, &putResp))
+	id1, ok := putResp[0]["id"].(float64)
+	require.True(t, ok)
+	id2, ok := putResp[1]["id"].(float64)
+	require.True(t, ok)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "kb",
+		"ids":    []interface{}{id2, id1}, // reverse of insertion order
+	})
+	getResult, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+
+	var docs []map[string]interface{}
+	require.NoError(t, unmarshalResult(getResult, &docs))
+	require.Len(t, docs, 2)
+	assert.Equal(t, "second", docs[0]["title"])
+	assert.Equal(t, "first", docs[1]["title"])
+}
+
 // TestHandleGetBatchWithMiss tests domain=kb batch get with missing IDs (should omit).
 func TestHandleGetBatchWithMiss(t *testing.T) {
 	resetDB(t)
@@ -1548,6 +1583,34 @@ func TestHandleGet_DomainBacklog_IdsFetch(t *testing.T) {
 	require.NoError(t, unmarshalResult(result, &items))
 	require.Len(t, items, 1)
 	assert.Equal(t, "Domain get task", items[0]["title"])
+}
+
+// TestHandleGet_DomainBacklog_IdsFetchPreservesRequestOrder proves the
+// batched IN-query fetch (backlog.GetItems) re-sorts to the caller's
+// requested ids[] order, not DB/insertion order.
+func TestHandleGet_DomainBacklog_IdsFetchPreservesRequestOrder(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item1, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "first", "", "", "", "")
+	require.NoError(t, err)
+	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "second", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"ids":    []interface{}{item2.ID, item1.ID}, // reverse of insertion order
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var items []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &items))
+	require.Len(t, items, 2)
+	assert.Equal(t, item2.ID, items[0]["id"])
+	assert.Equal(t, item1.ID, items[1]["id"])
 }
 
 // TestHandleGet_DomainBacklog_FilteredList verifies get domain=backlog lists with filters.

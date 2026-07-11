@@ -175,6 +175,82 @@ func GetItemsByIDs(d *sql.DB, ids []string) ([]Item, error) {
 	return scanItems(rows)
 }
 
+// getItemsByIDsFull is GetItemsByIDs plus the notes column: a private
+// twin rather than a change to the shared GetItemsByIDs/scanItems query
+// (which also backs ListItems/SearchItems/EpicLabels — none of which need
+// notes), so GetItems can serve verbose fetches (which do) without widening
+// what those other callers select.
+func getItemsByIDsFull(d *sql.DB, ids []string) (map[string]Item, error) {
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	rows, err := d.Query(
+		"SELECT id, project_id, priority, title, component, epic, description, notes, status, created, updated FROM items WHERE id IN ("+strings.Join(placeholders, ",")+")",
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get items by ids: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	byID := make(map[string]Item)
+	for rows.Next() {
+		var item Item
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Priority, &item.Title, &item.Component, &item.Epic, &item.Description, &item.Notes, &item.Status, &item.Created, &item.Updated); err != nil {
+			return nil, err
+		}
+		byID[item.ID] = item
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return byID, nil
+}
+
+// GetItems fetches items by id, preserving requested order and (unlike
+// GetItemsByIDs) alias resolution AND GetItem's not-found error contract:
+// a miss (even after alias resolution) errors out the whole call, matching
+// the per-id GetItem loop this replaces (a caller-visible "not found" for
+// any requested id, not a silent omission). The primary fetch is one
+// batched `WHERE id IN (...)` query; only ids that miss the primary query
+// fall back to a per-id GetItem call, which additionally resolves one
+// item_id_aliases hop — a rare path (a renamed/aliased id), so this stays a
+// single query in the common case rather than N+1.
+func GetItems(d *sql.DB, ids []string) ([]*Item, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	byID, err := getItemsByIDsFull(d, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]*Item, 0, len(ids))
+	for _, id := range ids {
+		if item, ok := byID[id]; ok {
+			item := item // shadow: distinct address per result
+			results = append(results, &item)
+			continue
+		}
+
+		// Miss on the batched query: fall back to the alias-resolving
+		// single-id lookup before concluding not-found. If that also
+		// misses, propagate its error — same short-circuit-on-first-miss
+		// behavior as the loop this replaces.
+		item, err := GetItem(d, id)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+	return results, nil
+}
+
 // epicLabel strips a leading "EPIC:" title prefix (the epic-item title
 // convention), trimming surrounding whitespace.
 func epicLabel(title string) string {

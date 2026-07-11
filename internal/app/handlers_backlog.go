@@ -224,18 +224,18 @@ func getBacklogItems(d *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, e
 
 	if len(ids) > 0 {
 		verbose, _ := req.GetArguments()["verbose"].(bool)
-		items := make([]interface{}, 0, len(ids))
 
-		for _, id := range ids {
-			item, err := backlog.GetItem(d, id)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if item == nil {
-				// Omit misses
-				continue
-			}
+		// backlog.GetItems does one batched IN-query (falling back to a
+		// per-id alias-resolving lookup only on a miss) instead of one
+		// GetItem call per id; misses cause an error (vs kb which omits
+		// them), and results are already re-sorted to requested order.
+		fetched, err := backlog.GetItems(d, ids)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 
+		items := make([]interface{}, 0, len(fetched))
+		for _, item := range fetched {
 			if !verbose {
 				item.Notes = ""
 				item.ProjectID = 0
