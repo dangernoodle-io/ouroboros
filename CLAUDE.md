@@ -27,7 +27,7 @@ make lint     # golangci-lint run
 - `internal/backlog/` — backlog CRUD (projects, items, plans, config)
 - `internal/roadmap/` — roadmap CRUD (per-project singletons, item mutations)
 - `internal/edges/` — polymorphic cross-reference graph (item/kb, blocks\|relates\|explains); `[[Title]]` KB autolinking; cascade cleanup on item/kb delete
-- `internal/config/` — bootstrap config file + env var loading
+- `internal/config/` — config loading via mcpkit `config.Load` + `xdgpath` (bootstrap.json overlay + `PROJECT_KB_PATH`/`QM_DB_PATH` env alias)
 - `internal/kb/` — KB export/import, validation
 - `internal/embed/` — pure-Go, offline static text embeddings (Model2Vec potion-retrieval-32M, int8-quantized, `//go:embed`'d asset); foundation for semantic search — not yet wired into the CLI/MCP surface
 - `internal/dashboard/` — dashboard data-capture (builtin/exec/shell segment producers → NDJSON contract; gated by `dashboard.enabled`); exec/shell run per-segment with a `timeout` (default 5s, clamped [1s,30s]) — sh/jq are NOT required (exec is native argv, shell is opt-in `sh -c`), and producers are operator-configured local commands (trust boundary = a Makefile/git hook), not remote input
@@ -61,7 +61,7 @@ CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/d
 
 SQLite with WAL mode. Schema managed by versioned migrations. Tables: documents (KB), documents_fts (FTS5), projects, items, plans, edges (cross-reference graph, app-level integrity — no FK across the type-erased endpoint columns), config, schema_migrations.
 
-Default DB path: `~/.local/share/ouroboros/kb.db`
+Default DB path: XDG data dir for `ouroboros` (`~/.local/share/ouroboros/kb.db`; override via `OUROBOROS_DATA_DIR` or `XDG_DATA_HOME`). bootstrap.json location is likewise the XDG config dir (`~/.config/ouroboros/bootstrap.json`; override via `OUROBOROS_CONFIG_DIR` or `XDG_CONFIG_HOME`).
 
 ## Dependencies
 

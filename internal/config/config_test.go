@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,14 +9,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// neutralizeXDG clears the XDG/OUROBOROS override env vars xdgpath honors,
+// so tests asserting a specific default/config path aren't sensitive to the
+// ambient environment (a real XDG_DATA_HOME/XDG_CONFIG_HOME set outside the
+// test process would otherwise redirect Load()'s resolved paths).
+func neutralizeXDG(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("OUROBOROS_DATA_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("OUROBOROS_CONFIG_DIR", "")
+}
+
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PROJECT_KB_PATH", "")
 	t.Setenv("QM_DB_PATH", "")
+	neutralizeXDG(t)
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Contains(t, cfg.DBPath, ".local/share/ouroboros")
+	assert.Contains(t, cfg.DBPath, filepath.Join(".local", "share", "ouroboros"))
 }
 
 func TestLoadFromFile(t *testing.T) {
@@ -25,9 +37,13 @@ func TestLoadFromFile(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("PROJECT_KB_PATH", "")
 	t.Setenv("QM_DB_PATH", "")
+	neutralizeXDG(t)
 
-	bootstrapDir := filepath.Join(tmpHome, ".config", "ouroboros")
-	require.NoError(t, os.MkdirAll(bootstrapDir, 0o755))
+	// OUROBOROS_CONFIG_DIR is used verbatim as the app config dir (highest
+	// precedence in xdgpath's resolution), so the test controls exactly
+	// where WithXDGFile looks, independent of $HOME/.config.
+	bootstrapDir := t.TempDir()
+	t.Setenv("OUROBOROS_CONFIG_DIR", bootstrapDir)
 
 	bootstrapFile := filepath.Join(bootstrapDir, "bootstrap.json")
 	data := []byte(`{
@@ -45,6 +61,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("PROJECT_KB_PATH", "/env/db.db")
 	t.Setenv("QM_DB_PATH", "/fallback/db.db")
+	neutralizeXDG(t)
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -56,74 +73,11 @@ func TestLoadQMEnvFallback(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("PROJECT_KB_PATH", "")
 	t.Setenv("QM_DB_PATH", "/fallback/db.db")
+	neutralizeXDG(t)
 
 	cfg, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, "/fallback/db.db", cfg.DBPath)
-}
-
-func TestSaveAndLoad(t *testing.T) {
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
-	t.Setenv("PROJECT_KB_PATH", "")
-	t.Setenv("QM_DB_PATH", "")
-
-	original := &Config{
-		DBPath: "/test/db.db",
-	}
-
-	err := Save(original)
-	require.NoError(t, err)
-
-	loaded, err := Load()
-	require.NoError(t, err)
-	assert.Equal(t, "/test/db.db", loaded.DBPath)
-}
-
-func TestExpandHome(t *testing.T) {
-	home := "/home/testuser"
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"~/config", filepath.Join(home, "config")},
-		{"/absolute/path", "/absolute/path"},
-		{"relative/path", "relative/path"},
-	}
-
-	for _, tt := range tests {
-		result := expandHome(tt.input)
-		if tt.input == "~/config" {
-			assert.True(t, filepath.IsAbs(result))
-			assert.Contains(t, result, "config")
-		} else {
-			assert.Equal(t, tt.expected, result)
-		}
-	}
-}
-
-func TestBootstrapExists(t *testing.T) {
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
-
-	assert.False(t, BootstrapExists())
-
-	bootstrapDir := filepath.Join(tmpHome, ".config", "ouroboros")
-	require.NoError(t, os.MkdirAll(bootstrapDir, 0o755))
-
-	bootstrapFile := filepath.Join(bootstrapDir, "bootstrap.json")
-	require.NoError(t, os.WriteFile(bootstrapFile, []byte("{}"), 0o644))
-
-	assert.True(t, BootstrapExists())
-}
-
-func TestBootstrapPath(t *testing.T) {
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
-
-	path := BootstrapPath()
-	assert.Contains(t, path, "ouroboros")
-	assert.Contains(t, path, "bootstrap.json")
 }
 
 func TestLoadFileOverridesDefaults(t *testing.T) {
@@ -131,9 +85,10 @@ func TestLoadFileOverridesDefaults(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("PROJECT_KB_PATH", "")
 	t.Setenv("QM_DB_PATH", "")
+	neutralizeXDG(t)
 
-	bootstrapDir := filepath.Join(tmpHome, ".config", "ouroboros")
-	require.NoError(t, os.MkdirAll(bootstrapDir, 0o755))
+	bootstrapDir := t.TempDir()
+	t.Setenv("OUROBOROS_CONFIG_DIR", bootstrapDir)
 
 	bootstrapFile := filepath.Join(bootstrapDir, "bootstrap.json")
 	data := []byte(`{"db_path": "/file/db.db"}`)
@@ -149,6 +104,7 @@ func TestLoadPartialFile(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("PROJECT_KB_PATH", "")
 	t.Setenv("QM_DB_PATH", "")
+	neutralizeXDG(t)
 
 	bootstrapDir := filepath.Join(tmpHome, ".config", "ouroboros")
 	require.NoError(t, os.MkdirAll(bootstrapDir, 0o755))
@@ -159,31 +115,34 @@ func TestLoadPartialFile(t *testing.T) {
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Contains(t, cfg.DBPath, ".local/share/ouroboros") // default
+	assert.Contains(t, cfg.DBPath, filepath.Join(".local", "share", "ouroboros")) // default
 }
 
-func TestSaveCreatesDir(t *testing.T) {
+func TestLoadTildeExpansion(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("PROJECT_KB_PATH", "~/custom/db.db")
+	t.Setenv("QM_DB_PATH", "")
+	neutralizeXDG(t)
 
-	cfg := &Config{
-		DBPath: "/test/db.db",
-	}
-
-	err := Save(cfg)
+	cfg, err := Load()
 	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(tmpHome, "custom", "db.db"), cfg.DBPath)
+}
 
-	bootstrapDir := filepath.Join(tmpHome, ".config", "ouroboros")
-	info, err := os.Stat(bootstrapDir)
-	require.NoError(t, err)
-	assert.True(t, info.IsDir())
+func TestLoadMalformedBootstrapErrors(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("PROJECT_KB_PATH", "")
+	t.Setenv("QM_DB_PATH", "")
+	neutralizeXDG(t)
+
+	bootstrapDir := t.TempDir()
+	t.Setenv("OUROBOROS_CONFIG_DIR", bootstrapDir)
 
 	bootstrapFile := filepath.Join(bootstrapDir, "bootstrap.json")
-	data, err := os.ReadFile(bootstrapFile)
-	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(bootstrapFile, []byte("not json"), 0o644))
 
-	var loaded Config
-	err = json.Unmarshal(data, &loaded)
-	require.NoError(t, err)
-	assert.Equal(t, "/test/db.db", loaded.DBPath)
+	_, err := Load()
+	require.Error(t, err)
 }

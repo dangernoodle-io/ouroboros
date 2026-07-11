@@ -1,78 +1,42 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
-	"path/filepath"
-	"strings"
+
+	mcpkitconfig "github.com/dangernoodle-io/mcpkit/config"
+	"github.com/dangernoodle-io/mcpkit/xdgpath"
 )
 
 type Config struct {
 	DBPath string `json:"db_path"`
 }
 
-func defaultConfig() *Config {
-	home, _ := os.UserHomeDir()
-	return &Config{
-		DBPath: filepath.Join(home, ".local", "share", "ouroboros", "kb.db"),
-	}
-}
-
-func bootstrapPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "ouroboros", "bootstrap.json")
-}
-
-func BootstrapPath() string {
-	return bootstrapPath()
-}
-
-func BootstrapExists() bool {
-	_, err := os.Stat(bootstrapPath())
-	return err == nil
-}
-
-func expandHome(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[2:])
-	}
-	return path
-}
-
+// Load builds the ouroboros config from defaults, the bootstrap.json
+// overlay, and env vars, in that precedence. DBPath defaults to
+// ~/.local/share/ouroboros/kb.db (honors XDG_DATA_HOME/OUROBOROS_DATA_DIR),
+// is overlaid by bootstrap.json's db_path if present, then by
+// PROJECT_KB_PATH (primary) or QM_DB_PATH (alias) if set. A leading "~/" in
+// the final DBPath is expanded. bootstrap.json's location is
+// ~/.config/ouroboros/bootstrap.json by default, overridable via
+// XDG_CONFIG_HOME/OUROBOROS_CONFIG_DIR.
 func Load() (*Config, error) {
-	cfg := defaultConfig()
+	defaults := Config{DBPath: xdgpath.DataFile("ouroboros", "kb.db")}
 
-	data, err := os.ReadFile(bootstrapPath())
-	if err == nil {
-		var file Config
-		if err := json.Unmarshal(data, &file); err == nil {
-			if file.DBPath != "" {
-				cfg.DBPath = file.DBPath
-			}
-		}
+	cfg, err := mcpkitconfig.Load(defaults, mcpkitconfig.WithXDGFile("ouroboros", "bootstrap.json"))
+	if err != nil {
+		return nil, err
 	}
 
-	// PROJECT_KB_PATH takes priority, then QM_DB_PATH as alias
+	// PROJECT_KB_PATH takes priority, then QM_DB_PATH as alias. mcpkit's
+	// WithEnv field-maps by struct field name and doesn't know about this
+	// alias, so it's applied by hand.
 	if v := os.Getenv("PROJECT_KB_PATH"); v != "" {
 		cfg.DBPath = v
 	} else if v := os.Getenv("QM_DB_PATH"); v != "" {
 		cfg.DBPath = v
 	}
 
-	cfg.DBPath = expandHome(cfg.DBPath)
+	cfg.DBPath = mcpkitconfig.ExpandHome(cfg.DBPath)
 
-	return cfg, nil
-}
-
-func Save(cfg *Config) error {
-	path := bootstrapPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return &cfg, nil
 }
