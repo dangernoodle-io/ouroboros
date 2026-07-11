@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/kb"
 )
 
@@ -195,4 +196,193 @@ func TestWireKBV2_UpdateByStringID_RoundTripsThroughRealCodec(t *testing.T) {
 	require.Len(t, updateResp, 1)
 	assert.Equal(t, "updated", updateResp[0].Action)
 	assert.Equal(t, "wire string-id renamed", updateResp[0].Title)
+}
+
+// TestWireBacklogV2_BothOmitted_ReturnsVerbatimMessage is backlog's
+// counterpart to TestWireKBV2_OmittedEntries_ReturnsVerbatimMessage: both
+// entries and delete_ids are non-required (see backlogInput's comment) so
+// omitting both reaches handleBacklogV2's own check instead of failing
+// go-sdk schema validation, preserving the verbatim "one of" message over
+// the wire.
+func TestWireBacklogV2_BothOmitted_ReturnsVerbatimMessage(t *testing.T) {
+	resetAllDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "backlog", map[string]any{})
+	require.NoError(t, err, "omitting both entries and delete_ids must not fail schema validation")
+	require.True(t, res.IsError)
+	assert.Equal(t, errBacklogEntriesOrDeleteIDsRequired, mcpx.ResultText(res))
+}
+
+// TestWireBacklogV2_Create_RoundTripsThroughRealCodec is a regression guard
+// the direct handler tests (handlers_backlog_v2_test.go) can't provide: this
+// drives the "backlog" tool over the real in-process testkit wiring with a
+// raw map[string]any (as a real client would send), proving a create entry
+// actually decodes and validates against the generated schema.
+func TestWireBacklogV2_Create_RoundTripsThroughRealCodec(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "backlog", map[string]any{
+		"entries": []any{
+			map[string]any{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "wire create task",
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	var resp []backlogResult
+	require.NoError(t, json.Unmarshal([]byte(mcpx.ResultText(res)), &resp))
+	require.Len(t, resp, 1)
+	assert.Equal(t, "create", resp[0].Action)
+	assert.Equal(t, "AC-1", resp[0].ID)
+}
+
+// TestWireBacklogV2_EpicBackrefSameBatchCreate_RoundTripsThroughRealCodec
+// proves a "$N" epic back-reference resolving to a same-batch create round-
+// trips over the real wire codec, not just a direct backlogInput
+// construction (handlers_backlog_v2_test.go's
+// TestHandleBacklogV2BatchEpicBackref_SameBatchCreate).
+func TestWireBacklogV2_EpicBackrefSameBatchCreate_RoundTripsThroughRealCodec(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "backlog", map[string]any{
+		"entries": []any{
+			map[string]any{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "EPIC: wire X",
+			},
+			map[string]any{
+				"project":  "acme-corp",
+				"priority": "P2",
+				"title":    "wire child",
+				"epic":     "$0",
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	var resp []backlogResult
+	require.NoError(t, json.Unmarshal([]byte(mcpx.ResultText(res)), &resp))
+	require.Len(t, resp, 2)
+
+	child, err := backlog.GetItem(db, resp[1].ID)
+	require.NoError(t, err)
+	assert.Equal(t, resp[0].ID, child.Epic)
+}
+
+// TestWireBacklogV2_EdgeMissingLabel_ReturnsVerbatimMessage proves
+// edgeInput.Label/Target's omitempty tags (see edgeInput's comment) restore
+// wire parity: an edges[] element with the "label" key ABSENT decodes to ""
+// instead of failing go-sdk schema validation, reaching
+// buildEdgeSpecsV2's existing empty-label/target check over the real wire
+// codec.
+func TestWireBacklogV2_EdgeMissingLabel_ReturnsVerbatimMessage(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "backlog", map[string]any{
+		"entries": []any{
+			map[string]any{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "wire edge missing label",
+				"edges": []any{
+					map[string]any{"target": "AC-1"},
+				},
+			},
+		},
+	})
+	require.NoError(t, err, "an edges[] element missing the label key must not fail schema validation")
+	require.True(t, res.IsError)
+	assert.Equal(t, "edges[] entry requires label and target", mcpx.ResultText(res))
+}
+
+// TestWireBacklogV2_EdgeInvalidLabel_ReturnsVerbatimMessage proves an
+// edges[] element with a present-but-unrecognized label still yields the
+// verbatim invalid-label message over the real wire codec.
+func TestWireBacklogV2_EdgeInvalidLabel_ReturnsVerbatimMessage(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "backlog", map[string]any{
+		"entries": []any{
+			map[string]any{
+				"project":  "acme-corp",
+				"priority": "P1",
+				"title":    "wire edge bad label",
+				"edges": []any{
+					map[string]any{"label": "bogus", "target": "AC-1"},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+	assert.Equal(t, `invalid edge label "bogus": must be one of blocks, relates, explains`, mcpx.ResultText(res))
+}
+
+// TestWireBacklogV2_ComponentNotScalar_Errors documents+guards the accepted
+// divergence (see backlogEntryInput's ACCEPTED DIVERGENCE comment): a
+// non-scalar component (a JSON list) over the real wire codec still errors,
+// just with a different (go-sdk decode/schema) message than the old
+// verbatim "must be a single string value" text -- intentionally NOT
+// asserted here, only that the call errors.
+func TestWireBacklogV2_ComponentNotScalar_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "backlog", map[string]any{
+		"entries": []any{
+			map[string]any{
+				"project":   "acme-corp",
+				"priority":  "P3",
+				"title":     "t",
+				"component": []any{"a", "b"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+	assert.NotEmpty(t, mcpx.ResultText(res))
 }

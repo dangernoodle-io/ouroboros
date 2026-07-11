@@ -108,6 +108,95 @@ type kbEntryInput struct {
 	Metadata *map[string]string `json:"metadata,omitempty"`
 }
 
+// backlogInput is the mcpkit-typed input for the backlog write tool (OU-3):
+// entries[] (mixed create/update batch) or delete_ids[] (batch delete).
+// Neither is schema-required (see the comment on Entries below and
+// getInput.Domain's comment for the same missing==empty verbatim-message
+// parity reason); the handler enforces "one of" at runtime.
+type backlogInput struct {
+	// Entries is tagged omitempty for the same reason kbInput.Entries is:
+	// old mcp-go behavior fell through to the SAME verbatim
+	// "delete_ids or entries is required" message whether entries was
+	// omitted or an empty array (both len(entries)==0). If go-sdk
+	// schema-validated entries as required, an omitted key would fail
+	// schema validation before handleBacklogV2 ever runs. The handler
+	// performs its own explicit "neither present" check instead.
+	Entries   []backlogEntryInput `json:"entries,omitempty" jsonschema:"Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent"`
+	DeleteIDs []string            `json:"delete_ids,omitempty" jsonschema:"Item IDs to delete"`
+}
+
+// backlogEntryInput uses POINTER fields (except ID, Edges) for presence,
+// mirroring kbEntryInput: a nil pointer means the key was absent. ID is a
+// plain *string (not the kbEntryInput.ID `any` dual-type dance) since
+// backlog ids are always prefixed strings (e.g. "B1-728") -- no numeric-id
+// decode ambiguity to reproduce here.
+//
+// ACCEPTED DIVERGENCE (numeric/wrong-typed id): the old untyped parser did
+// `e["id"].(string)` and treated a failed assertion (e.g. a JSON number, or
+// omitted) the same as "no id" -> silent create. A typed *string field can't
+// receive a JSON number at all -- go-sdk's decode rejects the whole call
+// with a schema/decode error instead of silently creating. Not replicated
+// (real callers always send a string id or omit the key).
+//
+// ACCEPTED DIVERGENCE (wrong-typed non-id fields): the old untyped parser
+// silently treated a present-but-wrong-typed priority/title/description/
+// notes/status as absent (failed type assertion -> zero value, e.g.
+// `ok` false so the field is never added to `fields`/never satisfies the
+// create gate). go-sdk instead REJECTS a wrong-typed field with a whole-call
+// decode error. Not replicated (real callers always send correctly-typed
+// fields).
+//
+// ACCEPTED DIVERGENCE (component/epic not-scalar message): the old
+// scalarStringArg returned the verbatim
+// "%s must be a single string value (single-valued, not a list)" error when
+// component/epic was present but non-string (e.g. a list). With typed
+// *string fields, a JSON list/object for component or epic is instead
+// rejected by go-sdk's decode with a DIFFERENT (generic schema/decode)
+// message before handleBacklogV2 ever runs. This diverges from the old
+// verbatim message; RECOMMENDATION (per the OU-3 build spec) is to accept
+// this stricter-but-different-message divergence rather than reintroduce an
+// `any`+scalarStringArg-style shim purely to preserve wire-text parity for a
+// misuse case. Flagged for reconsideration at cutover if exact verbatim
+// parity on this specific error matters.
+type backlogEntryInput struct {
+	ID          *string     `json:"id,omitempty" jsonschema:"Item id to update in place; omit to create"`
+	Project     *string     `json:"project,omitempty" jsonschema:"Project name (create only)"`
+	Priority    *string     `json:"priority,omitempty" jsonschema:"P0-P6"`
+	Title       *string     `json:"title,omitempty"`
+	Description *string     `json:"description,omitempty" jsonschema:"Max 500 chars; put narrative in notes"`
+	Notes       *string     `json:"notes,omitempty"`
+	Component   *string     `json:"component,omitempty" jsonschema:"Single-valued component tag"`
+	Epic        *string     `json:"epic,omitempty" jsonschema:"Epic backlog item id, single-valued; may be \"$N\", a back-reference to entries[N] earlier in this same write"`
+	Status      *string     `json:"status,omitempty"`
+	Edges       []edgeInput `json:"edges,omitempty" jsonschema:"Inline edges to create from this item: [{label,target}], label: blocks|relates|explains, target: item id"`
+}
+
+// edgeInput is the typed counterpart to parseEdgeSpecs' map-reading raw
+// edges[] element ({label,target}). Label/Target are tagged omitempty for
+// the same missing-key-parity reason as every other required-looking field
+// in this file (see getInput.Domain's comment): if go-sdk schema-validated
+// them as required, an edges[] element with the "label" or "target" key
+// ABSENT (e.g. {"target":"AC-1"}) would be rejected before
+// buildEdgeSpecsV2 ever runs, with a generic "required: missing
+// properties" schema error instead of the old verbatim "edges[] entry
+// requires label and target" message. omitempty decodes a missing key to
+// "" instead, reaching buildEdgeSpecsV2's existing empty-label/target
+// check, which fires that verbatim message exactly as before -- full
+// parity restored, not a divergence.
+//
+// ACCEPTED DIVERGENCE (non-object element): the old parseEdgeSpecs treated
+// a non-object edges[] element (e.g. a bare string or number) as a hard
+// error ("invalid edges[] entry: expected object with label and target").
+// A typed []edgeInput can't receive a non-object element at all -- go-sdk's
+// decode rejects the whole call with a decode error instead. This is the
+// only remaining edges[] divergence; the empty-label/target and
+// invalid-label messages (produced by buildEdgeSpecsV2, which still runs
+// after decode) are unaffected and reproduced exactly.
+type edgeInput struct {
+	Label  string `json:"label,omitempty"`
+	Target string `json:"target,omitempty"`
+}
+
 // searchInput is the mcpkit-typed union of every search tool parameter
 // across all three domains. Differs from getInput: no ids/verbose/tags,
 // adds Queries (kb batch mode), no by/format (search has no roadmap

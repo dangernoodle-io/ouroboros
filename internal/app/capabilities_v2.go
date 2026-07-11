@@ -11,9 +11,10 @@ import (
 // server.go verbatim, so the tool surface presented to a client is unchanged
 // across the mcp-go/mcpkit seam.
 const (
-	descGetToolV2    = "Fetch entries by ID or filters (required domain: kb|backlog|roadmap). ids[] returns exact matches; omit ids for a filtered list."
-	descSearchToolV2 = "Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes)."
-	descKBToolV2     = "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb."
+	descGetToolV2     = "Fetch entries by ID or filters (required domain: kb|backlog|roadmap). ids[] returns exact matches; omit ids for a filtered list."
+	descSearchToolV2  = "Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes)."
+	descKBToolV2      = "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb."
+	descBacklogToolV2 = "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. Reads live under get/search domain=backlog."
 )
 
 // getCapability and searchCapability are mcpkit Capabilities for the get and
@@ -43,5 +44,15 @@ type kbCapability struct{ db *sql.DB }
 
 func (c kbCapability) Attach(r *mcpkit.Registrar) error {
 	mcpkit.AddTool(r, &mcpx.Tool{Name: "kb", Description: descKBToolV2}, handleKBV2(c.db))
+	return nil
+}
+
+// backlogCapability is the mcpkit Capability for the backlog write tool
+// (OU-3). Annotations (destructive hint) are DEFERRED per OU-293 -- same
+// chokepoint limitation as getCapability/searchCapability, see their comment.
+type backlogCapability struct{ db *sql.DB }
+
+func (c backlogCapability) Attach(r *mcpkit.Registrar) error {
+	mcpkit.AddTool(r, &mcpx.Tool{Name: "backlog", Description: descBacklogToolV2}, handleBacklogV2(c.db))
 	return nil
 }
