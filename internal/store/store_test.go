@@ -275,6 +275,149 @@ func TestQueryDocumentsReturnsNoContent(t *testing.T) {
 	assert.Equal(t, int64(1), summaries[0].ID)
 }
 
+// TestGetDocumentsBatchesInOneQuery covers store.GetDocuments: multiple
+// valid ids all returned, a nonexistent id among them simply omitted (no
+// error), and an empty/nil ids slice returns an empty result.
+func TestGetDocumentsBatchesInOneQuery(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "doc-one", Content: "content one"}
+	r1, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "doc-two", Content: "content two"}
+	r2, err := store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	docs, err := store.GetDocuments(db, []int64{r1.ID, r2.ID, 9999})
+	require.NoError(t, err)
+	require.Len(t, docs, 2, "a missing id is simply omitted, not an error")
+
+	byID := map[int64]store.Document{}
+	for _, d := range docs {
+		byID[d.ID] = d
+	}
+	assert.Equal(t, "doc-one", byID[r1.ID].Title)
+	assert.Equal(t, "content one", byID[r1.ID].Content)
+	assert.Equal(t, "doc-two", byID[r2.ID].Title)
+}
+
+// TestGetDocumentsEmpty confirms an empty/nil ids slice short-circuits to
+// an empty result without querying.
+func TestGetDocumentsEmpty(t *testing.T) {
+	db := testDB(t)
+	docs, err := store.GetDocuments(db, nil)
+	require.NoError(t, err)
+	assert.Empty(t, docs)
+}
+
+// TestGetDocumentsPopulatesSessionIDMetadataAndTags covers GetDocuments'
+// scan of a row with session_id, metadata, and tags all set — the
+// notes/session_id/metadata/tags "Valid" branches, exercised by
+// TestGetDocumentsBatchesInOneQuery only for the empty-metadata/no-session
+// case.
+func TestGetDocumentsPopulatesSessionIDMetadataAndTags(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:      "decision",
+		Project:   "acme-corp",
+		Title:     "with-session-and-tags",
+		Content:   "content",
+		SessionID: "sess-001",
+		Metadata:  map[string]string{"source": "hook:stop"},
+		Tags:      []string{"tag-a", "tag-b"},
+	}
+	r, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	docs, err := store.GetDocuments(db, []int64{r.ID})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, "sess-001", docs[0].SessionID)
+	assert.Equal(t, map[string]string{"source": "hook:stop"}, docs[0].Metadata)
+	assert.ElementsMatch(t, []string{"tag-a", "tag-b"}, docs[0].Tags)
+}
+
+// TestGetDocumentsMalformedJSONFallsBackToEmpty covers GetDocuments' fallback
+// on unparseable metadata/tags JSON (a defensive branch for pre-existing rows
+// that predate strict validation): both fields fall back to an empty
+// map/slice instead of erroring the whole fetch.
+func TestGetDocumentsMalformedJSONFallsBackToEmpty(t *testing.T) {
+	db := testDB(t)
+
+	_, err := db.Exec(`INSERT INTO documents (type, project, category, title, content, metadata, tags, created_at, updated_at)
+		VALUES ('decision', 'acme-corp', '', 'malformed-json', 'content', 'not-json', 'also-not-json', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+
+	var id int64
+	require.NoError(t, db.QueryRow("SELECT id FROM documents WHERE title = 'malformed-json'").Scan(&id))
+
+	docs, err := store.GetDocuments(db, []int64{id})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Empty(t, docs[0].Metadata)
+	assert.Empty(t, docs[0].Tags)
+}
+
+// TestGetDocumentsQueryError exercises the db.Query error path (closed DB).
+func TestGetDocumentsQueryError(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	require.NoError(t, store.ApplySchema(db))
+	require.NoError(t, db.Close())
+
+	_, err = store.GetDocuments(db, []int64{1})
+	assert.Error(t, err)
+}
+
+// TestDeleteDocumentsTxExecError exercises DeleteDocumentsTx's tx.Exec
+// error path (the documents table dropped mid-transaction).
+func TestDeleteDocumentsTxExecError(t *testing.T) {
+	db := testDB(t)
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	_, err = tx.Exec("DROP TABLE documents")
+	require.NoError(t, err)
+
+	err = store.DeleteDocumentsTx(tx, []int64{1})
+	assert.Error(t, err)
+
+	require.NoError(t, tx.Rollback())
+}
+
+// TestDeleteDocumentsTxBatchesInOneQuery covers store.DeleteDocumentsTx: a
+// single ids[] delete removes every named document, atomically.
+func TestDeleteDocumentsTxBatchesInOneQuery(t *testing.T) {
+	db := testDB(t)
+
+	r1, err := store.UpsertDocument(db, store.Document{Type: "note", Project: "acme-corp", Title: "del-one", Content: "c"})
+	require.NoError(t, err)
+	r2, err := store.UpsertDocument(db, store.Document{Type: "note", Project: "acme-corp", Title: "del-two", Content: "c"})
+	require.NoError(t, err)
+	r3, err := store.UpsertDocument(db, store.Document{Type: "note", Project: "acme-corp", Title: "keep-me", Content: "c"})
+	require.NoError(t, err)
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	require.NoError(t, store.DeleteDocumentsTx(tx, []int64{r1.ID, r2.ID}))
+	require.NoError(t, tx.Commit())
+
+	docs, err := store.GetDocuments(db, []int64{r1.ID, r2.ID, r3.ID})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, "keep-me", docs[0].Title)
+}
+
+// TestDeleteDocumentsTxEmpty confirms an empty ids slice is a no-op.
+func TestDeleteDocumentsTxEmpty(t *testing.T) {
+	db := testDB(t)
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	require.NoError(t, store.DeleteDocumentsTx(tx, nil))
+	require.NoError(t, tx.Commit())
+}
+
 func TestDeleteDocument(t *testing.T) {
 	db := testDB(t)
 

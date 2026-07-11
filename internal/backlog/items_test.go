@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
+	"dangernoodle.io/ouroboros/internal/store"
 )
 
 func createTestProject(t *testing.T, d *sql.DB) *backlog.Project {
@@ -149,6 +150,86 @@ func TestEpicLabelsResolvesRenamedEpicViaAliasFallback(t *testing.T) {
 
 	labels := backlog.EpicLabels(d, []string{"OLD-1"})
 	assert.Equal(t, "renamed", labels["OLD-1"], "keyed by the requested (old) id, not the resolved current id")
+}
+
+// TestGetItemsBatchesInOneQueryPreservingOrder covers backlog.GetItems: a
+// batched fetch of multiple valid ids returns them in the REQUESTED order
+// (not insertion/DB order), including notes (needed by verbose get).
+func TestGetItemsBatchesInOneQueryPreservingOrder(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item1, err := backlog.AddItem(d, p.ID, "AC", "P1", "first", "", "secret notes", "", "")
+	require.NoError(t, err)
+	item2, err := backlog.AddItem(d, p.ID, "AC", "P1", "second", "", "", "", "")
+	require.NoError(t, err)
+
+	// Request in reverse-insertion order to prove GetItems re-sorts to
+	// match the request, not DB/insertion order.
+	items, err := backlog.GetItems(d, []string{item2.ID, item1.ID})
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	assert.Equal(t, item2.ID, items[0].ID, "result order follows request order")
+	assert.Equal(t, item1.ID, items[1].ID)
+	assert.Equal(t, "secret notes", items[1].Notes, "notes are populated (needed by verbose fetch)")
+}
+
+// TestGetItemsMissingIDErrors confirms a nonexistent id (even after alias
+// resolution) errors out the whole call, matching the per-id GetItem loop
+// this replaces — a miss is NOT silently omitted for backlog gets (unlike
+// kb's GetDocuments/GetDocument "nil, nil on miss" contract).
+func TestGetItemsMissingIDErrors(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "exists", "", "", "", "")
+	require.NoError(t, err)
+
+	_, err = backlog.GetItems(d, []string{item.ID, "AC-999"})
+	assert.Error(t, err)
+}
+
+// TestGetItemsResolvesRenamedIDViaAliasFallback verifies the rare
+// renamed-item path: an id missed by the batched IN-query still resolves
+// via the per-id GetItem alias fallback.
+func TestGetItemsResolvesRenamedIDViaAliasFallback(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	item, err := backlog.AddItem(d, p.ID, "AC", "P1", "renamed", "", "", "", "")
+	require.NoError(t, err)
+
+	_, err = d.Exec("INSERT INTO item_id_aliases (old_id, new_id, renamed_at) VALUES (?, ?, ?)",
+		"OLD-1", item.ID, "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	items, err := backlog.GetItems(d, []string{"OLD-1"})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, item.ID, items[0].ID)
+}
+
+// TestGetItemsEmpty confirms an empty/nil ids slice returns an empty result
+// without querying.
+func TestGetItemsEmpty(t *testing.T) {
+	d := testDB(t)
+	items, err := backlog.GetItems(d, nil)
+	require.NoError(t, err)
+	assert.Empty(t, items)
+}
+
+// TestGetItemsQueryError exercises GetItems' propagation of the batched
+// query's error (closed DB) — a hard failure on the primary fetch, distinct
+// from the per-id miss path (TestGetItemsMissingIDErrors) which falls back to
+// GetItem before erroring.
+func TestGetItemsQueryError(t *testing.T) {
+	d, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	require.NoError(t, store.ApplySchema(d))
+	require.NoError(t, d.Close())
+
+	_, err = backlog.GetItems(d, []string{"AC-1"})
+	assert.Error(t, err)
 }
 
 // TestAddItemBeginError exercises AddItem's d.Begin() error path (closed DB).

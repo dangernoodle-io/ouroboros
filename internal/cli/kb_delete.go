@@ -42,14 +42,19 @@ func runKBDelete(out io.Writer, db *sql.DB, idStrs []string) error {
 
 	// All-or-nothing: verify every id exists before deleting any of them, so
 	// a typo among a batch aborts with nothing deleted rather than a partial
-	// delete.
+	// delete. One batched WHERE id IN (...) query instead of one GetDocument
+	// call per id.
+	fetched, err := store.GetDocuments(db, ids)
+	if err != nil {
+		return fmt.Errorf("kb delete: %w", err)
+	}
+	found := make(map[int64]bool, len(fetched))
+	for _, doc := range fetched {
+		found[doc.ID] = true
+	}
 	var missing []string
 	for _, id := range ids {
-		doc, err := store.GetDocument(db, id)
-		if err != nil {
-			return fmt.Errorf("kb delete: %w", err)
-		}
-		if doc == nil {
+		if !found[id] {
 			missing = append(missing, strconv.FormatInt(id, 10))
 		}
 	}
@@ -57,19 +62,20 @@ func runKBDelete(out io.Writer, db *sql.DB, idStrs []string) error {
 		return fmt.Errorf("kb delete: document(s) not found: %s — nothing deleted", strings.Join(missing, ", "))
 	}
 
-	// Atomic batch: every doc delete and its edge cascade cleanup happen in
-	// one tx (mirrors backlog.DeleteItems), followed by a single FTS rebuild
-	// after commit — not one rebuild per id.
+	// Atomic batch: the doc delete (single DELETE ... WHERE id IN) and the
+	// per-id edge cascade cleanup happen in one tx (mirrors
+	// backlog.DeleteItems), followed by a single FTS rebuild after commit —
+	// not one rebuild per id.
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("kb delete: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	if err := store.DeleteDocumentsTx(tx, ids); err != nil {
+		return fmt.Errorf("kb delete: %w", err)
+	}
 	for _, id := range ids {
-		if err := store.DeleteDocumentTx(tx, id); err != nil {
-			return fmt.Errorf("kb delete: %w", err)
-		}
 		if _, err := edges.CascadeDelete(tx, edges.TypeKB, strconv.FormatInt(id, 10)); err != nil {
 			return fmt.Errorf("kb delete: cascade cleanup: %w", err)
 		}

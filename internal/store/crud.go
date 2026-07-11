@@ -364,6 +364,66 @@ func GetDocument(db *sql.DB, id int64) (*Document, error) {
 	return getDocumentExec(db, "id = ?", id)
 }
 
+// GetDocuments fetches documents by id in a single batched query (one
+// `WHERE id IN (...)` instead of one query per id). An id with no matching
+// row is simply omitted from the result, not an error — same "miss is
+// silent" contract as GetDocument returning nil. Result order is DB order,
+// not request order; callers that need request order re-key by ID.
+func GetDocuments(db *sql.DB, ids []int64) ([]Document, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	rows, err := db.Query(`
+		SELECT id, type, project, category, title, content, notes, session_id, metadata, tags, created_at, updated_at
+		FROM documents WHERE id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get documents: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+
+	docs := make([]Document, 0, len(ids))
+	for rows.Next() {
+		var doc Document
+		var metadataJSON, tagsJSON, notes, sessionID sql.NullString
+
+		if err := rows.Scan(&doc.ID, &doc.Type, &doc.Project, &doc.Category, &doc.Title, &doc.Content, &notes, &sessionID, &metadataJSON, &tagsJSON, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan document: %w", err)
+		}
+
+		if notes.Valid {
+			doc.Notes = notes.String
+		}
+		if sessionID.Valid {
+			doc.SessionID = sessionID.String
+		}
+		if metadataJSON.Valid {
+			if err := json.Unmarshal([]byte(metadataJSON.String), &doc.Metadata); err != nil {
+				doc.Metadata = map[string]string{}
+			}
+		}
+		if tagsJSON.Valid {
+			if err := json.Unmarshal([]byte(tagsJSON.String), &doc.Tags); err != nil {
+				doc.Tags = []string{}
+			}
+		}
+
+		docs = append(docs, doc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to get documents: %w", err)
+	}
+
+	return docs, nil
+}
+
 // GetDocumentByKey returns a full Document by its natural key
 // (type, project, category, title). Returns nil, nil if not found.
 func GetDocumentByKey(db *sql.DB, docType, project, category, title string) (*Document, error) {
@@ -609,6 +669,29 @@ func DeleteDocumentTx(tx *sql.Tx, id int64) error {
 	_, err := tx.Exec("DELETE FROM documents WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete document: %w", err)
+	}
+	return nil
+}
+
+// DeleteDocumentsTx deletes documents by id within an existing transaction,
+// as a single `DELETE ... WHERE id IN (...)` instead of one DELETE per id.
+// Mirrors DeleteDocumentTx's contract: caller owns commit/rollback, edge
+// cascade cleanup, and FTS rebuild.
+func DeleteDocumentsTx(tx *sql.Tx, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	_, err := tx.Exec("DELETE FROM documents WHERE id IN ("+strings.Join(placeholders, ",")+")", args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete documents: %w", err)
 	}
 	return nil
 }

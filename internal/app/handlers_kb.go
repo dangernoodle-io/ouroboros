@@ -226,14 +226,23 @@ func getDocuments(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, err
 
 	if len(ids) > 0 {
 		verbose, _ := req.GetArguments()["verbose"].(bool)
-		docs := make([]interface{}, 0, len(ids))
 
+		// Single WHERE id IN (...) query instead of one GetDocument call per
+		// id, then re-keyed by id and walked in the caller's requested order
+		// (fetched is DB order, not request order).
+		fetched, err := store.GetDocuments(db, ids)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		byID := make(map[int64]*store.Document, len(fetched))
+		for i := range fetched {
+			byID[fetched[i].ID] = &fetched[i]
+		}
+
+		docs := make([]interface{}, 0, len(ids))
 		for _, id := range ids {
-			doc, err := store.GetDocument(db, id)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if doc == nil {
+			doc, ok := byID[id]
+			if !ok {
 				// Omit misses
 				continue
 			}
