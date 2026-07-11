@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execSync } = require('child_process');
-const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent, queryKb } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, getBinaryPath, isWithinCooldown, touchFile, matchesAnyPattern, resolveProject, logHookEvent, queryKb, getCooldownDir } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = parseInt(process.env.OUROBOROS_UPC_COOLDOWN_MS, 10) || 300000; // 5 minutes per project (override: OUROBOROS_UPC_COOLDOWN_MS)
 const RESUME_COOLDOWN_MS = 0; // no cooldown for resume prompts
@@ -95,7 +95,7 @@ async function main() {
     }
 
     // Check cooldown per project (resume prompts bypass cooldown)
-    const cooldownFile = `/tmp/.ouroboros-ctx-${project}`;
+    const cooldownFile = getCooldownDir('user-prompt-context', project);
     if (intent !== 'resume' && isWithinCooldown(cooldownFile, COOLDOWN_MS)) {
       process.exit(0);
     }

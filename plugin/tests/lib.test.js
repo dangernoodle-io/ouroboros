@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType, isOuroborosWriteTool, turnAlreadyPersisted } = require('../scripts/lib');
+const { extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType, isOuroborosWriteTool, turnAlreadyPersisted, getCooldownDir, touchFile, isWithinCooldown } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -467,6 +467,89 @@ test('resolveProject - priority: git > filePath > message > transcript', () => {
 });
 
 // Tests for logHookEvent
+// OU-192: cooldown files moved from /tmp to ~/.ouroboros/cooldowns/ (same
+// base as the hook logs) — shared /tmp is multi-user and only sometimes
+// survives reboot.
+test('getCooldownDir - resolves under HOME/.ouroboros/cooldowns', () => {
+  const originalHome = process.env.HOME;
+  try {
+    process.env.HOME = '/home/test-user';
+    delete require.cache[require.resolve('../scripts/lib')];
+    const { getCooldownDir: getDir } = require('../scripts/lib');
+    assert.strictEqual(getDir(), path.join('/home/test-user', '.ouroboros', 'cooldowns'));
+  } finally {
+    process.env.HOME = originalHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+  }
+});
+
+test('getCooldownDir - joins extra path segments (per-hook subdir + key)', () => {
+  const originalHome = process.env.HOME;
+  try {
+    process.env.HOME = '/home/test-user';
+    delete require.cache[require.resolve('../scripts/lib')];
+    const { getCooldownDir: getDir } = require('../scripts/lib');
+    assert.strictEqual(
+      getDir('post-commit-nudge', 'my-project'),
+      path.join('/home/test-user', '.ouroboros', 'cooldowns', 'post-commit-nudge', 'my-project')
+    );
+  } finally {
+    process.env.HOME = originalHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+  }
+});
+
+test('getCooldownDir - falls back to os.homedir() when HOME is unset (e.g. Windows)', () => {
+  const originalHome = process.env.HOME;
+  try {
+    delete process.env.HOME;
+    delete require.cache[require.resolve('../scripts/lib')];
+    const { getCooldownDir: getDir } = require('../scripts/lib');
+    const expectedPrefix = path.join(os.homedir(), '.ouroboros', 'cooldowns', 'x');
+    assert.strictEqual(getDir('x'), expectedPrefix);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    delete require.cache[require.resolve('../scripts/lib')];
+  }
+});
+
+test('touchFile - creates parent cooldown dir recursively under HOME then writes the file', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'touchfile-cooldown-'));
+  const originalHome = process.env.HOME;
+  try {
+    process.env.HOME = tmpHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+    const { getCooldownDir: getDir, touchFile: touch, isWithinCooldown: within } = require('../scripts/lib');
+
+    const cooldownFile = getDir('some-hook', 'some-project');
+    assert.strictEqual(fs.existsSync(cooldownFile), false, 'cooldown file should not exist yet');
+
+    touch(cooldownFile);
+
+    assert(fs.existsSync(cooldownFile), 'cooldown file should exist under ~/.ouroboros/cooldowns/ after touch');
+    assert(cooldownFile.startsWith(path.join(tmpHome, '.ouroboros', 'cooldowns')), 'cooldown file must live under ~/.ouroboros/cooldowns/');
+    assert(within(cooldownFile, 60000), 'freshly touched file should be within a 60s cooldown window');
+  } finally {
+    process.env.HOME = originalHome;
+    delete require.cache[require.resolve('../scripts/lib')];
+    fs.rmSync(tmpHome, { recursive: true });
+  }
+});
+
+test('touchFile - fail-open: unwritable parent does not throw', () => {
+  assert.doesNotThrow(() => {
+    touchFile('/root/nonexistent/invalid/path/that/cannot/exist/cooldown-file');
+  });
+});
+
+test('isWithinCooldown - fail-open: nonexistent cooldown file returns false (not on cooldown)', () => {
+  assert.strictEqual(isWithinCooldown('/tmp/definitely-does-not-exist-cooldown-file-12345', 60000), false);
+});
+
 test('logHookEvent - writes JSONL line with ts and passed fields', () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'logHookEvent-'));
   const originalHome = process.env.HOME;

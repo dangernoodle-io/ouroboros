@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 
-const { readStdin, projectFromPath, isWithinCooldown, touchFile, logHookEvent } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, isWithinCooldown, touchFile, logHookEvent, getCooldownDir } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 300000; // 5 minutes
 
 function getCooldownFile(project) {
   if (!project) {
-    return '/tmp/.ouroboros-commit-nudge-unknown';
+    return getCooldownDir('post-commit-nudge', 'unknown');
   }
   // Sanitize project name: replace path-unsafe characters with hyphens
   const sanitized = project.replace(/[^a-zA-Z0-9._-]/g, '-');
-  return `/tmp/.ouroboros-commit-nudge-${sanitized}`;
+  return getCooldownDir('post-commit-nudge', sanitized);
 }
 
 async function main() {

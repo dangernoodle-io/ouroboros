@@ -8,6 +8,12 @@ const os = require('os');
 const SCRIPT_PATH = path.join(__dirname, '..', 'scripts', 'user-prompt-context.js');
 const FIXTURES_PATH = path.join(__dirname, 'fixtures');
 
+// cooldownFileFor mirrors the script's getCooldownDir('user-prompt-context', key)
+// path construction, scoped to the given HOME dir (test isolation).
+function cooldownFileFor(home, key) {
+  return path.join(home, '.ouroboros', 'cooldowns', 'user-prompt-context', key);
+}
+
 let tempDir;
 let stubPath;
 let homeDir;
@@ -157,7 +163,7 @@ test('classifier: how does the auth middleware work? → specific', () => {
 
 // Test 14: end-to-end Tool loaded. → no output, no cooldown touch
 test('e2e: Tool loaded. → exit 0, no output, no cooldown file touched', () => {
-  const cooldownFile = `/tmp/.ouroboros-ctx-dangernoodle-marketplace`;
+  const cooldownFile = cooldownFileFor(homeDir, 'dangernoodle-marketplace');
   // Remove cooldown if exists
   try { fs.unlinkSync(cooldownFile); } catch (e) {}
 
@@ -209,7 +215,7 @@ test('OU-257: transcript last-touched file in a foreign project is ignored; cwd 
 
   // Clear cooldown so injection isn't suppressed by a real dev session's
   // recent breadboard context injection outside this test.
-  try { fs.unlinkSync('/tmp/.ouroboros-ctx-breadboard'); } catch (e) {}
+  try { fs.unlinkSync(cooldownFileFor(homeDir, 'breadboard')); } catch (e) {}
 
   // Foreign project: dangernoodle-github (last file read in the transcript,
   // but NOT where the session is actually working)
@@ -465,7 +471,7 @@ test('OU-14: default COOLDOWN_MS is 5 minutes (300000ms)', () => {
 test('OU-14: OUROBOROS_UPC_COOLDOWN_MS env override is respected', () => {
   // Write a cooldown file with a timestamp just 2 minutes ago
   const project = 'test-cooldown-override';
-  const cooldownFile = `/tmp/.ouroboros-ctx-${project}`;
+  const cooldownFile = cooldownFileFor(homeDir, project);
   try { fs.unlinkSync(cooldownFile); } catch (e) {}
   fs.writeFileSync(cooldownFile, '');
   // Set mtime to 2 minutes ago
@@ -507,5 +513,5 @@ test('cleanup: remove temp stub dir and HOME', () => {
     fs.rmSync(homeDir, { recursive: true });
   }
   // Clean cooldown files
-  try { fs.unlinkSync(`/tmp/.ouroboros-ctx-ouroboros`); } catch (e) {}
+  try { fs.unlinkSync(cooldownFileFor(homeDir, 'ouroboros')); } catch (e) {}
 });

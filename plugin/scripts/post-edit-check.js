@@ -2,7 +2,7 @@
 
 const path = require('path');
 const crypto = require('crypto');
-const { readStdin, projectFromPath, isWithinCooldown, touchFile, logHookEvent, queryKb } = require(__dirname + '/lib');
+const { readStdin, projectFromPath, isWithinCooldown, touchFile, logHookEvent, queryKb, getCooldownDir } = require(__dirname + '/lib');
 
 const COOLDOWN_MS = 600000; // 10 minutes per file
 
@@ -50,7 +50,7 @@ async function main() {
     for (const filePath of filePaths) {
       // Per-file cooldown
       const fileHash = crypto.createHash('md5').update(filePath).digest('hex').substring(0, 8);
-      const cooldownFile = `/tmp/.ouroboros-stale-${fileHash}`;
+      const cooldownFile = getCooldownDir('post-edit-check', fileHash);
       if (isWithinCooldown(cooldownFile, COOLDOWN_MS)) {
         continue;
       }
