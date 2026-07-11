@@ -36,6 +36,78 @@ type getInput struct {
 	Format      string   `json:"format,omitempty" jsonschema:"structured, md, or html, default structured (roadmap only)"`
 }
 
+// kbInput is the mcpkit-typed input for the kb write tool (OU-2): a batch of
+// entries[], each either a create/natural-key-upsert (id absent) or an
+// id-addressed partial update (id present).
+type kbInput struct {
+	// Entries is tagged omitempty for the same reason getInput.Domain is
+	// (see its comment): old mcp-go behavior returned the SAME verbatim
+	// "entries array is required (batch-only mode)" message for both an
+	// omitted entries key and an empty entries[] array. If go-sdk
+	// schema-validated entries as required, an omitted key would fail
+	// schema validation before handleKBV2 ever runs, with a generic
+	// schema-validation error instead of that message. The handler performs
+	// its own explicit len(in.Entries)==0 check instead.
+	Entries []kbEntryInput `json:"entries,omitempty" jsonschema:"Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?. content max 500 chars; put narrative in notes"`
+}
+
+// kbEntryInput uses POINTER fields (except ID, see below) for presence: a
+// nil pointer means the key was absent, matching parseKBEntryUpdate's
+// presence semantics exactly (a title-only update leaves content/notes/tags
+// untouched instead of clobbering them with zero values). On the create path
+// (id absent) a nil pointer means "unset" -> "" / nil, matching
+// parseKBEntryCreate's silent-zero-value behavior for an absent field.
+//
+// ID is deliberately `any`, NOT a typed pointer wrapper (e.g. a custom
+// `*kbID` struct with its own UnmarshalJSON), despite id needing genuine
+// dual-type decode (JSON number or numeric string). A throwaway probe
+// (confirmed empirically, then deleted) proved a custom struct type here is
+// a hard blocker: go-sdk's input-schema inference (google/jsonschema-go) reflects
+// on the Go type structure independent of any custom json.Unmarshaler --
+// a struct with only unexported fields (needed to store the decoded
+// int64/error out-of-band) yields an empty "type":"object" schema, and
+// go-sdk validates incoming arguments against that schema BEFORE the
+// handler ever runs. That rejects every real id (a JSON number or string)
+// with a generic schema-validation error, breaking the tool outright. `any`
+// reflects as an unrestricted schema (no type constraint, matching old
+// mcp-go's untyped id field), and the raw decoded value (float64/string/
+// bool/nil/map/slice, exactly as the old untyped map-based parser saw it)
+// is parsed by parseKBIDV2, below, reproducing parseKBEntryID verbatim
+// (including its exact error text).
+//
+// ACCEPTED DIVERGENCE (stricter validation on every OTHER field): the old
+// untyped parser silently coerced a present-but-wrong-typed field to its
+// zero value (e.g. title:123 -> title "") since a failed type-assertion
+// just fell through the `if v, ok := ...; ok` guard. go-sdk's JSON
+// unmarshal instead REJECTS a wrong-typed Type/Project/Category/Title/
+// Content/Notes/Tags/Metadata field with a whole-call decode error. This is
+// a deliberate, accepted divergence (real Claude clients always send
+// correctly-typed fields) -- not replicated.
+//
+// ACCEPTED DIVERGENCE (id:null is LOOSER, not stricter): encoding/json
+// decodes an explicit `"id": null` into the `any` field as a Go nil,
+// indistinguishable from an absent key -- both route to parseKBIDV2's
+// present==false branch, i.e. create. The old untyped parser instead saw
+// e["id"] present with a nil value, fell into parseKBEntryID's default
+// branch, and returned a hard "invalid id: <nil>" error. Unlike the
+// stricter-validation divergence above, this one is LOOSER: a caller that
+// explicitly (if unusually) sends id:null now silently creates a new doc
+// instead of erroring. It can't be cleanly closed with the `any`-field
+// approach here (a custom decode type or json.RawMessage both break go-sdk
+// schema inference the same way the deleted struct-based kbID probe did,
+// see ID's comment above) -- tracked for the OU-5 cutover decision.
+type kbEntryInput struct {
+	ID       any                `json:"id,omitempty" jsonschema:"Document id (integer or numeric string) to update in place; omit to create/upsert by type+project+category+title"`
+	Type     *string            `json:"type,omitempty"`
+	Project  *string            `json:"project,omitempty"`
+	Category *string            `json:"category,omitempty"`
+	Title    *string            `json:"title,omitempty"`
+	Content  *string            `json:"content,omitempty"`
+	Notes    *string            `json:"notes,omitempty"`
+	Tags     *[]string          `json:"tags,omitempty"`
+	Metadata *map[string]string `json:"metadata,omitempty"`
+}
+
 // searchInput is the mcpkit-typed union of every search tool parameter
 // across all three domains. Differs from getInput: no ids/verbose/tags,
 // adds Queries (kb batch mode), no by/format (search has no roadmap
