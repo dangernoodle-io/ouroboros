@@ -88,7 +88,7 @@ When in doubt: the caller can always ask for more. They cannot un-spend tokens o
 - `plugin/scripts/bootstrap.js` — single pure-Node SessionStart installer + validator (no npm deps): installs the binary (dev path, local Homebrew, or GitHub release archive, verified via SHA256), then checks the binary and every hook script are on disk, repairing the binary when missing/broken; fail-open, always exits 0
 - `plugin/scripts/lib.js` — shared hook utilities (stdin, project resolution, cooldown, KB formatting)
 - `plugin/scripts/*.js` — hook scripts for KB persistence nudges, context injection, staleness warnings
-- `plugin/skills/` — persist, recall, triage skills
+- `plugin/skills/` — persist, recall, triage, epic skills
 - `plugin/agents/` — backlog-manager, knowledge-explorer subagents
 - `plugin/tests/` — node:test suite (zero npm deps), run via `plugin/tests/run.sh`
 

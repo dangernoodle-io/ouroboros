@@ -35,7 +35,7 @@ The plugin adds, beyond the raw MCP tools:
 
 - Auto-installs the `ouroboros` binary on session start — no manual install step
 - Hooks that inject project KB context into every turn and auto-persist decisions when conversations end
-- Skills: `/persist`, `/recall`, `/triage` for common KB and backlog workflows
+- Skills: `/persist`, `/recall`, `/triage`, `/epic` for common KB and backlog workflows
 - Subagents: `backlog-manager` and `knowledge-explorer` for deeper investigation
 
 Source: [dangernoodle-io/dangernoodle-marketplace](https://github.com/dangernoodle-io/dangernoodle-marketplace).
