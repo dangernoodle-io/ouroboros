@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +14,26 @@ import (
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/backup"
 )
+
+// runGit runs a git command in dir, failing the test on error.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, out)
+}
+
+// gitLogOneline returns "git log --oneline" output for dir; the caller has
+// already ensured at least one commit exists.
+func gitLogOneline(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "log", "--oneline")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git log: %s", out)
+	return strings.TrimSpace(string(out))
+}
 
 var bk *backup.Backup
 
@@ -636,6 +658,111 @@ func TestHandleBacklogBatchCreate(t *testing.T) {
 	for _, r := range resp {
 		assert.Equal(t, "create", r["action"])
 	}
+}
+
+// TestHandleBacklogBatchCreate_BackupCommitFnCalledOnceWithAggregateCount
+// swaps backupCommitFn for a recorder and verifies a 3-item create batch
+// invokes it EXACTLY ONCE, with the aggregate count in the message — not
+// once per item. A git-log-based assertion can't distinguish this: after
+// the first real commit stages a file, every later commit call would find
+// nothing new staged and become a no-op "nothing to commit" return, so
+// per-item-call regressions and the correct single-call behavior are both
+// git-log-invisible. The recorder catches the call count directly.
+func TestHandleBacklogBatchCreate_BackupCommitFnCalledOnceWithAggregateCount(t *testing.T) {
+	resetAllDB(t)
+
+	var calls []string
+	orig := backupCommitFn
+	backupCommitFn = func(_ *backup.Backup, msg string) {
+		calls = append(calls, msg)
+	}
+	t.Cleanup(func() { backupCommitFn = orig })
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "one"},
+			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "two"},
+			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "three"},
+		},
+	})
+
+	// bk itself is irrelevant here — backupCommitFn is fully replaced, so its
+	// nil-check no longer applies; the recorder fires regardless.
+	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	require.Len(t, calls, 1, "a 3-item batch must call backupCommitFn exactly once, not once per item")
+	assert.Equal(t, "batch: 3 items written", calls[0])
+}
+
+// TestHandleBacklogBatchCreate_ProducesBatchLabeledCommit drives a REAL
+// backup.Backup against a temp git repo and confirms handleBacklog produces
+// a batch-labeled commit (backupCommit's success path, OU-71). This does
+// NOT prove call count — see the recorder-based test above for that — only
+// that the real Commit() call chain produces the expected commit message.
+func TestHandleBacklogBatchCreate_ProducesBatchLabeledCommit(t *testing.T) {
+	resetAllDB(t)
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test-user@example.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	runGit(t, repoDir, "config", "commit.gpgsign", "false")
+
+	// Simulate the on-disk snapshot backupCommit stages.
+	snapshotPath := filepath.Join(repoDir, "kb.db")
+	require.NoError(t, exec.Command("touch", snapshotPath).Run())
+
+	realBk := backup.New("dedicated", repoDir, "")
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "one"},
+			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "two"},
+			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "three"},
+		},
+	})
+
+	result, err := handleBacklog(db, realBk)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	log := gitLogOneline(t, repoDir)
+	assert.Contains(t, log, "batch: 3 items written", "handleBacklog must produce a batch-labeled backup commit")
+}
+
+// TestHandleBacklogCreate_BackupCommitErrorDoesNotFailWrite verifies a
+// backup.Commit failure is logged and swallowed (best-effort) rather than
+// failing the write — backupCommit's error branch.
+func TestHandleBacklogCreate_BackupCommitErrorDoesNotFailWrite(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	// RepoPath doesn't exist, so bk.Commit's "git add ." fails (bad cmd.Dir).
+	badBk := backup.New("dedicated", filepath.Join(t.TempDir(), "does-not-exist"), "")
+
+	req := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "resilient"},
+		},
+	})
+
+	result, err := handleBacklog(db, badBk)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError, "a backup commit failure must not fail the write")
+
+	item, err := backlog.GetItem(db, "AC-1")
+	require.NoError(t, err)
+	assert.Equal(t, "resilient", item.Title)
 }
 
 // TestHandleBacklogNoEntriesOrDeleteIDs_Errors verifies backlog rejects a call with neither
