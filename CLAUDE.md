@@ -27,7 +27,6 @@ make lint     # golangci-lint run
 - `internal/backlog/` — backlog CRUD (projects, items, plans, config)
 - `internal/roadmap/` — roadmap CRUD (per-project singletons, item mutations)
 - `internal/edges/` — polymorphic cross-reference graph (item/kb, blocks\|relates\|explains); `[[Title]]` KB autolinking; cascade cleanup on item/kb delete
-- `internal/backup/` — git backup operations
 - `internal/config/` — bootstrap config file + env var loading
 - `internal/kb/` — KB export/import, validation
 - `internal/embed/` — pure-Go, offline static text embeddings (Model2Vec potion-retrieval-32M, int8-quantized, `//go:embed`'d asset); foundation for semantic search — not yet wired into the CLI/MCP surface
@@ -57,9 +56,6 @@ CLI-only ops (run `ouroboros <cmd> --help`): `project` (create/get/list/rename/d
 |---------|-------------|
 | PROJECT_KB_PATH | SQLite database path (primary) |
 | QM_DB_PATH | SQLite database path (alias) |
-| QM_BACKUP_MODE | none, dedicated, or shared |
-| QM_GIT_REPO | Git repository path for backups |
-| QM_SPARSE_PATH | Sparse checkout path (shared mode) |
 
 ## Storage
 

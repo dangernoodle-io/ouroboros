@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,30 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/backup"
 )
-
-// runGit runs a git command in dir, failing the test on error.
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "git %v: %s", args, out)
-}
-
-// gitLogOneline returns "git log --oneline" output for dir; the caller has
-// already ensured at least one commit exists.
-func gitLogOneline(t *testing.T, dir string) string {
-	t.Helper()
-	cmd := exec.Command("git", "log", "--oneline")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "git log: %s", out)
-	return strings.TrimSpace(string(out))
-}
-
-var bk *backup.Backup
 
 func resetAllDB(t *testing.T) {
 	t.Helper()
@@ -122,7 +97,7 @@ func TestHandleBacklogBatchCreateAndUpdate(t *testing.T) {
 		},
 	})
 
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 
 	var resp []map[string]interface{}
@@ -146,7 +121,7 @@ func TestHandleBacklogDeleteNonexistent(t *testing.T) {
 	deleteReq := makeRequest(map[string]interface{}{
 		"delete_ids": []interface{}{"NONEXISTENT"},
 	})
-	deleteResult, err := handleBacklog(db, bk)(context.TODO(), deleteReq)
+	deleteResult, err := handleBacklog(db)(context.TODO(), deleteReq)
 	require.NoError(t, err)
 
 	var deleteResp map[string]interface{}
@@ -171,7 +146,7 @@ func TestHandleBacklogCreate(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -202,7 +177,7 @@ func TestHandleBacklogCreateWithNotesAndComponent(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -238,7 +213,7 @@ func TestHandleBacklogCreateWithEpic(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -265,7 +240,7 @@ func TestHandleBacklogCreateEpicNotFound_Errors(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -302,7 +277,7 @@ func TestHandleBacklogCreateWithAliasResolvedEpic(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 }
@@ -325,7 +300,7 @@ func TestHandleBacklogCreateEpicNotScalar_Errors(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -349,7 +324,7 @@ func TestHandleBacklogUpdateComponent(t *testing.T) {
 			map[string]interface{}{"id": item.ID, "component": "widget"},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -375,7 +350,7 @@ func TestHandleBacklogUpdateEpic(t *testing.T) {
 			map[string]interface{}{"id": item.ID, "epic": epic.ID},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -399,7 +374,7 @@ func TestHandleBacklogUpdateEpicNotFound_Errors(t *testing.T) {
 			map[string]interface{}{"id": item.ID, "priority": "P3", "epic": "AC-999"},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -429,7 +404,7 @@ func TestHandleBacklogUpdateEpicClear(t *testing.T) {
 			map[string]interface{}{"id": item.ID, "priority": "P2", "epic": ""},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -454,7 +429,7 @@ func TestHandleBacklogUpdateEpicNotScalar_Errors(t *testing.T) {
 			map[string]interface{}{"id": item.ID, "epic": []interface{}{"AC-1", "AC-2"}},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -480,7 +455,7 @@ func TestHandleBacklogCreateComponentNotScalar_Errors(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -503,7 +478,7 @@ func TestHandleBacklogUpdateComponentNotScalar_Errors(t *testing.T) {
 			map[string]interface{}{"id": item.ID, "component": []interface{}{"a", "b"}},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -527,7 +502,7 @@ func TestHandleBacklogInvalidPriority(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -545,7 +520,7 @@ func TestHandleBacklogNonexistentProject(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -569,7 +544,7 @@ func TestHandleBacklogDescriptionTooLong(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -594,7 +569,7 @@ func TestHandleBacklogUpdateInvalidPriority(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -613,7 +588,7 @@ func TestHandleBacklogDeleteMultiple(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"delete_ids": []interface{}{item1.ID, item2.ID},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -648,7 +623,7 @@ func TestHandleBacklogBatchCreate(t *testing.T) {
 			},
 		},
 	})
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -660,111 +635,6 @@ func TestHandleBacklogBatchCreate(t *testing.T) {
 	}
 }
 
-// TestHandleBacklogBatchCreate_BackupCommitFnCalledOnceWithAggregateCount
-// swaps backupCommitFn for a recorder and verifies a 3-item create batch
-// invokes it EXACTLY ONCE, with the aggregate count in the message — not
-// once per item. A git-log-based assertion can't distinguish this: after
-// the first real commit stages a file, every later commit call would find
-// nothing new staged and become a no-op "nothing to commit" return, so
-// per-item-call regressions and the correct single-call behavior are both
-// git-log-invisible. The recorder catches the call count directly.
-func TestHandleBacklogBatchCreate_BackupCommitFnCalledOnceWithAggregateCount(t *testing.T) {
-	resetAllDB(t)
-
-	var calls []string
-	orig := backupCommitFn
-	backupCommitFn = func(_ *backup.Backup, msg string) {
-		calls = append(calls, msg)
-	}
-	t.Cleanup(func() { backupCommitFn = orig })
-
-	_, err := backlog.CreateProject(db, "acme-corp", "AC")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "one"},
-			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "two"},
-			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "three"},
-		},
-	})
-
-	// bk itself is irrelevant here — backupCommitFn is fully replaced, so its
-	// nil-check no longer applies; the recorder fires regardless.
-	result, err := handleBacklog(db, nil)(context.TODO(), req)
-	require.NoError(t, err)
-	require.False(t, result.IsError)
-
-	require.Len(t, calls, 1, "a 3-item batch must call backupCommitFn exactly once, not once per item")
-	assert.Equal(t, "batch: 3 items written", calls[0])
-}
-
-// TestHandleBacklogBatchCreate_ProducesBatchLabeledCommit drives a REAL
-// backup.Backup against a temp git repo and confirms handleBacklog produces
-// a batch-labeled commit (backupCommit's success path, OU-71). This does
-// NOT prove call count — see the recorder-based test above for that — only
-// that the real Commit() call chain produces the expected commit message.
-func TestHandleBacklogBatchCreate_ProducesBatchLabeledCommit(t *testing.T) {
-	resetAllDB(t)
-
-	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
-	runGit(t, repoDir, "config", "user.email", "test-user@example.com")
-	runGit(t, repoDir, "config", "user.name", "Test User")
-	runGit(t, repoDir, "config", "commit.gpgsign", "false")
-
-	// Simulate the on-disk snapshot backupCommit stages.
-	snapshotPath := filepath.Join(repoDir, "kb.db")
-	require.NoError(t, exec.Command("touch", snapshotPath).Run())
-
-	realBk := backup.New("dedicated", repoDir, "")
-
-	_, err := backlog.CreateProject(db, "acme-corp", "AC")
-	require.NoError(t, err)
-
-	req := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "one"},
-			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "two"},
-			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "three"},
-		},
-	})
-
-	result, err := handleBacklog(db, realBk)(context.TODO(), req)
-	require.NoError(t, err)
-	require.False(t, result.IsError)
-
-	log := gitLogOneline(t, repoDir)
-	assert.Contains(t, log, "batch: 3 items written", "handleBacklog must produce a batch-labeled backup commit")
-}
-
-// TestHandleBacklogCreate_BackupCommitErrorDoesNotFailWrite verifies a
-// backup.Commit failure is logged and swallowed (best-effort) rather than
-// failing the write — backupCommit's error branch.
-func TestHandleBacklogCreate_BackupCommitErrorDoesNotFailWrite(t *testing.T) {
-	resetAllDB(t)
-
-	_, err := backlog.CreateProject(db, "acme-corp", "AC")
-	require.NoError(t, err)
-
-	// RepoPath doesn't exist, so bk.Commit's "git add ." fails (bad cmd.Dir).
-	badBk := backup.New("dedicated", filepath.Join(t.TempDir(), "does-not-exist"), "")
-
-	req := makeRequest(map[string]interface{}{
-		"entries": []interface{}{
-			map[string]interface{}{"project": "acme-corp", "priority": "P1", "title": "resilient"},
-		},
-	})
-
-	result, err := handleBacklog(db, badBk)(context.TODO(), req)
-	require.NoError(t, err)
-	require.False(t, result.IsError, "a backup commit failure must not fail the write")
-
-	item, err := backlog.GetItem(db, "AC-1")
-	require.NoError(t, err)
-	assert.Equal(t, "resilient", item.Title)
-}
-
 // TestHandleBacklogNoEntriesOrDeleteIDs_Errors verifies backlog rejects a call with neither
 // delete_ids nor entries — this is a write-only tool now, reads live under get/search.
 func TestHandleBacklogNoEntriesOrDeleteIDs_Errors(t *testing.T) {
@@ -773,7 +643,7 @@ func TestHandleBacklogNoEntriesOrDeleteIDs_Errors(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"projects": []interface{}{"acme-corp"},
 	})
-	result, err := handleBacklog(db, bk)(context.TODO(), req)
+	result, err := handleBacklog(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])

@@ -8,17 +8,13 @@ import (
 )
 
 type Config struct {
-	DBPath     string `json:"db_path"`
-	BackupMode string `json:"backup"`
-	GitRepo    string `json:"git_repo,omitempty"`
-	SparseDir  string `json:"sparse_path,omitempty"`
+	DBPath string `json:"db_path"`
 }
 
 func defaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
-		DBPath:     filepath.Join(home, ".local", "share", "ouroboros", "kb.db"),
-		BackupMode: "none",
+		DBPath: filepath.Join(home, ".local", "share", "ouroboros", "kb.db"),
 	}
 }
 
@@ -54,15 +50,6 @@ func Load() (*Config, error) {
 			if file.DBPath != "" {
 				cfg.DBPath = file.DBPath
 			}
-			if file.BackupMode != "" {
-				cfg.BackupMode = file.BackupMode
-			}
-			if file.GitRepo != "" {
-				cfg.GitRepo = file.GitRepo
-			}
-			if file.SparseDir != "" {
-				cfg.SparseDir = file.SparseDir
-			}
 		}
 	}
 
@@ -72,18 +59,8 @@ func Load() (*Config, error) {
 	} else if v := os.Getenv("QM_DB_PATH"); v != "" {
 		cfg.DBPath = v
 	}
-	if v := os.Getenv("QM_BACKUP_MODE"); v != "" {
-		cfg.BackupMode = v
-	}
-	if v := os.Getenv("QM_GIT_REPO"); v != "" {
-		cfg.GitRepo = v
-	}
-	if v := os.Getenv("QM_SPARSE_PATH"); v != "" {
-		cfg.SparseDir = v
-	}
 
 	cfg.DBPath = expandHome(cfg.DBPath)
-	cfg.GitRepo = expandHome(cfg.GitRepo)
 
 	return cfg, nil
 }

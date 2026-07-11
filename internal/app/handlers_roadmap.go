@@ -9,7 +9,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/backup"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -151,7 +150,7 @@ func blockedByPtrArg(args map[string]interface{}, key string) (*[]roadmap.Blocke
 // mutates the per-project roadmap singleton via roadmap.Mutate, which serializes the
 // load->mutate->save cycle in a single transaction. Reads live under get/search
 // domain=roadmap.
-func handleRoadmap(db *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
+func handleRoadmap(db *sql.DB) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := req.GetArguments()
 
@@ -164,17 +163,17 @@ func handleRoadmap(db *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 
 		switch op {
 		case "add":
-			return handleRoadmapAdd(db, bk, project, args)
+			return handleRoadmapAdd(db, project, args)
 		case "update":
-			return handleRoadmapUpdate(db, bk, project, args)
+			return handleRoadmapUpdate(db, project, args)
 		case "move":
-			return handleRoadmapMove(db, bk, project, args)
+			return handleRoadmapMove(db, project, args)
 		case "reorder":
-			return handleRoadmapReorder(db, bk, project, args)
+			return handleRoadmapReorder(db, project, args)
 		case "done":
-			return handleRoadmapDone(db, bk, project, args)
+			return handleRoadmapDone(db, project, args)
 		case "remove":
-			return handleRoadmapRemove(db, bk, project, args)
+			return handleRoadmapRemove(db, project, args)
 		default:
 			return mcp.NewToolResultError(`op is required: must be "add", "update", "move", "reorder", "done", or "remove"`), nil //nolint:nilerr
 		}
@@ -184,7 +183,7 @@ func handleRoadmap(db *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 // validSectionsMsg lists the valid section names for error messages.
 const validSectionsMsg = "now, next, deferred, parked, dropped, or done"
 
-func handleRoadmapAdd(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+func handleRoadmapAdd(db *sql.DB, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	section := roadmap.Section(strArg(args, "section"))
 	if !roadmap.ValidSection(section) {
 		return mcp.NewToolResultError(fmt.Sprintf("invalid section %q: must be %s", section, validSectionsMsg)), nil //nolint:nilerr
@@ -234,11 +233,10 @@ func handleRoadmapAdd(db *sql.DB, bk *backup.Backup, project string, args map[st
 		return mcp.NewToolResultError(mutateErr.Error()), nil
 	}
 
-	backupCommit(bk, fmt.Sprintf("roadmap: added item %d to %s (%s)", id, section, project))
 	return jsonResult(map[string]interface{}{"id": id, "section": string(section)})
 }
 
-func handleRoadmapUpdate(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+func handleRoadmapUpdate(db *sql.DB, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	id, ok := intArg(args)
 	if !ok {
 		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
@@ -277,11 +275,10 @@ func handleRoadmapUpdate(db *sql.DB, bk *backup.Backup, project string, args map
 		return mcp.NewToolResultError(mutateErr.Error()), nil
 	}
 
-	backupCommit(bk, fmt.Sprintf("roadmap: updated item %d (%s)", id, project))
 	return jsonResult(map[string]interface{}{"id": id})
 }
 
-func handleRoadmapMove(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+func handleRoadmapMove(db *sql.DB, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	id, ok := intArg(args)
 	if !ok {
 		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
@@ -304,11 +301,10 @@ func handleRoadmapMove(db *sql.DB, bk *backup.Backup, project string, args map[s
 		return mcp.NewToolResultError(mutateErr.Error()), nil
 	}
 
-	backupCommit(bk, fmt.Sprintf("roadmap: moved item %d to %s (%s)", id, to, project))
 	return jsonResult(map[string]interface{}{"id": id, "section": string(to)})
 }
 
-func handleRoadmapReorder(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+func handleRoadmapReorder(db *sql.DB, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	id, ok := intArg(args)
 	if !ok {
 		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
@@ -326,11 +322,10 @@ func handleRoadmapReorder(db *sql.DB, bk *backup.Backup, project string, args ma
 		return mcp.NewToolResultError(mutateErr.Error()), nil
 	}
 
-	backupCommit(bk, fmt.Sprintf("roadmap: reordered item %d to position %d (%s)", id, int(position), project))
 	return jsonResult(map[string]interface{}{"id": id, "position": int(position)})
 }
 
-func handleRoadmapDone(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+func handleRoadmapDone(db *sql.DB, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	id, ok := intArg(args)
 	if !ok {
 		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
@@ -343,11 +338,10 @@ func handleRoadmapDone(db *sql.DB, bk *backup.Backup, project string, args map[s
 		return mcp.NewToolResultError(mutateErr.Error()), nil
 	}
 
-	backupCommit(bk, fmt.Sprintf("roadmap: marked item %d done (%s)", id, project))
 	return jsonResult(map[string]interface{}{"id": id, "section": string(roadmap.SectionDone)})
 }
 
-func handleRoadmapRemove(db *sql.DB, bk *backup.Backup, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+func handleRoadmapRemove(db *sql.DB, project string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	id, ok := intArg(args)
 	if !ok {
 		return mcp.NewToolResultError("id is required"), nil //nolint:nilerr
@@ -360,7 +354,6 @@ func handleRoadmapRemove(db *sql.DB, bk *backup.Backup, project string, args map
 		return mcp.NewToolResultError(mutateErr.Error()), nil
 	}
 
-	backupCommit(bk, fmt.Sprintf("roadmap: removed item %d (%s)", id, project))
 	return jsonResult(map[string]interface{}{"id": id, "removed": true})
 }
 

@@ -35,7 +35,7 @@ func TestHandleRoadmap_Add(t *testing.T) {
 		},
 	})
 
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -66,7 +66,7 @@ func TestHandleRoadmap_Add_InvalidSection(t *testing.T) {
 		"section": "bogus",
 		"title":   "x",
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -82,7 +82,7 @@ func TestHandleRoadmap_Add_BlockedByMissingProject(t *testing.T) {
 			map[string]interface{}{"project": "", "ref": "OR-9"},
 		},
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -101,7 +101,7 @@ func TestHandleRoadmap_Add_BlockedByMissingRef(t *testing.T) {
 			map[string]interface{}{"project": "other-repo", "ref": ""},
 		},
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -117,7 +117,7 @@ func TestHandleRoadmap_Update_BlockedByMissingProject(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	updateReq := makeRequest(map[string]interface{}{
@@ -126,7 +126,7 @@ func TestHandleRoadmap_Update_BlockedByMissingProject(t *testing.T) {
 			map[string]interface{}{"project": "", "ref": "OR-9"},
 		},
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), updateReq)
+	result, err := handleRoadmap(db)(context.TODO(), updateReq)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -141,13 +141,13 @@ func TestHandleRoadmap_Update(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Original", "body": "orig body",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	updateReq := makeRequest(map[string]interface{}{
 		"op": "update", "project": "acme-corp", "id": float64(1), "title": "Updated title",
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), updateReq)
+	result, err := handleRoadmap(db)(context.TODO(), updateReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -165,7 +165,7 @@ func TestHandleRoadmap_Update_SliceFields(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Original",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	updateReq := makeRequest(map[string]interface{}{
@@ -176,7 +176,7 @@ func TestHandleRoadmap_Update_SliceFields(t *testing.T) {
 			map[string]interface{}{"project": "other-repo", "ref": "OR-1"},
 		},
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), updateReq)
+	result, err := handleRoadmap(db)(context.TODO(), updateReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -197,7 +197,7 @@ func TestHandleRoadmap_Update_NotFound(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"op": "update", "project": "acme-corp", "id": float64(999), "title": "x",
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -209,13 +209,13 @@ func TestHandleRoadmap_Move(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Move me",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	moveReq := makeRequest(map[string]interface{}{
 		"op": "move", "project": "acme-corp", "id": float64(1), "to": "parked",
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), moveReq)
+	result, err := handleRoadmap(db)(context.TODO(), moveReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -236,13 +236,13 @@ func TestHandleRoadmap_Move_InvalidSection(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
 		"op": "move", "project": "acme-corp", "id": float64(1), "to": "bogus",
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -254,13 +254,13 @@ func TestHandleRoadmap_Done(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Finish me",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	doneReq := makeRequest(map[string]interface{}{
 		"op": "done", "project": "acme-corp", "id": float64(1),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), doneReq)
+	result, err := handleRoadmap(db)(context.TODO(), doneReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -276,13 +276,13 @@ func TestHandleRoadmap_Remove(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Delete me",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	removeReq := makeRequest(map[string]interface{}{
 		"op": "remove", "project": "acme-corp", "id": float64(1),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), removeReq)
+	result, err := handleRoadmap(db)(context.TODO(), removeReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -299,7 +299,7 @@ func TestHandleRoadmap_MissingProject_Errors(t *testing.T) {
 	resetDB(t)
 
 	req := makeRequest(map[string]interface{}{"op": "add", "section": "now", "title": "x"})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -309,7 +309,7 @@ func TestHandleRoadmap_InvalidOp_Errors(t *testing.T) {
 	resetDB(t)
 
 	req := makeRequest(map[string]interface{}{"op": "bogus", "project": "acme-corp"})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -320,7 +320,7 @@ func TestHandleRoadmap_MissingID_Errors(t *testing.T) {
 
 	for _, op := range []string{"update", "move", "done", "remove"} {
 		req := makeRequest(map[string]interface{}{"op": op, "project": "acme-corp"})
-		result, err := handleRoadmap(db, nil)(context.TODO(), req)
+		result, err := handleRoadmap(db)(context.TODO(), req)
 		require.NoError(t, err)
 		assert.True(t, result.IsError, "op=%s should require id", op)
 	}
@@ -334,7 +334,7 @@ func TestHandleRoadmap_Singleton(t *testing.T) {
 		req := makeRequest(map[string]interface{}{
 			"op": "add", "project": "acme-corp", "section": "now", "title": "item",
 		})
-		_, err := handleRoadmap(db, nil)(context.TODO(), req)
+		_, err := handleRoadmap(db)(context.TODO(), req)
 		require.NoError(t, err)
 	}
 
@@ -356,7 +356,7 @@ func TestHandleRoadmap_Add_BlockedByNotObject(t *testing.T) {
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 		"blocked_by": []interface{}{"not-an-object"},
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -377,7 +377,7 @@ func TestHandleRoadmap_Add_MutateError(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 	})
-	result, callErr := handleRoadmap(brokenDB, nil)(context.TODO(), req)
+	result, callErr := handleRoadmap(brokenDB)(context.TODO(), req)
 	require.NoError(t, callErr)
 	assert.True(t, result.IsError)
 }
@@ -389,7 +389,7 @@ func TestHandleRoadmap_Move_NotFound(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"op": "move", "project": "acme-corp", "id": float64(9999), "to": "parked",
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -401,7 +401,7 @@ func TestHandleRoadmap_Done_NotFound(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"op": "done", "project": "acme-corp", "id": float64(9999),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -414,12 +414,12 @@ func TestHandleRoadmap_Reorder(t *testing.T) {
 	addReq1 := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "stays first",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq1)
+	_, err := handleRoadmap(db)(context.TODO(), addReq1)
 	require.NoError(t, err)
 	addReq2 := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "reorder me",
 	})
-	_, err = handleRoadmap(db, nil)(context.TODO(), addReq2)
+	_, err = handleRoadmap(db)(context.TODO(), addReq2)
 	require.NoError(t, err)
 
 	// Target index 4 clamps to the end (index 1, after removal) of a
@@ -427,7 +427,7 @@ func TestHandleRoadmap_Reorder(t *testing.T) {
 	reorderReq := makeRequest(map[string]interface{}{
 		"op": "reorder", "project": "acme-corp", "id": float64(2), "position": float64(4),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), reorderReq)
+	result, err := handleRoadmap(db)(context.TODO(), reorderReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -447,13 +447,13 @@ func TestHandleRoadmap_Reorder_MissingPosition(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
 		"op": "reorder", "project": "acme-corp", "id": float64(1),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -465,7 +465,7 @@ func TestHandleRoadmap_Reorder_MissingID(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"op": "reorder", "project": "acme-corp", "position": float64(1),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -477,7 +477,7 @@ func TestHandleRoadmap_Reorder_NotFound(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"op": "reorder", "project": "acme-corp", "id": float64(9999), "position": float64(1),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -491,14 +491,14 @@ func TestHandleRoadmap_Add_EpicAndPosition(t *testing.T) {
 	existingReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "existing",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), existingReq)
+	_, err := handleRoadmap(db)(context.TODO(), existingReq)
 	require.NoError(t, err)
 
 	req := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 		"epic": "BB-707", "position": float64(0),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -520,13 +520,13 @@ func TestHandleRoadmap_Add_NoPosition_AppendsLast(t *testing.T) {
 	firstReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "first",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), firstReq)
+	_, err := handleRoadmap(db)(context.TODO(), firstReq)
 	require.NoError(t, err)
 
 	secondReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "second",
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), secondReq)
+	result, err := handleRoadmap(db)(context.TODO(), secondReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -547,7 +547,7 @@ func TestHandleRoadmap_Add_ComponentNotScalar_Errors(t *testing.T) {
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 		"component": []interface{}{"a", "b"},
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -564,7 +564,7 @@ func TestHandleRoadmap_Add_EpicNotScalar_Errors(t *testing.T) {
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 		"epic": []interface{}{"BB-1", "BB-2"},
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -579,13 +579,13 @@ func TestHandleRoadmap_Update_Epic(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	updateReq := makeRequest(map[string]interface{}{
 		"op": "update", "project": "acme-corp", "id": float64(1), "epic": "BB-707",
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), updateReq)
+	result, err := handleRoadmap(db)(context.TODO(), updateReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -603,14 +603,14 @@ func TestHandleRoadmap_Update_EpicNotScalar_Errors(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "x",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	updateReq := makeRequest(map[string]interface{}{
 		"op": "update", "project": "acme-corp", "id": float64(1),
 		"epic": []interface{}{"BB-1", "BB-2"},
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), updateReq)
+	result, err := handleRoadmap(db)(context.TODO(), updateReq)
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	textContent, ok := mcp.AsTextContent(result.Content[0])
@@ -627,13 +627,13 @@ func TestHandleRoadmap_Move_WithPosition(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Move me",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	moveReq := makeRequest(map[string]interface{}{
 		"op": "move", "project": "acme-corp", "id": float64(1), "to": "deferred", "position": float64(6),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), moveReq)
+	result, err := handleRoadmap(db)(context.TODO(), moveReq)
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 
@@ -651,7 +651,7 @@ func TestHandleRoadmap_Add_DeferredAndDropped(t *testing.T) {
 		req := makeRequest(map[string]interface{}{
 			"op": "add", "project": "acme-corp", "section": section, "title": "item " + section,
 		})
-		result, err := handleRoadmap(db, nil)(context.TODO(), req)
+		result, err := handleRoadmap(db)(context.TODO(), req)
 		require.NoError(t, err)
 		require.False(t, result.IsError, "section=%s", section)
 	}
@@ -669,7 +669,7 @@ func TestHandleRoadmap_Remove_NotFound(t *testing.T) {
 	req := makeRequest(map[string]interface{}{
 		"op": "remove", "project": "acme-corp", "id": float64(9999),
 	})
-	result, err := handleRoadmap(db, nil)(context.TODO(), req)
+	result, err := handleRoadmap(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 }
@@ -684,7 +684,7 @@ func TestHandleGet_DomainRoadmap_Structured(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Structured item",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	getReq := makeRequest(map[string]interface{}{
@@ -707,7 +707,7 @@ func TestHandleGet_DomainRoadmap_Markdown(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "MD item",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	getReq := makeRequest(map[string]interface{}{
@@ -738,7 +738,7 @@ func TestHandleGet_DomainRoadmap_ByEpicResolvesLabel(t *testing.T) {
 		"op": "add", "project": "acme-corp", "section": "now", "title": "epic item",
 		"epic": epicItem.ID,
 	})
-	_, err = handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err = handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	getReq := makeRequest(map[string]interface{}{
@@ -762,7 +762,7 @@ func TestHandleGet_DomainRoadmap_HTML(t *testing.T) {
 		"op": "add", "project": "acme-corp", "section": "now", "title": "HTML item",
 		"component": "widget",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	getReq := makeRequest(map[string]interface{}{
@@ -803,7 +803,7 @@ func TestHandleGet_DomainRoadmap_HTMLByEpicMarksBlockedHeader(t *testing.T) {
 		"op": "add", "project": "acme-corp", "section": "now", "title": "epic item",
 		"epic": epicItem.ID,
 	})
-	_, err = handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err = handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	getReq := makeRequest(map[string]interface{}{
@@ -828,14 +828,14 @@ func TestHandleGet_DomainRoadmap_HTMLFiltersApply(t *testing.T) {
 		"op": "add", "project": "acme-corp", "section": "now", "title": "matches",
 		"component": "widget",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq1)
+	_, err := handleRoadmap(db)(context.TODO(), addReq1)
 	require.NoError(t, err)
 
 	addReq2 := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "other",
 		"component": "gadget",
 	})
-	_, err = handleRoadmap(db, nil)(context.TODO(), addReq2)
+	_, err = handleRoadmap(db)(context.TODO(), addReq2)
 	require.NoError(t, err)
 
 	getReq := makeRequest(map[string]interface{}{
@@ -860,14 +860,14 @@ func TestHandleGet_DomainRoadmap_ComponentAndEpicFilters(t *testing.T) {
 		"op": "add", "project": "acme-corp", "section": "now", "title": "matches",
 		"component": "widget", "epic": "BB-707",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq1)
+	_, err := handleRoadmap(db)(context.TODO(), addReq1)
 	require.NoError(t, err)
 
 	addReq2 := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "other",
 		"component": "gadget",
 	})
-	_, err = handleRoadmap(db, nil)(context.TODO(), addReq2)
+	_, err = handleRoadmap(db)(context.TODO(), addReq2)
 	require.NoError(t, err)
 
 	getReq := makeRequest(map[string]interface{}{
@@ -900,7 +900,7 @@ func TestHandleSearch_DomainRoadmap(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Unique searchable widget",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	searchReq := makeRequest(map[string]interface{}{
@@ -955,7 +955,7 @@ func TestHandleSearch_DomainRoadmap_WithLimit(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "Limited searchable widget",
 	})
-	_, err := handleRoadmap(db, nil)(context.TODO(), addReq)
+	_, err := handleRoadmap(db)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	searchReq := makeRequest(map[string]interface{}{
@@ -981,7 +981,7 @@ func TestHandleSearch_DomainRoadmap_Error(t *testing.T) {
 	addReq := makeRequest(map[string]interface{}{
 		"op": "add", "project": "acme-corp", "section": "now", "title": "widget",
 	})
-	_, err = handleRoadmap(brokenDB, nil)(context.TODO(), addReq)
+	_, err = handleRoadmap(brokenDB)(context.TODO(), addReq)
 	require.NoError(t, err)
 
 	_, err = brokenDB.Exec("DROP TABLE documents_fts")

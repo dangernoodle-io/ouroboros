@@ -12,7 +12,7 @@ import (
 
 // rebuildFTS is a test seam over store.RebuildFTS: tests swap this for a
 // counter to assert a batch call rebuilds the FTS index exactly once, not
-// once per row (mirrors the backupCommitFn seam in internal/app).
+// once per row.
 var rebuildFTS = store.RebuildFTS
 
 // validateEntries validates every create/upsert entry, returning the first

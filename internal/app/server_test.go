@@ -50,7 +50,7 @@ func TestToolsListFootprint(t *testing.T) {
 	defer db.Close()
 	require.NoError(t, store.ApplySchema(db))
 
-	srv := buildServer(db, nil, "test")
+	srv := buildServer(db, "test")
 	registry := srv.ListTools()
 
 	tools := make([]mcp.Tool, 0, len(registry))
@@ -162,7 +162,7 @@ func TestAllToolsRegisteredAtStartup(t *testing.T) {
 	defer db.Close()
 	require.NoError(t, store.ApplySchema(db))
 
-	srv := buildServer(db, nil, "test")
+	srv := buildServer(db, "test")
 
 	allTools := srv.ListTools()
 	t.Logf("startup: %d total tools (expected 5)", len(allTools))
