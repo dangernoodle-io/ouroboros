@@ -11,11 +11,10 @@ import (
 )
 
 // errRoadmapProjectRequired/errRoadmapOpRequired/errRoadmapIDRequired/
-// errRoadmapPositionRequired are the verbatim messages handlers_roadmap.go's
-// handleRoadmap/handleRoadmapUpdate/handleRoadmapMove/handleRoadmapReorder/
-// handleRoadmapDone/handleRoadmapRemove return for a missing project/op/id/
-// position -- reproduced here since roadmapInput schema-declares every one
-// of these fields omitempty (see roadmapInput's comment).
+// errRoadmapPositionRequired are the verbatim messages the old roadmap write
+// handler's per-op validation returned for a missing project/op/id/position
+// -- reproduced here since roadmapInput schema-declares every one of these
+// fields omitempty (see roadmapInput's comment).
 const (
 	errRoadmapProjectRequired  = "project is required"
 	errRoadmapOpRequired       = `op is required: must be "add", "update", "move", "reorder", "done", or "remove"`
@@ -23,14 +22,15 @@ const (
 	errRoadmapPositionRequired = "position is required"
 )
 
-// handleRoadmapV2 is the mcpkit-typed counterpart to handleRoadmap (OU-4):
-// dispatches op=add|update|move|reorder|done|remove against roadmapInput's
-// single flat arg set, reproducing handlers_roadmap.go's per-op validation
-// and verbatim errors exactly (project checked first, matching the old
-// handler's dispatch order), then delegates every mutation to
-// roadmap.Mutate (one tx per op: load->mutate->save->commit, rollback on
-// error, FTS rebuild post-commit) -- reused, not reimplemented.
-func handleRoadmapV2(db *sql.DB) mcpx.Handler[roadmapInput, any] {
+// handleRoadmapV2 (OU-4) dispatches op=add|update|move|reorder|done|remove
+// against roadmapInput's single flat arg set, reproducing the old roadmap
+// write handler's per-op validation and verbatim errors exactly (project
+// checked first, matching the old handler's dispatch order), then delegates
+// every mutation to roadmap.Mutate (one tx per op:
+// load->mutate->save->commit, rollback on error, FTS rebuild post-commit)
+// -- reused, not reimplemented. st.db is read at call time (not at
+// construction time) — see serverState's doc comment.
+func handleRoadmapV2(st *serverState) mcpx.Handler[roadmapInput, any] {
 	return func(_ context.Context, _ *mcpx.CallToolRequest, in roadmapInput) (*mcpx.CallToolResult, any, error) {
 		if in.Project == "" {
 			return mcpx.ErrorResult(errRoadmapProjectRequired), nil, nil
@@ -38,17 +38,17 @@ func handleRoadmapV2(db *sql.DB) mcpx.Handler[roadmapInput, any] {
 
 		switch in.Op {
 		case "add":
-			return handleRoadmapAddV2(db, in)
+			return handleRoadmapAddV2(st.db, in)
 		case "update":
-			return handleRoadmapUpdateV2(db, in)
+			return handleRoadmapUpdateV2(st.db, in)
 		case "move":
-			return handleRoadmapMoveV2(db, in)
+			return handleRoadmapMoveV2(st.db, in)
 		case "reorder":
-			return handleRoadmapReorderV2(db, in)
+			return handleRoadmapReorderV2(st.db, in)
 		case "done":
-			return handleRoadmapDoneV2(db, in)
+			return handleRoadmapDoneV2(st.db, in)
 		case "remove":
-			return handleRoadmapRemoveV2(db, in)
+			return handleRoadmapRemoveV2(st.db, in)
 		default:
 			return mcpx.ErrorResult(errRoadmapOpRequired), nil, nil
 		}

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	mcpkitcli "github.com/dangernoodle-io/mcpkit/cli"
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/app"
@@ -22,6 +23,17 @@ var versionFlag bool
 func init() {
 	rootCmd.Flags().BoolVarP(&versionFlag, "version", "v", false, "Print version and exit")
 
+	// serverCmd is the mcpkit-composed MCP server ("ouroboros server"). A
+	// bare invocation (no subcommand, no --version) also runs it — the
+	// Claude Code plugin launches the bare binary — so
+	// mcpkitcli.UseAsDefault wires serverCmd.RunE onto rootCmd, then the
+	// wrapper below layers the pre-existing --version short-circuit back on
+	// top (UseAsDefault would otherwise overwrite it wholesale).
+	serverCmd := app.NewServerCommand(Version)
+	rootCmd.AddCommand(serverCmd)
+	mcpkitcli.UseAsDefault(rootCmd, serverCmd)
+
+	serveRunE := rootCmd.RunE
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if versionFlag {
 			if Version != "" {
@@ -31,8 +43,8 @@ func init() {
 			}
 			return nil
 		}
-		// No subcommand and no --version: run the MCP server (default action)
-		return app.Serve(Version)
+		// No subcommand and no --version: run the MCP server (default action).
+		return serveRunE(cmd, args)
 	}
 
 	rootCmd.AddCommand(queryCmd)

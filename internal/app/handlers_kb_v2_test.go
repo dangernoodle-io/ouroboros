@@ -33,7 +33,7 @@ func TestHandleKBV2Batch(t *testing.T) {
 		},
 	}}
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, in)
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, in)
 	require.NoError(t, err)
 	require.NotNil(t, res)
 
@@ -55,7 +55,7 @@ func TestHandleKBV2BatchMultiple(t *testing.T) {
 		{Type: strPtrV2("note"), Project: strPtrV2("acme-corp"), Title: strPtrV2("Schema Changes"), Content: strPtrV2("Need migration")},
 	}}
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, in)
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, in)
 	require.NoError(t, err)
 
 	var resp []kb.PutResult
@@ -72,7 +72,7 @@ func TestHandleKBV2BatchMultiple(t *testing.T) {
 func TestHandleKBV2BatchEmpty(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{})
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{})
 	require.NoError(t, err)
 	require.True(t, res.IsError)
 	assert.Equal(t, errKBEntriesRequired, mcpx.ResultText(res))
@@ -84,7 +84,7 @@ func TestHandleKBV2BatchEmpty(t *testing.T) {
 func TestHandleKBV2UpdateByID_RetitleInPlace(t *testing.T) {
 	resetDB(t)
 
-	createRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	createRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("decision"), Project: strPtrV2("acme-corp"), Title: strPtrV2("orig-title"), Content: strPtrV2("c1")},
 	}})
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestHandleKBV2UpdateByID_RetitleInPlace(t *testing.T) {
 	require.NoError(t, jsonUnmarshalText(createRes, &createResp))
 	id := createResp[0].ID
 
-	updateRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	updateRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: float64(id), Title: strPtrV2("renamed-title")},
 	}})
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestHandleKBV2UpdateByID_RetitleInPlace(t *testing.T) {
 func TestHandleKBV2UpdateByID_AllFields(t *testing.T) {
 	resetDB(t)
 
-	createRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	createRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("orig"), Content: strPtrV2("c1")},
 	}})
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestHandleKBV2UpdateByID_AllFields(t *testing.T) {
 	require.NoError(t, jsonUnmarshalText(createRes, &createResp))
 	id := createResp[0].ID
 
-	updateRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	updateRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{
 			ID:       float64(id),
 			Type:     strPtrV2("decision"),
@@ -154,7 +154,7 @@ func TestHandleKBV2UpdateByID_AllFields(t *testing.T) {
 func TestHandleKBV2UpdateByID_NonexistentID_Errors(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: float64(999999), Title: strPtrV2("does not matter")},
 	}})
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestHandleKBV2UpdateByID_NonexistentID_Errors(t *testing.T) {
 func TestHandleKBV2UpdateByID_MixedBatch(t *testing.T) {
 	resetDB(t)
 
-	seedRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	seedRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("existing"), Content: strPtrV2("c1")},
 	}})
 	require.NoError(t, err)
@@ -174,7 +174,7 @@ func TestHandleKBV2UpdateByID_MixedBatch(t *testing.T) {
 	require.NoError(t, jsonUnmarshalText(seedRes, &seedResp))
 	id := seedResp[0].ID
 
-	mixedRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	mixedRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: float64(id), Title: strPtrV2("existing renamed")},
 		{Type: strPtrV2("note"), Project: strPtrV2("acme-corp"), Title: strPtrV2("brand new"), Content: strPtrV2("c2")},
 	}})
@@ -197,7 +197,7 @@ func TestHandleKBV2UpdateByID_MixedBatch(t *testing.T) {
 func TestHandleKBV2UpdateByID_MixedBatchPartialFailure_Atomic(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("should-not-persist"), Content: strPtrV2("c1")},
 		{ID: float64(999999), Title: strPtrV2("does not matter")},
 	}})
@@ -214,7 +214,7 @@ func TestHandleKBV2UpdateByID_MixedBatchPartialFailure_Atomic(t *testing.T) {
 func TestHandleKBV2UpdateByID_StringID(t *testing.T) {
 	resetDB(t)
 
-	createRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	createRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("string-id-orig"), Content: strPtrV2("v1")},
 	}})
 	require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestHandleKBV2UpdateByID_StringID(t *testing.T) {
 	require.NoError(t, jsonUnmarshalText(createRes, &createResp))
 	id := createResp[0].ID
 
-	updateRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	updateRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: fmt.Sprintf("%d", id), Title: strPtrV2("string-id-renamed")},
 	}})
 	require.NoError(t, err)
@@ -239,7 +239,7 @@ func TestHandleKBV2UpdateByID_StringID(t *testing.T) {
 func TestHandleKBV2UpdateByID_InvalidStringID_Errors(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: "abc", Title: strPtrV2("does not matter")},
 	}})
 	require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestHandleKBV2UpdateByID_InvalidStringID_Errors(t *testing.T) {
 func TestHandleKBV2UpdateByID_ZeroID_Errors(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: float64(0), Title: strPtrV2("does not matter")},
 	}})
 	require.NoError(t, err)
@@ -270,7 +270,7 @@ func TestHandleKBV2UpdateByID_ZeroID_Errors(t *testing.T) {
 func TestHandleKBV2UpdateByID_NegativeID_Errors(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: float64(-5), Title: strPtrV2("does not matter")},
 	}})
 	require.NoError(t, err)
@@ -283,7 +283,7 @@ func TestHandleKBV2UpdateByID_NegativeID_Errors(t *testing.T) {
 func TestHandleKBV2UpdateByID_NonScalarID_Errors(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: true, Title: strPtrV2("does not matter")},
 	}})
 	require.NoError(t, err)
@@ -296,7 +296,7 @@ func TestHandleKBV2UpdateByID_NonScalarID_Errors(t *testing.T) {
 func TestHandleKBV2_IDAbsent_StillUpserts(t *testing.T) {
 	resetDB(t)
 
-	first, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	first, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Category: strPtrV2("cat"), Title: strPtrV2("t"), Content: strPtrV2("v1")},
 	}})
 	require.NoError(t, err)
@@ -304,7 +304,7 @@ func TestHandleKBV2_IDAbsent_StillUpserts(t *testing.T) {
 	require.NoError(t, jsonUnmarshalText(first, &firstResp))
 	require.Equal(t, "created", firstResp[0].Action)
 
-	second, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	second, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Category: strPtrV2("cat"), Title: strPtrV2("t"), Content: strPtrV2("v2")},
 	}})
 	require.NoError(t, err)
@@ -324,7 +324,7 @@ func TestHandleKBV2_IDAbsent_StillUpserts(t *testing.T) {
 func TestHandleKBV2ValidationAbortsEntireBatch(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("decision"), Project: strPtrV2("acme-corp"), Title: strPtrV2("Valid entry"), Content: strPtrV2("Content 1")},
 		{Project: strPtrV2("acme-corp"), Title: strPtrV2("Invalid entry"), Content: strPtrV2("Content 2")}, // missing required type
 	}})
@@ -351,7 +351,7 @@ func TestHandleKBV2Batch50Entries(t *testing.T) {
 		}
 	}
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: entries})
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: entries})
 	require.NoError(t, err)
 
 	var resp []kb.PutResult
@@ -368,7 +368,7 @@ func TestHandleKBV2Batch50Entries(t *testing.T) {
 func TestHandleKBV2Batch_CategoryNotesMetadata(t *testing.T) {
 	resetDB(t)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{
 			Type:     strPtrV2("decision"),
 			Project:  strPtrV2("acme-corp"),
@@ -392,12 +392,12 @@ func TestHandleKBV2Batch_CategoryNotesMetadata(t *testing.T) {
 func TestHandleKBV2Batch_ConflictDetected(t *testing.T) {
 	resetDB(t)
 
-	_, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	_, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("decision"), Project: strPtrV2("acme-corp"), Title: strPtrV2("conflict-entry"), Content: strPtrV2("original content")},
 	}})
 	require.NoError(t, err)
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("decision"), Project: strPtrV2("acme-corp"), Title: strPtrV2("conflict-entry"), Content: strPtrV2("changed content")},
 	}})
 	require.NoError(t, err)
@@ -418,7 +418,7 @@ func TestHandleKBV2Batch_ConflictDetected(t *testing.T) {
 func TestHandleKBV2UpdateByID_EmptyContentRejected(t *testing.T) {
 	resetDB(t)
 
-	createRes, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	createRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("t"), Content: strPtrV2("v1")},
 	}})
 	require.NoError(t, err)
@@ -426,7 +426,7 @@ func TestHandleKBV2UpdateByID_EmptyContentRejected(t *testing.T) {
 	require.NoError(t, jsonUnmarshalText(createRes, &createResp))
 	id := createResp[0].ID
 
-	res, _, err := handleKBV2(db)(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
 		{ID: float64(id), Content: strPtrV2("")},
 	}})
 	require.NoError(t, err)

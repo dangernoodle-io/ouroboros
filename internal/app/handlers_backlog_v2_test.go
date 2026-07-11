@@ -35,7 +35,7 @@ func TestHandleBacklogV2BatchCreateAndUpdate(t *testing.T) {
 		{Project: strPtrV2("test-project"), Priority: strPtrV2("P1"), Title: strPtrV2("Task 2 New")},
 	}}
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, in)
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, in)
 	require.NoError(t, err)
 	require.False(t, res.IsError)
 
@@ -55,7 +55,7 @@ func TestHandleBacklogV2BatchCreateAndUpdate(t *testing.T) {
 func TestHandleBacklogV2DeleteNonexistent(t *testing.T) {
 	resetAllDB(t)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		DeleteIDs: []string{"NONEXISTENT"},
 	})
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestHandleBacklogV2DeleteMultiple(t *testing.T) {
 	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "Delete me 2", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		DeleteIDs: []string{item1.ID, item2.ID},
 	})
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestHandleBacklogV2DeleteTakesPriorityOverEntries(t *testing.T) {
 	item1, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Delete me", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		DeleteIDs: []string{item1.ID},
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("should not be created")},
@@ -122,7 +122,7 @@ func TestHandleBacklogV2Create(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P2"), Title: strPtrV2("New task")},
 		},
@@ -145,7 +145,7 @@ func TestHandleBacklogV2CreateWithNotesAndComponent(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{
 				Project:     strPtrV2("acme-corp"),
@@ -180,7 +180,7 @@ func TestHandleBacklogV2CreateWithEpic(t *testing.T) {
 	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("epic child"), Epic: strPtrV2(epic.ID)},
 		},
@@ -201,7 +201,7 @@ func TestHandleBacklogV2CreateEpicNotFound_Errors(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("orphan child"), Epic: strPtrV2("AC-999")},
 		},
@@ -224,7 +224,7 @@ func TestHandleBacklogV2BatchMidBatchError_RollsBackWholeBatch(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("would-be first item")},
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("orphan child"), Epic: strPtrV2("AC-999")},
@@ -260,7 +260,7 @@ func TestHandleBacklogV2CreateWithAliasResolvedEpic(t *testing.T) {
 		"OLD-V2-1", epic.ID, "2024-01-01T00:00:00Z")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("epic child via old id"), Epic: strPtrV2("OLD-V2-1")},
 		},
@@ -278,7 +278,7 @@ func TestHandleBacklogV2UpdateComponent(t *testing.T) {
 	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(item.ID), Component: strPtrV2("widget")},
 		},
@@ -302,7 +302,7 @@ func TestHandleBacklogV2UpdateEpic(t *testing.T) {
 	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(item.ID), Epic: strPtrV2(epic.ID)},
 		},
@@ -325,7 +325,7 @@ func TestHandleBacklogV2UpdateEpicNotFound_Errors(t *testing.T) {
 	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(item.ID), Priority: strPtrV2("P3"), Epic: strPtrV2("AC-999")},
 		},
@@ -352,7 +352,7 @@ func TestHandleBacklogV2UpdateEpicClear(t *testing.T) {
 	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(item.ID), Priority: strPtrV2("P2"), Epic: strPtrV2("")},
 		},
@@ -373,7 +373,7 @@ func TestHandleBacklogV2InvalidPriority(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P9"), Title: strPtrV2("Bad priority task")},
 		},
@@ -386,7 +386,7 @@ func TestHandleBacklogV2InvalidPriority(t *testing.T) {
 func TestHandleBacklogV2NonexistentProject(t *testing.T) {
 	resetAllDB(t)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("nonexistent-project"), Priority: strPtrV2("P1"), Title: strPtrV2("Orphan task")},
 		},
@@ -404,7 +404,7 @@ func TestHandleBacklogV2DescriptionTooLong(t *testing.T) {
 
 	longDesc := strings.Repeat("a", 502)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("Long desc task"), Description: strPtrV2(longDesc)},
 		},
@@ -423,7 +423,7 @@ func TestHandleBacklogV2UpdateInvalidPriority(t *testing.T) {
 	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Original task", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(item.ID), Priority: strPtrV2("INVALID")},
 		},
@@ -442,7 +442,7 @@ func TestHandleBacklogV2UpdateNonexistentID_Errors(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2("AC-999"), Priority: strPtrV2("P1")},
 		},
@@ -463,7 +463,7 @@ func TestHandleBacklogV2UpdateEpicBackrefMalformed_Errors(t *testing.T) {
 	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(item.ID), Epic: strPtrV2("$x")},
 		},
@@ -486,7 +486,7 @@ func TestHandleBacklogV2UpdateInlineEdgeMissingTarget_Errors(t *testing.T) {
 	a, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "item a", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(a.ID), Priority: strPtrV2("P0"), Edges: []edgeInput{{Label: "blocks", Target: "TM-999"}}},
 		},
@@ -506,7 +506,7 @@ func TestHandleBacklogV2BatchCreate(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P0"), Title: strPtrV2("Batch task 1")},
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("Batch task 2")},
@@ -532,7 +532,7 @@ func TestHandleBacklogV2BatchCreateSequentialIDs(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P0"), Title: strPtrV2("first")},
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("second")},
@@ -559,7 +559,7 @@ func TestHandleBacklogV2Create_MissingRequiredFields_SilentlySkipped(t *testing.
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{}, // no id, no project/priority/title -- silently skipped
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("real one")},
@@ -585,7 +585,7 @@ func TestHandleBacklogV2Update_NoFieldsNoEdges_SilentlySkipped(t *testing.T) {
 	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(item.ID)},
 		},
@@ -610,7 +610,7 @@ func TestHandleBacklogV2CreateWithInlineEdges(t *testing.T) {
 	target, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "target", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{
 				Project:  strPtrV2("acme-corp"),
@@ -642,7 +642,7 @@ func TestHandleBacklogV2UpdateWithInlineEdges(t *testing.T) {
 	b, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "b", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{ID: strPtrV2(a.ID), Edges: []edgeInput{{Label: "relates", Target: b.ID}}},
 		},
@@ -684,7 +684,7 @@ func TestHandleBacklogV2InlineEdgeInvalidLabel_Errors(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{
 				Project:  strPtrV2("acme-corp"),
@@ -708,7 +708,7 @@ func TestHandleBacklogV2InlineEdgeMissingTarget_Errors(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{
 				Project:  strPtrV2("acme-corp"),
@@ -737,7 +737,7 @@ func TestHandleBacklogV2BatchEpicBackref_SameBatchCreate(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("EPIC: X")},
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P2"), Title: strPtrV2("child 1"), Epic: strPtrV2("$0")},
@@ -771,7 +771,7 @@ func TestHandleBacklogV2BatchEpicBackref_UpdateReparent(t *testing.T) {
 	existing, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P2", "pre-existing task", "", "", "", "")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("EPIC: Y")},
 			{ID: strPtrV2(existing.ID), Epic: strPtrV2("$0")},
@@ -798,7 +798,7 @@ func TestHandleBacklogV2BatchEpicBackref_ForwardRef_Errors(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P2"), Title: strPtrV2("child (forward ref)"), Epic: strPtrV2("$1")},
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("EPIC: later")},
@@ -822,7 +822,7 @@ func TestHandleBacklogV2BatchEpicBackref_SelfRef_Errors(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("self-ref"), Epic: strPtrV2("$0")},
 		},
@@ -840,7 +840,7 @@ func TestHandleBacklogV2BatchEpicBackref_OutOfRange_Errors(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("EPIC: A")},
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P2"), Title: strPtrV2("out of range ref"), Epic: strPtrV2("$5")},
@@ -860,7 +860,7 @@ func TestHandleBacklogV2BatchEpicBackref_Malformed_Errors(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, bad := range []string{"$", "$x"} {
-		res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 			Entries: []backlogEntryInput{
 				{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("malformed ref " + bad), Epic: strPtrV2(bad)},
 			},
@@ -881,7 +881,7 @@ func TestHandleBacklogV2BatchEpicBackref_UnresolvedPosition_Errors(t *testing.T)
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
 		Entries: []backlogEntryInput{
 			{}, // malformed: no id, no project/priority/title -- silently skipped
 			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P2"), Title: strPtrV2("dangling ref"), Epic: strPtrV2("$0")},
@@ -897,7 +897,7 @@ func TestHandleBacklogV2BatchEpicBackref_UnresolvedPosition_Errors(t *testing.T)
 func TestHandleBacklogV2NoEntriesOrDeleteIDs_Errors(t *testing.T) {
 	resetAllDB(t)
 
-	res, _, err := handleBacklogV2(db)(context.Background(), &mcpx.CallToolRequest{}, backlogInput{})
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{})
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
 	assert.Equal(t, errBacklogEntriesOrDeleteIDsRequired, mcpx.ResultText(res))

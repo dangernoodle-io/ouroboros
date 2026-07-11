@@ -65,7 +65,8 @@ Default DB path: XDG data dir for `ouroboros` (`~/.local/share/ouroboros/kb.db`;
 
 ## Dependencies
 
-- `github.com/mark3labs/mcp-go` — MCP server framework
+- `github.com/dangernoodle-io/mcpkit` (+ `mcpkit/cli`, `mcpkit/mcpx`, `mcpkit/host/generic`) — MCP server framework; the served ouroboros MCP server is the mcpkit-composed `buildServerV2` (`internal/app`), wired into `internal/cli` via `mcpkit/cli.ServerCmd` + `UseAsDefault` (bare `ouroboros` and `ouroboros server` both serve)
+- `github.com/mark3labs/mcp-go` — test-only, the MCP wire-acceptance client (`integration/mcp_acc_test.go`); not imported by served code
 - `modernc.org/sqlite` — pure Go SQLite driver (CGO_ENABLED=0 safe)
 
 ## Guiding principle: token conservation

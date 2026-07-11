@@ -13,10 +13,11 @@ import (
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-// handleGetV2 is the mcpkit-typed counterpart to handleGet: dispatches by
-// required domain (kb|backlog|roadmap), reading from the typed getInput
-// instead of an untyped arg map. req is unused — every input comes from in.
-func handleGetV2(db *sql.DB) mcpx.Handler[getInput, any] {
+// handleGetV2 dispatches by required domain (kb|backlog|roadmap), reading
+// from the typed getInput instead of an untyped arg map. req is unused —
+// every input comes from in. st.db is read at call time (not at
+// construction time) — see serverState's doc comment.
+func handleGetV2(st *serverState) mcpx.Handler[getInput, any] {
 	return func(_ context.Context, _ *mcpx.CallToolRequest, in getInput) (*mcpx.CallToolResult, any, error) {
 		// Explicit missing/empty check (Domain is deliberately not
 		// schema-required — see getInput.Domain's comment): both an omitted
@@ -27,11 +28,11 @@ func handleGetV2(db *sql.DB) mcpx.Handler[getInput, any] {
 		}
 		switch in.Domain {
 		case "kb":
-			return getDocumentsV2(db, in)
+			return getDocumentsV2(st.db, in)
 		case "backlog":
-			return getBacklogItemsV2(db, in)
+			return getBacklogItemsV2(st.db, in)
 		case "roadmap":
-			return getRoadmapV2(db, in)
+			return getRoadmapV2(st.db, in)
 		default:
 			return mcpx.ErrorResult(errDomainRequired), nil, nil
 		}

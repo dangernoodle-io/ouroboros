@@ -10,10 +10,11 @@ import (
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-// handleSearchV2 is the mcpkit-typed counterpart to handleSearch: dispatches
-// by required domain (kb|backlog|roadmap), reading from the typed
-// searchInput instead of an untyped arg map.
-func handleSearchV2(db *sql.DB) mcpx.Handler[searchInput, any] {
+// handleSearchV2 dispatches by required domain (kb|backlog|roadmap),
+// reading from the typed searchInput instead of an untyped arg map. st.db
+// is read at call time (not at construction time) — see serverState's doc
+// comment.
+func handleSearchV2(st *serverState) mcpx.Handler[searchInput, any] {
 	return func(_ context.Context, _ *mcpx.CallToolRequest, in searchInput) (*mcpx.CallToolResult, any, error) {
 		// Explicit missing/empty check — see getInput.Domain's comment;
 		// searchInput.Domain is likewise deliberately not schema-required.
@@ -22,11 +23,11 @@ func handleSearchV2(db *sql.DB) mcpx.Handler[searchInput, any] {
 		}
 		switch in.Domain {
 		case "kb":
-			return searchDocumentsV2(db, in)
+			return searchDocumentsV2(st.db, in)
 		case "backlog":
-			return searchBacklogItemsV2(db, in)
+			return searchBacklogItemsV2(st.db, in)
 		case "roadmap":
-			return searchRoadmapV2(db, in)
+			return searchRoadmapV2(st.db, in)
 		default:
 			return mcpx.ErrorResult(errDomainRequired), nil, nil
 		}
