@@ -497,6 +497,111 @@ func TestReadLastMainAssistantText_MalformedLineSkipped(t *testing.T) {
 	assert.Equal(t, "the real message", readLastMainAssistantText(transcript))
 }
 
+func TestReadLastMainAssistantText_LargeFileUsesTailCap(t *testing.T) {
+	// The target message sits at end-of-file, so it's found whether or not
+	// the cap math is right; this only pins that a >cap file is handled
+	// without error and the tail message is still found (position-invariant
+	// — see TestReadLastMainAssistantText_PartialLeadingLineDropped below for
+	// a test that actually pins the drop-the-partial-line behavior).
+	lines := []string{userLine("start turn")}
+	padding := strings.Repeat("x", 1024)
+	for i := 0; i < 2200; i++ {
+		lines = append(lines, assistantLine(padding))
+	}
+	lines = append(lines, assistantLine("the real message"))
+	transcript := writeTranscript(t, lines)
+
+	info, err := os.Stat(transcript)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(maxHookTailBytes))
+
+	assert.Equal(t, "the real message", readLastMainAssistantText(transcript))
+}
+
+func TestReadLastMainAssistantText_PartialLeadingLineDropped(t *testing.T) {
+	// Pin that the leading-partial-line drop in readTranscriptTail is
+	// load-bearing, not just crash-safe. The fixture is built so the ONLY
+	// main-context assistant record the backward scan could ever match is
+	// the truncated leading fragment itself:
+	//
+	//   file = junkPrefix + wrongJSON + "\n" + garbageTail + "\n"
+	//
+	// junkPrefix's length is chosen (arithmetically, not by trial) so the
+	// tail-cap window starts EXACTLY at the byte where wrongJSON begins.
+	// garbageTail's length is chosen so that window ends exactly at EOF.
+	// That means the captured tail is precisely: wrongJSON + "\n" +
+	// garbageTail + "\n" — garbageTail never parses as JSON, so it's always
+	// skipped.
+	//
+	// - With the drop present: the tail's leading line (wrongJSON) is
+	//   stripped as a presumed-partial fragment, leaving only garbageTail —
+	//   no assistant record survives, so the function returns "".
+	// - Without the drop (mutation-tested below): wrongJSON is kept and,
+	//   since junkPrefix was stripped away by the cap itself, happens to be
+	//   valid standalone JSON — a fully-formed (wrong) assistant record that
+	//   the backward scan would match and return.
+	wrongJSON := assistantLine("WRONG: leaked partial-line fragment")
+	innerLen := len(wrongJSON)
+	require.Less(t, innerLen+2, maxHookTailBytes, "fixture assumes wrongJSON is small relative to the cap")
+
+	junkPrefix := strings.Repeat("j", 4096)
+	afterLen := maxHookTailBytes - innerLen - 2
+	garbageTail := strings.Repeat("z", afterLen)
+
+	transcript := writeTranscript(t, []string{junkPrefix + wrongJSON, garbageTail})
+
+	info, err := os.Stat(transcript)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(maxHookTailBytes))
+	require.EqualValues(t, len(junkPrefix), info.Size()-int64(maxHookTailBytes),
+		"fixture arithmetic must land the tail-cap boundary exactly at wrongJSON's start")
+
+	assert.Equal(t, "", readLastMainAssistantText(transcript),
+		"the partial leading fragment must be dropped, never mis-parsed into a wrong result")
+}
+
+// --- readTranscriptTail error paths -----------------------------------------
+
+func TestReadTranscriptTail_SubCapReadFileErrorReturnsNil(t *testing.T) {
+	// A directory stat-succeeds (size < cap) but os.ReadFile on it fails
+	// (EISDIR) — exercises the small-file os.ReadFile error branch.
+	dir := t.TempDir()
+	assert.Nil(t, readTranscriptTail(dir))
+}
+
+func TestReadTranscriptTail_NoNewlineInCappedTailKeepsWholeTail(t *testing.T) {
+	// A file larger than the cap whose capped tail window contains no
+	// newline at all: the idx<0 branch must keep the whole tail rather
+	// than drop it as a presumed-partial leading line.
+	body := strings.Repeat("y", maxHookTailBytes+4096)
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Greater(t, info.Size(), int64(maxHookTailBytes))
+
+	lines := readTranscriptTail(path)
+	require.Len(t, lines, 1)
+	assert.Equal(t, strings.Repeat("y", maxHookTailBytes), string(lines[0]))
+}
+
+func TestReadTranscriptTail_OverCapOpenErrorReturnsNil(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root: chmod 0o000 does not deny read access")
+	}
+	// A file larger than the cap that os.Stat can see but os.Open cannot
+	// read (permission denied) — exercises the over-cap os.Open error
+	// branch.
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	body := strings.Repeat("y", maxHookTailBytes+4096)
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+	require.NoError(t, os.Chmod(path, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+
+	assert.Nil(t, readTranscriptTail(path))
+}
+
 // --- findGitRoot / projectFromPath -----------------------------------------
 
 func TestFindGitRoot_StartPathIsFile(t *testing.T) {
