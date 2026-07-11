@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
+	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
@@ -150,6 +151,34 @@ func TestEpicLabelsResolvesRenamedEpicViaAliasFallback(t *testing.T) {
 
 	labels := backlog.EpicLabels(d, []string{"OLD-1"})
 	assert.Equal(t, "renamed", labels["OLD-1"], "keyed by the requested (old) id, not the resolved current id")
+}
+
+// TestBlockedEpicsForDetectsIncomingBlocksEdge verifies the epic-axis
+// blocked-header lookup: an epic id targeted by an incoming "blocks" edge is
+// mapped true, an unblocked epic id is simply absent from the result.
+func TestBlockedEpicsForDetectsIncomingBlocksEdge(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	epicItem, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: WiFi map", "", "", "", "")
+	require.NoError(t, err)
+	unblockedEpic, err := backlog.AddItem(d, p.ID, "AC", "P1", "EPIC: unblocked", "", "", "", "")
+	require.NoError(t, err)
+	blocker, err := backlog.AddItem(d, p.ID, "AC", "P1", "blocking item", "", "", "", "")
+	require.NoError(t, err)
+
+	_, err = edges.Link(d, edges.TypeItem, blocker.ID, "blocks", edges.TypeItem, epicItem.ID, p.ID)
+	require.NoError(t, err)
+
+	blocked := backlog.BlockedEpicsFor(d, []string{epicItem.ID, unblockedEpic.ID})
+	assert.True(t, blocked[epicItem.ID])
+	assert.False(t, blocked[unblockedEpic.ID])
+}
+
+// TestBlockedEpicsForEmpty covers the no-ids input.
+func TestBlockedEpicsForEmpty(t *testing.T) {
+	d := testDB(t)
+	assert.Empty(t, backlog.BlockedEpicsFor(d, nil))
 }
 
 // TestGetItemsBatchesInOneQueryPreservingOrder covers backlog.GetItems: a

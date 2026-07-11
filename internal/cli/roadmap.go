@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
-	"dangernoodle.io/ouroboros/internal/edges"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 )
 
@@ -116,21 +115,6 @@ func runRoadmapShow(w io.Writer, db *sql.DB, project, by, component, epic string
 	return nil
 }
 
-// blockedEpicsFor resolves, for each epic id referenced by the roadmap,
-// whether that epic (itself a backlog item) is the target of an incoming
-// "blocks" edge. A lookup failure for one epic id is treated as "not
-// blocked" rather than failing the whole render.
-func blockedEpicsFor(db *sql.DB, epicIDs []string) map[string]bool {
-	blocked := make(map[string]bool, len(epicIDs))
-	for _, id := range epicIDs {
-		sources, err := edges.ItemsByEdge(db, edges.TypeItem, id, "blocks")
-		if err == nil && len(sources) > 0 {
-			blocked[id] = true
-		}
-	}
-	return blocked
-}
-
 // runRoadmapShowHTML renders the roadmap as a self-contained HTML fragment.
 // With no --output, it writes the bare embeddable fragment to w (stdout);
 // with --output/-o, it wraps the fragment in a minimal standalone
@@ -144,7 +128,7 @@ func runRoadmapShowHTML(w io.Writer, db *sql.DB, project, by, component, epic, o
 	rm = roadmap.Filter(rm, component, epic)
 	epicIDs := roadmap.EpicIDs(rm)
 	epicLabels := backlog.EpicLabels(db, epicIDs)
-	blockedEpics := blockedEpicsFor(db, epicIDs)
+	blockedEpics := backlog.BlockedEpicsFor(db, epicIDs)
 	fragment := roadmap.RenderHTML(rm, by, epicLabels, blockedEpics)
 
 	if outPath == "" {
@@ -503,11 +487,8 @@ func maxPriorityNum(priority string) (int, error) {
 	if priority == "" {
 		return 0, nil
 	}
-	if len(priority) < 2 || (priority[0] != 'P' && priority[0] != 'p') {
-		return 0, fmt.Errorf("invalid --priority %q: want P0..P6", priority)
-	}
-	n, err := strconv.Atoi(priority[1:])
-	if err != nil {
+	n, ok := backlog.ParsePriority(priority)
+	if !ok {
 		return 0, fmt.Errorf("invalid --priority %q: want P0..P6", priority)
 	}
 	return n, nil

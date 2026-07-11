@@ -212,6 +212,38 @@ func TestMaxPriorityNumMalformedNumber(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid --priority")
 }
 
+// TestMaxPriorityNumAcceptsWhitespaceCaseAndMultiDigit locks maxPriorityNum's
+// pre-refactor behavior: it already TrimSpace'd before validating, so
+// leading/trailing whitespace, lowercase "p", and multi-digit numbers were
+// (and must remain) ACCEPTED, not rejected — delegating to
+// backlog.ParsePriority must not silently loosen or tighten this.
+func TestMaxPriorityNumAcceptsWhitespaceCaseAndMultiDigit(t *testing.T) {
+	cases := []struct {
+		in    string
+		wantN int
+	}{
+		{" P3", 3},
+		{"P3 ", 3},
+		{"  P3  ", 3},
+		{"p3", 3},
+		{"P10", 10},
+	}
+	for _, tc := range cases {
+		n, err := maxPriorityNum(tc.in)
+		require.NoError(t, err, "input %q should be accepted", tc.in)
+		assert.Equal(t, tc.wantN, n, "input %q", tc.in)
+	}
+}
+
+// TestMaxPriorityNumRejectsInternalWhitespace locks a rejection: whitespace
+// BETWEEN the "P" and the digits (not merely surrounding the whole flag) is
+// malformed both before and after the refactor.
+func TestMaxPriorityNumRejectsInternalWhitespace(t *testing.T) {
+	_, err := maxPriorityNum("P 3")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --priority")
+}
+
 // TestRunRoadmapSeedDefaultStatus covers runRoadmapSeed's default-status
 // assignment (status == "" -> "open"), reachable only via a direct call:
 // the CLI flag default is already "open", so the cobra path never passes

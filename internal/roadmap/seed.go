@@ -1,9 +1,6 @@
 package roadmap
 
 import (
-	"strconv"
-	"strings"
-
 	"dangernoodle.io/ouroboros/internal/backlog"
 )
 
@@ -82,7 +79,7 @@ func bucketSection(bi backlog.Item) Section {
 	if bi.Status == "done" {
 		return SectionDone
 	}
-	n, ok := parsePriorityNum(bi.Priority)
+	n, ok := backlog.ParsePriority(bi.Priority)
 	if !ok {
 		return SectionParked
 	}
@@ -94,20 +91,6 @@ func bucketSection(bi backlog.Item) Section {
 	default:
 		return SectionParked
 	}
-}
-
-// parsePriorityNum parses a "P<n>" priority string (e.g. "P0") into n. Ok is
-// false for an empty/malformed value.
-func parsePriorityNum(priority string) (int, bool) {
-	p := strings.TrimSpace(priority)
-	if len(p) < 2 || (p[0] != 'P' && p[0] != 'p') {
-		return 0, false
-	}
-	n, err := strconv.Atoi(p[1:])
-	if err != nil {
-		return 0, false
-	}
-	return n, true
 }
 
 // findByTicket returns the id of the roadmap item (in any section) whose

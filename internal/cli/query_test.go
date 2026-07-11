@@ -10,18 +10,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	_ "modernc.org/sqlite"
-
 	"dangernoodle.io/ouroboros/internal/store"
+	"dangernoodle.io/ouroboros/internal/testutil"
 )
 
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	require.NoError(t, err)
-	require.NoError(t, store.ApplySchema(db))
-	t.Cleanup(func() { db.Close() })
-	return db
+	return testutil.TestDB(t)
 }
 
 func TestRunQueryByProject(t *testing.T) {
