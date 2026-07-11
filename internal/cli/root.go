@@ -48,6 +48,7 @@ func init() {
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(unlinkCmd)
 	rootCmd.AddCommand(dashboardCmd)
+	rootCmd.AddCommand(hookCmd)
 }
 
 // Execute runs the root command.
