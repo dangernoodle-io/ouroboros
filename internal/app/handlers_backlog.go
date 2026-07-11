@@ -208,6 +208,20 @@ type itemWithEdges struct {
 // getBacklogItems handles domain=backlog reads for the get tool: ids[] fetch, or filters list.
 func getBacklogItems(d *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ids := parseStringSlice(req.GetArguments(), "ids")
+
+	// backlog ids are prefixed strings (e.g. "B1-728"). If the caller
+	// supplied an ids[] array where ANY element failed to parse as a string
+	// (e.g. a JSON number like 728, or a null), that's a type mismatch, not
+	// "no ids" — silently dropping the bad element and returning the rest
+	// would return silently-wrong data. Correctly-typed-but-nonexistent ids
+	// still parse fine here (parsed length == raw length) and fall through
+	// to the ids-fetch branch below (empty result), unaffected. An
+	// explicitly empty ids[] array (len 0 == len 0) falls through to
+	// filter/list mode.
+	if rawIDs, ok := req.GetArguments()["ids"].([]interface{}); ok && len(ids) != len(rawIDs) {
+		return mcp.NewToolResultError(`ids for domain=backlog must be prefixed strings like "B1-728"`), nil //nolint:nilerr
+	}
+
 	if len(ids) > 0 {
 		verbose, _ := req.GetArguments()["verbose"].(bool)
 		items := make([]interface{}, 0, len(ids))

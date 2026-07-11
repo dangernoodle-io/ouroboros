@@ -211,6 +211,19 @@ type docWithEdges struct {
 func getDocuments(db *sql.DB, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// If ids provided, return full documents (omit misses)
 	ids := parseInt64Slice(req.GetArguments(), "ids")
+
+	// kb ids are integers (JSON numbers). If the caller supplied an ids[]
+	// array where ANY element failed to parse as int64 (e.g. a string-typed
+	// id like "1364", or a null), that's a type mismatch, not "no ids" —
+	// silently dropping the bad element and returning the rest would return
+	// silently-wrong data. Correctly-typed-but-nonexistent ids still parse
+	// fine here (parsed length == raw length) and fall through to the
+	// ids-fetch branch below (empty result), unaffected. An explicitly
+	// empty ids[] array (len 0 == len 0) falls through to filter/list mode.
+	if rawIDs, ok := req.GetArguments()["ids"].([]interface{}); ok && len(ids) != len(rawIDs) {
+		return mcp.NewToolResultError("ids for domain=kb must be integers"), nil //nolint:nilerr
+	}
+
 	if len(ids) > 0 {
 		verbose, _ := req.GetArguments()["verbose"].(bool)
 		docs := make([]interface{}, 0, len(ids))

@@ -589,6 +589,98 @@ func TestHandleGetBatchWithMiss(t *testing.T) {
 	assert.Equal(t, "Decision 1", docs[0]["title"])
 }
 
+// TestHandleGetDomainKB_IdsWrongType tests that a non-empty ids[] array of
+// the wrong JSON type (string instead of number) returns an explicit
+// validation error instead of silently falling through to the unfiltered
+// list.
+func TestHandleGetDomainKB_IdsWrongType(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "Decision 1",
+				"content": "Content 1",
+			},
+		},
+	})
+	_, err := handleKB(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "kb",
+		"ids":    []interface{}{"1364"}, // string, wrong type for domain=kb
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	assert.True(t, result.IsError, "string-typed ids for domain=kb must error, not fall through to unfiltered list")
+}
+
+// TestHandleGetDomainKB_IdsCorrectTypeNonexistent_RegressionGuard confirms
+// correctly-typed but nonexistent ids still return an empty list, not an
+// error (regression guard alongside TestHandleGetBatchWithMiss).
+func TestHandleGetDomainKB_IdsCorrectTypeNonexistent_RegressionGuard(t *testing.T) {
+	resetDB(t)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "kb",
+		"ids":    []interface{}{9999.0},
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var docs []map[string]interface{}
+	require.NoError(t, unmarshalResult(result, &docs))
+	assert.Empty(t, docs)
+}
+
+// TestHandleGetDomainKB_IdsMixedValidity tests that a mixed-validity ids[]
+// array (some elements parse, some don't) errors instead of silently
+// dropping the bad element and returning results for the good ones.
+func TestHandleGetDomainKB_IdsMixedValidity(t *testing.T) {
+	resetDB(t)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "kb",
+		"ids":    []interface{}{1.0, "x"},
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	assert.True(t, result.IsError, "mixed-validity ids for domain=kb must error, not silently drop the bad element")
+}
+
+// TestHandleGetDomainKB_IdsEmptyArray_RegressionGuard confirms an explicitly
+// empty ids[] array is still treated as normal list mode (not an error),
+// pinning the boundary against a future refactor flipping the length
+// comparison.
+func TestHandleGetDomainKB_IdsEmptyArray_RegressionGuard(t *testing.T) {
+	resetDB(t)
+
+	putReq := makeRequest(map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{
+				"type":    "decision",
+				"project": "acme-corp",
+				"title":   "Decision 1",
+				"content": "Content 1",
+			},
+		},
+	})
+	_, err := handleKB(db)(context.TODO(), putReq)
+	require.NoError(t, err)
+
+	getReq := makeRequest(map[string]interface{}{
+		"domain": "kb",
+		"ids":    []interface{}{},
+	})
+	result, err := handleGet(db)(context.TODO(), getReq)
+	require.NoError(t, err)
+	require.False(t, result.IsError, "empty ids[] should fall through to list mode, not error")
+}
+
 // TestHandleKBValidationAbortsEntireBatch tests that validation failure aborts whole batch.
 func TestHandleKBValidationAbortsEntireBatch(t *testing.T) {
 	resetDB(t)
@@ -1550,6 +1642,68 @@ func TestHandleGet_DomainBacklog_IdsFetchMiss(t *testing.T) {
 	result, err := handleGet(db)(context.TODO(), req)
 	require.NoError(t, err)
 	assert.True(t, result.IsError, "fetching nonexistent item should return error result")
+}
+
+// TestHandleGet_DomainBacklog_IdsWrongType tests that a non-empty ids[]
+// array of the wrong JSON type (number instead of prefixed string) returns
+// an explicit validation error instead of silently falling through to the
+// unfiltered list.
+func TestHandleGet_DomainBacklog_IdsWrongType(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"ids":    []interface{}{728.0}, // JSON number, wrong type for domain=backlog
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError, "number-typed ids for domain=backlog must error, not fall through to unfiltered list")
+}
+
+// TestHandleGet_DomainBacklog_IdsMixedValidity tests that a mixed-validity
+// ids[] array (some elements parse, some don't) errors instead of silently
+// dropping the bad element and returning results for the good ones.
+func TestHandleGet_DomainBacklog_IdsMixedValidity(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"ids":    []interface{}{item.ID, 2.0},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	assert.True(t, result.IsError, "mixed-validity ids for domain=backlog must error, not silently drop the bad element")
+}
+
+// TestHandleGet_DomainBacklog_IdsEmptyArray_RegressionGuard confirms an
+// explicitly empty ids[] array is still treated as normal list mode (not an
+// error), pinning the boundary against a future refactor flipping the
+// length comparison.
+func TestHandleGet_DomainBacklog_IdsEmptyArray_RegressionGuard(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
+	require.NoError(t, err)
+
+	req := makeRequest(map[string]interface{}{
+		"domain": "backlog",
+		"ids":    []interface{}{},
+	})
+	result, err := handleGet(db)(context.TODO(), req)
+	require.NoError(t, err)
+	require.False(t, result.IsError, "empty ids[] should fall through to list mode, not error")
 }
 
 // TestHandleGet_DomainBacklog_IdsFetchOmitsProjectID tests that ids-fetch response omits project_id/component (omitempty).

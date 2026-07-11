@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType, isOuroborosWriteTool, turnAlreadyPersisted } = require('../scripts/lib');
+const { extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, isSkippedAgentType, isOuroborosWriteTool, turnAlreadyPersisted } = require('../scripts/lib');
 
 test('extractKbBlock - well-formed block returns matched=true + JSON string', () => {
   const message = 'Some text\n```kb\n[{"type":"decision"}]\n```\nMore text';
@@ -66,6 +66,16 @@ test('matchesAnyPattern - no match → false', () => {
   const patterns = [/apple/, /banana/];
   const result = matchesAnyPattern('orange and grape', patterns);
   assert.strictEqual(result, false);
+});
+
+test('DECISION_PATTERNS - "we\'ll use" with ASCII apostrophe matches', () => {
+  const result = matchesAnyPattern("we'll use the retry queue for this", DECISION_PATTERNS);
+  assert.strictEqual(result, true);
+});
+
+test('DECISION_PATTERNS - "we’ll use" with curly apostrophe matches', () => {
+  const result = matchesAnyPattern('we’ll use the retry queue for this', DECISION_PATTERNS);
+  assert.strictEqual(result, true);
 });
 
 test('formatContextLines - empty rows → empty array', () => {

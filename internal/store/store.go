@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode"
 
 	_ "modernc.org/sqlite"
 )
@@ -301,26 +302,26 @@ func RebuildFTS(db *sql.DB) error {
 	return err
 }
 
-// FtsEscape converts a query string into FTS5 implicit AND syntax.
-// Splits on whitespace, strips FTS5 meta chars from each token, and joins with spaces.
+// FtsEscape converts a query string into FTS5 implicit AND syntax. Splits the
+// query on FTS5/unicode61 token boundaries (any rune that isn't a letter or
+// digit — the same boundary unicode61's default tokenizer splits on, e.g.
+// hyphen, underscore, whitespace, and other punctuation), quotes each token
+// as its own phrase, and joins with spaces (implicit AND in FTS5 MATCH
+// syntax). A single hyphenated word like "old-title" is indexed by unicode61
+// as two tokens ("old","title"), so it must be split the same way here —
+// collapsing it into one "oldtitle" phrase would never match anything.
 func FtsEscape(q string) string {
-	tokens := strings.Fields(q)
-	var result []string
+	tokens := strings.FieldsFunc(q, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
 
+	result := make([]string, 0, len(tokens))
 	for _, token := range tokens {
-		// Strip FTS5 meta characters: " * ( ) : - ^ +
-		filtered := strings.Map(func(r rune) rune {
-			switch r {
-			case '"', '*', '(', ')', ':', '-', '^', '+':
-				return -1 // drop this rune
-			default:
-				return r
-			}
-		}, token)
-
-		if filtered != "" {
-			result = append(result, "\""+filtered+"\"")
-		}
+		// Defensive: unreachable given the FieldsFunc boundary above splits
+		// on every non-letter/digit rune, so a token can never contain a
+		// quote. Kept in case a future tokenizer-boundary change allows it.
+		escaped := strings.ReplaceAll(token, "\"", "\"\"")
+		result = append(result, "\""+escaped+"\"")
 	}
 
 	if len(result) == 0 {

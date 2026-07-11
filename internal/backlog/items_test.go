@@ -828,6 +828,28 @@ func TestSearchItemsByTitle(t *testing.T) {
 	assert.Equal(t, "AC-1", items[0].ID)
 }
 
+func TestSearchItemsByHyphenatedTitle(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "fix-hyphen-bug title", "desc", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "other item", "desc", "", "", "")
+	require.NoError(t, err)
+
+	// Hyphenated query must find the hyphenated title.
+	items, err := backlog.SearchItems(d, "fix-hyphen-bug", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "AC-1", items[0].ID)
+
+	// Multi-word hyphenated query.
+	items, err = backlog.SearchItems(d, "fix-hyphen-bug title", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "AC-1", items[0].ID)
+}
+
 func TestSearchItemsByDescriptionAndNotes(t *testing.T) {
 	d := testDB(t)
 	p := createTestProject(t, d)

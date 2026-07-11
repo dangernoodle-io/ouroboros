@@ -189,6 +189,27 @@ func TestQueryDocumentsFTS(t *testing.T) {
 	assert.NotEqual(t, 0.0, summaries[0].Score, "FTS path should populate BM25 score")
 }
 
+func TestQueryDocumentsAllSeparatorQueryFallsBackToList(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "release-process", Content: "some content"}
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "deployment", Content: "other content"}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	// A query made entirely of token separators escapes to "" (no
+	// searchable tokens). This must NOT bind MATCH '' (fts5 syntax error)
+	// — it must fall back to the unfiltered list, honoring other filters.
+	for _, q := range []string{"---", "***", "   "} {
+		summaries, err := store.QueryDocuments(db, nil, nil, nil, q, nil, 50)
+		require.NoError(t, err, "query %q should not error", q)
+		assert.Len(t, summaries, 2, "query %q should fall back to unfiltered list", q)
+	}
+}
+
 func TestQueryDocumentsFTSWithFilters(t *testing.T) {
 	db := testDB(t)
 
@@ -518,13 +539,15 @@ func TestFtsEscape(t *testing.T) {
 	}{
 		{"single word", "foo", "\"foo\""},
 		{"multi word AND", "database choice", "\"database\" \"choice\""},
-		{"token with inner quote", "foo\"bar", "\"foobar\""},
-		{"token with wildcard", "foo*bar", "\"foobar\""},
+		{"token with inner quote", "foo\"bar", "\"foo\" \"bar\""},
+		{"token with wildcard", "foo*bar", "\"foo\" \"bar\""},
 		{"whitespace collapsing", "  foo   bar  ", "\"foo\" \"bar\""},
-		{"hyphen handling", "state-import", "\"stateimport\""},
-		{"multiple FTS meta chars", "foo*bar:baz(qux)", "\"foobarbazqux\""},
+		{"hyphen splits into separate tokens", "state-import", "\"state\" \"import\""},
+		{"multi-word hyphenated query", "old-title search", "\"old\" \"title\" \"search\""},
+		{"underscore splits into separate tokens", "baz_qux", "\"baz\" \"qux\""},
+		{"multiple FTS meta chars", "foo*bar:baz(qux)", "\"foo\" \"bar\" \"baz\" \"qux\""},
 		{"all meta chars stripped", "\"*():-^+", ""},
-		{"preserves non-meta punctuation", "hello.world", "\"hello.world\""},
+		{"dot splits into separate tokens (unicode61 separator)", "hello.world", "\"hello\" \"world\""},
 		{"complex query", "database design patterns", "\"database\" \"design\" \"patterns\""},
 		{"empty string", "", ""},
 		{"only whitespace", "   ", ""},
@@ -1142,6 +1165,37 @@ func TestSearchDocumentsMultiWordPartialMiss(t *testing.T) {
 	require.Len(t, summaries, 0)
 }
 
+func TestSearchDocumentsHyphenatedTitle(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "old-title migration guide",
+		Content: "steps to migrate from the old-title scheme",
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	// Hyphenated single-word query must find the hyphenated title (unicode61
+	// splits "old-title" into two tokens at index time; the query must too).
+	summaries, err := store.SearchDocuments(db, "old-title", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "old-title migration guide", summaries[0].Title)
+
+	// Multi-word hyphenated query.
+	summaries, err = store.SearchDocuments(db, "old-title migration", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "old-title migration guide", summaries[0].Title)
+
+	// Non-hyphenated query still works.
+	summaries, err = store.SearchDocuments(db, "migration", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+}
+
 func TestKeywordSearchMultiProject(t *testing.T) {
 	db := testDB(t)
 
@@ -1282,6 +1336,39 @@ func TestCountDocumentsByTypeFiltered(t *testing.T) {
 	assert.Equal(t, 1, typeMap["decision"])
 	assert.Equal(t, 2, typeMap["fact"])
 	assert.NotContains(t, typeMap, "note")
+}
+
+func TestCountDocumentsByTypeCaseInsensitive(t *testing.T) {
+	db := testDB(t)
+
+	// Seed a doc whose project casing diverges from the canonical name.
+	docs := []store.Document{
+		{Type: "fact", Project: "Acme-Corp", Title: "acme-fact-1", Content: "content"},
+		{Type: "fact", Project: "acme-corp", Title: "acme-fact-2", Content: "content"},
+		{Type: "note", Project: "other-corp", Title: "other-note", Content: "content"},
+	}
+	for _, doc := range docs {
+		_, err := store.UpsertDocument(db, doc)
+		require.NoError(t, err)
+	}
+
+	// Query with the canonical (lowercase) casing must still match the
+	// differently-cased entry — mirrors GetProjectByName's LOWER() match.
+	counts, err := store.CountDocumentsByType(db, []string{"acme-corp"})
+	require.NoError(t, err)
+	require.Len(t, counts, 1)
+	assert.Equal(t, "fact", counts[0].Type)
+	assert.Equal(t, 2, counts[0].Count)
+
+	// Multi-project (IN clause) path is also case-insensitive.
+	counts, err = store.CountDocumentsByType(db, []string{"ACME-CORP", "OTHER-CORP"})
+	require.NoError(t, err)
+	typeMap := make(map[string]int)
+	for _, tc := range counts {
+		typeMap[tc.Type] = tc.Count
+	}
+	assert.Equal(t, 2, typeMap["fact"])
+	assert.Equal(t, 1, typeMap["note"])
 }
 
 func TestCountDocumentsByTypeEmpty(t *testing.T) {
