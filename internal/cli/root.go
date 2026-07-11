@@ -50,7 +50,6 @@ func init() {
 	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(importCmd)
-	rootCmd.AddCommand(statuslineCmd)
 	rootCmd.AddCommand(lsCmd)
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(planCmd)
@@ -60,7 +59,7 @@ func init() {
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(unlinkCmd)
 	rootCmd.AddCommand(dashboardCmd)
-	mcpkitcli.MountProviders(rootCmd, claudeHooksProvider())
+	mcpkitcli.MountProviders(rootCmd, claudeProvider())
 }
 
 // Execute runs the root command.
