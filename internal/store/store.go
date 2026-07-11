@@ -43,21 +43,14 @@ type DocumentSummary struct {
 	Score     float64  `json:"score,omitempty"`
 }
 
-// InitDB initializes the database connection and applies schema.
-// If path is non-empty it is used directly; otherwise the fallback reads
-// PROJECT_KB_PATH and defaults to ~/.local/share/ouroboros/kb.db.
+// InitDB initializes the database connection and applies schema. path must
+// be non-empty; callers resolve the default/fallback path via
+// config.Load().DBPath before calling InitDB.
 func InitDB(path string) (*sql.DB, error) {
+	if path == "" {
+		return nil, fmt.Errorf("InitDB: empty db path")
+	}
 	dbPath := path
-	if dbPath == "" {
-		dbPath = os.Getenv("PROJECT_KB_PATH")
-	}
-	if dbPath == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to determine home directory: %w", err)
-		}
-		dbPath = filepath.Join(homeDir, ".local", "share", "ouroboros", "kb.db")
-	}
 
 	// Create parent directories
 	parentDir := filepath.Dir(dbPath)

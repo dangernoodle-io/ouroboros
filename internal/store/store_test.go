@@ -1766,9 +1766,8 @@ func TestBackfillSessionIDFromMetadata(t *testing.T) {
 func TestInitDBMaxOpenConns(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	t.Setenv("PROJECT_KB_PATH", dbPath)
 
-	db, err := store.InitDB("")
+	db, err := store.InitDB(dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
 
@@ -1792,18 +1791,11 @@ func TestInitDB_ExplicitPath(t *testing.T) {
 	assert.Equal(t, 1, n)
 }
 
-func TestInitDB_EmptyPathFallsBackToEnv(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "init-test-env.db")
-	t.Setenv("PROJECT_KB_PATH", dbPath)
-
+func TestInitDB_EmptyPathErrors(t *testing.T) {
 	db, err := store.InitDB("")
-	require.NoError(t, err)
-	t.Cleanup(func() { db.Close() })
-
-	var n int
-	require.NoError(t, db.QueryRow("SELECT 1").Scan(&n))
-	assert.Equal(t, 1, n)
+	require.Error(t, err)
+	require.Nil(t, db)
+	assert.Contains(t, err.Error(), "empty db path")
 }
 
 func TestQueryDocuments_UpdatedAtDateFormat(t *testing.T) {
