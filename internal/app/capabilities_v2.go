@@ -19,52 +19,69 @@ const (
 )
 
 // getCapability and searchCapability are mcpkit Capabilities for the get and
-// search read tools (OU-1). Annotations (ReadOnlyHint etc.) are DEFERRED —
-// mcpkit's AddTool chokepoint has no annotation support yet (MC-8 left it as
-// future work) and hand-rolling go-sdk annotations here would leak go-sdk
-// past the mcpx seam. This is advisory-only; a mcpkit follow-up will restore
-// hints once it grows that knob.
+// search read tools (OU-1). Both carry ReadOnlyHint, matching buildServer's
+// toolAnnotation(mcp.ToBoolPtr(true), nil, nil) mapping (server.go).
 type getCapability struct{ db *sql.DB }
 
 func (c getCapability) Attach(r *mcpkit.Registrar) error {
-	mcpkit.AddTool(r, &mcpx.Tool{Name: "get", Description: descGetToolV2}, handleGetV2(c.db))
+	mcpkit.AddTool(r, &mcpx.Tool{
+		Name:        "get",
+		Description: descGetToolV2,
+		Annotations: &mcpx.ToolAnnotations{ReadOnlyHint: true},
+	}, handleGetV2(c.db))
 	return nil
 }
 
 type searchCapability struct{ db *sql.DB }
 
 func (c searchCapability) Attach(r *mcpkit.Registrar) error {
-	mcpkit.AddTool(r, &mcpx.Tool{Name: "search", Description: descSearchToolV2}, handleSearchV2(c.db))
+	mcpkit.AddTool(r, &mcpx.Tool{
+		Name:        "search",
+		Description: descSearchToolV2,
+		Annotations: &mcpx.ToolAnnotations{ReadOnlyHint: true},
+	}, handleSearchV2(c.db))
 	return nil
 }
 
 // kbCapability is the mcpkit Capability for the kb write tool (OU-2).
-// Annotations (idempotent hint) are DEFERRED per OU-293 -- same chokepoint
-// limitation as getCapability/searchCapability, see their comment.
+// Carries IdempotentHint, matching buildServer's toolAnnotation(nil, nil,
+// mcp.ToBoolPtr(true)) mapping (server.go).
 type kbCapability struct{ db *sql.DB }
 
 func (c kbCapability) Attach(r *mcpkit.Registrar) error {
-	mcpkit.AddTool(r, &mcpx.Tool{Name: "kb", Description: descKBToolV2}, handleKBV2(c.db))
+	mcpkit.AddTool(r, &mcpx.Tool{
+		Name:        "kb",
+		Description: descKBToolV2,
+		Annotations: &mcpx.ToolAnnotations{IdempotentHint: true},
+	}, handleKBV2(c.db))
 	return nil
 }
 
 // backlogCapability is the mcpkit Capability for the backlog write tool
-// (OU-3). Annotations (destructive hint) are DEFERRED per OU-293 -- same
-// chokepoint limitation as getCapability/searchCapability, see their comment.
+// (OU-3). Carries DestructiveHint, matching buildServer's
+// toolAnnotation(nil, mcp.ToBoolPtr(true), nil) mapping (server.go).
 type backlogCapability struct{ db *sql.DB }
 
 func (c backlogCapability) Attach(r *mcpkit.Registrar) error {
-	mcpkit.AddTool(r, &mcpx.Tool{Name: "backlog", Description: descBacklogToolV2}, handleBacklogV2(c.db))
+	mcpkit.AddTool(r, &mcpx.Tool{
+		Name:        "backlog",
+		Description: descBacklogToolV2,
+		Annotations: &mcpx.ToolAnnotations{DestructiveHint: mcpx.BoolPtr(true)},
+	}, handleBacklogV2(c.db))
 	return nil
 }
 
 // roadmapCapability is the mcpkit Capability for the roadmap write tool
-// (OU-4, the last write tool before OU-5 cutover). Annotations (destructive
-// hint) are DEFERRED per OU-293 -- same chokepoint limitation as
-// getCapability/searchCapability, see their comment.
+// (OU-4, the last write tool before OU-5 cutover). Carries DestructiveHint,
+// matching buildServer's toolAnnotation(nil, mcp.ToBoolPtr(true), nil)
+// mapping (server.go).
 type roadmapCapability struct{ db *sql.DB }
 
 func (c roadmapCapability) Attach(r *mcpkit.Registrar) error {
-	mcpkit.AddTool(r, &mcpx.Tool{Name: "roadmap", Description: descRoadmapToolV2}, handleRoadmapV2(c.db))
+	mcpkit.AddTool(r, &mcpx.Tool{
+		Name:        "roadmap",
+		Description: descRoadmapToolV2,
+		Annotations: &mcpx.ToolAnnotations{DestructiveHint: mcpx.BoolPtr(true)},
+	}, handleRoadmapV2(c.db))
 	return nil
 }

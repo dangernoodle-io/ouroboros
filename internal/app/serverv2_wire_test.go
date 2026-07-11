@@ -548,6 +548,70 @@ func TestWireRoadmapV2_UpdateNullKB_LeavesUnchanged(t *testing.T) {
 	assert.Equal(t, []int{3, 4}, rm.Sections.Now[0].KB, "kb: null is a no-op here (divergence from the old handler, which cleared it)")
 }
 
+// TestWireV2_ServerInstructions_AdvertisedAtInitialize proves buildServerV2
+// advertises serverInstructions verbatim over the wire. testkit.Harness
+// doesn't expose the underlying ClientSession's InitializeResult, so this
+// connects an in-process client directly against the *mcpkit.App (the same
+// mcpx.InMemoryPair + mcpx.NewClient pattern mcpkit's own mcpx_test.go uses
+// for TestServerInstructions), reading Instructions off
+// ClientSession.InitializeResult() -- the sole wire-level path mcpx exposes.
+func TestWireV2_ServerInstructions_AdvertisedAtInitialize(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	serverT, clientT := mcpx.InMemoryPair()
+
+	ctx := context.Background()
+	srvSess, err := app.Connect(ctx, serverT)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = srvSess.Close() })
+
+	client := mcpx.NewClient(mcpx.Implementation{Name: "instructions-test-client", Version: "0.0.0"}, nil)
+	clientSess, err := client.Connect(ctx, clientT)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = clientSess.Close() })
+
+	res := clientSess.InitializeResult()
+	require.NotNil(t, res)
+	assert.Equal(t, serverInstructions, res.Instructions)
+}
+
+// TestWireV2_ToolAnnotations_MatchOldServerMapping proves tools/list carries
+// the exact annotation mapping buildServer's toolAnnotation(...) calls set
+// (server.go): get/search ReadOnlyHint, kb IdempotentHint,
+// backlog/roadmap DestructiveHint.
+func TestWireV2_ToolAnnotations_MatchOldServerMapping(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.ListTools(context.Background())
+	require.NoError(t, err)
+
+	byName := make(map[string]*mcpx.Tool, len(res.Tools))
+	for _, tool := range res.Tools {
+		byName[tool.Name] = tool
+	}
+
+	for _, name := range []string{"get", "search"} {
+		require.NotNil(t, byName[name].Annotations, "%s tool missing annotations", name)
+		assert.True(t, byName[name].Annotations.ReadOnlyHint, "%s tool should carry ReadOnlyHint", name)
+	}
+
+	require.NotNil(t, byName["kb"].Annotations)
+	assert.True(t, byName["kb"].Annotations.IdempotentHint, "kb tool should carry IdempotentHint")
+
+	for _, name := range []string{"backlog", "roadmap"} {
+		require.NotNil(t, byName[name].Annotations, "%s tool missing annotations", name)
+		require.NotNil(t, byName[name].Annotations.DestructiveHint, "%s tool should carry DestructiveHint", name)
+		assert.True(t, *byName[name].Annotations.DestructiveHint, "%s tool's DestructiveHint should be true", name)
+	}
+}
+
 // TestWireRoadmapV2_ComponentNotScalar_Errors documents+guards the accepted
 // divergence (see roadmapInput's comment): a non-scalar component (a JSON
 // list) over the real wire codec still errors, just with a different
