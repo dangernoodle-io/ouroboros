@@ -465,7 +465,8 @@ func QueryDocuments(db *sql.DB, types []string, projects []string, categories []
 
 	var query string
 	var args []interface{}
-	isFTS := ftsQuery != ""
+	escaped := FtsEscape(ftsQuery)
+	isFTS := escaped != ""
 
 	if isFTS {
 		// FTS5 query
@@ -475,7 +476,7 @@ func QueryDocuments(db *sql.DB, types []string, projects []string, categories []
 			JOIN documents_fts fts ON d.id = fts.rowid
 			WHERE fts.documents_fts MATCH ?
 		`
-		args = append(args, FtsEscape(ftsQuery))
+		args = append(args, escaped)
 
 		query += typeFilter("d.", types, &args)
 		query += projectFilter("d.", projects, &args)
@@ -726,15 +727,18 @@ func CountDocumentsByType(db *sql.DB, projects []string) ([]TypeCount, error) {
 	if len(projects) > 0 {
 		query += " WHERE"
 		if len(projects) == 1 {
-			query += " project = ?"
+			// Case-insensitive to match GetProjectByName — a KB entry whose
+			// project casing diverges from the canonical project name must
+			// still be counted, not silently dropped.
+			query += " LOWER(project) = LOWER(?)"
 			args = append(args, projects[0])
 		} else {
 			placeholders := make([]string, len(projects))
 			for i, p := range projects {
-				placeholders[i] = "?"
+				placeholders[i] = "LOWER(?)"
 				args = append(args, p)
 			}
-			query += " project IN (" + strings.Join(placeholders, ",") + ")"
+			query += " LOWER(project) IN (" + strings.Join(placeholders, ",") + ")"
 		}
 	}
 

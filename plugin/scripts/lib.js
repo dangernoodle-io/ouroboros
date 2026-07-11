@@ -255,7 +255,7 @@ const DECISION_PATTERNS = [
   /\bchose .+ over\b/i,
   /\bdesign decision/i,
   /\bgoing with\b/i,
-  /\bwe('|')ll use\b/i,
+  /\bwe['’]ll use\b/i,
   /\binstead of\b.{0,30}\bbecause\b/i,
 ];
 
