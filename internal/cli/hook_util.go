@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -30,6 +31,36 @@ var kbFenceRe = regexp.MustCompile("```kb\\s*\n([\\s\\S]*?)\n```")
 var ouroborosWriteToolRe = regexp.MustCompile(`(?i)(^|_)(kb|backlog|roadmap|put|item)$`)
 
 var ouroborosNameRe = regexp.MustCompile(`(?i)ouroboros`)
+
+// skipAgentTypes lists agent types whose SubagentStop event should never
+// trigger a kb-block persist attempt (read-only exploration/research agents
+// with no decisions of their own to persist). Mirrors lib.js's
+// SKIP_AGENT_TYPES.
+var skipAgentTypes = []string{"Explore", "knowledge-explorer", "backlog-manager"}
+
+// isSkippedAgentType reports whether agentType (or, for a "namespace:type"
+// value, its colon-suffix tail) is in skipAgentTypes. Faithful port of
+// lib.js isSkippedAgentType.
+func isSkippedAgentType(agentType string) bool {
+	if agentType == "" {
+		return false
+	}
+	for _, t := range skipAgentTypes {
+		if agentType == t {
+			return true
+		}
+	}
+	tail := agentType
+	if idx := strings.LastIndex(agentType, ":"); idx >= 0 {
+		tail = agentType[idx+1:]
+	}
+	for _, t := range skipAgentTypes {
+		if tail == t {
+			return true
+		}
+	}
+	return false
+}
 
 // tier2Patterns: self-claim signals meaning the context already persisted
 // via a tool/MCP call.

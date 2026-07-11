@@ -52,3 +52,39 @@ func TestRootCmd_ClaudeHooksStopMounted(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "stop", cmd.Use)
 }
+
+// TestClaudeHooksSubagentStop_WireDecodesStdinAndRuns mirrors
+// TestClaudeHooksStop_WireDecodesStdinAndRuns for the SubagentStop event:
+// build the provider's command tree, locate `hooks subagent-stop`, feed it
+// real stdin JSON, and confirm it decodes and runs to a silent exit-0 (too
+// short a message, so runHookSubagentStop short-circuits).
+func TestClaudeHooksSubagentStop_WireDecodesStdinAndRuns(t *testing.T) {
+	isolateHookLog(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROJECT_KB_PATH", filepath.Join(home, "kb.db"))
+	t.Setenv("QM_DB_PATH", "")
+
+	provider := claudeProvider()
+	cmds := provider.Commands()
+	require.Len(t, cmds, 1, "claude namespace is a single top-level command")
+
+	subagentStopCmd, _, err := cmds[0].Find([]string{"hooks", "subagent-stop"})
+	require.NoError(t, err)
+
+	var out bytes.Buffer
+	subagentStopCmd.SetOut(&out)
+	subagentStopCmd.SetIn(strings.NewReader(`{"cwd":"/tmp","session_id":"abc","last_assistant_message":"too short"}`))
+
+	require.NoError(t, subagentStopCmd.RunE(subagentStopCmd, nil))
+	assert.Empty(t, out.String())
+}
+
+// TestRootCmd_ClaudeHooksSubagentStopMounted confirms
+// `ouroboros claude hooks subagent-stop` is reachable from the real rootCmd
+// (root.go wiring), not just from a freshly-built provider.
+func TestRootCmd_ClaudeHooksSubagentStopMounted(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"claude", "hooks", "subagent-stop"})
+	require.NoError(t, err)
+	assert.Equal(t, "subagent-stop", cmd.Use)
+}
