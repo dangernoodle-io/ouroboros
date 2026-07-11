@@ -98,7 +98,7 @@ func buildServer(db *sql.DB, version string) *server.MCPServer {
 
 	s.AddTool(mcp.NewTool("backlog",
 		mcp.WithDescription("Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. Reads live under get/search domain=backlog."),
-		mcp.WithArray("entries", mcp.Description("Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes")),
+		mcp.WithArray("entries", mcp.Description("Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent")),
 		mcp.WithArray("delete_ids", mcp.Description("Item IDs to delete")),
 		toolAnnotation(nil, mcp.ToBoolPtr(true), nil),
 	), withRecover(handleBacklog(db)))
