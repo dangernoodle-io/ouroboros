@@ -15,6 +15,7 @@ const (
 	descSearchToolV2  = "Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes)."
 	descKBToolV2      = "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb."
 	descBacklogToolV2 = "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. Reads live under get/search domain=backlog."
+	descRoadmapToolV2 = "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done sections) via op=add|update|move|reorder|done|remove. Items carry two single-valued grouping axes: component (structural) and epic (optional; an epic IS a backlog item). Reads live under get/search domain=roadmap."
 )
 
 // getCapability and searchCapability are mcpkit Capabilities for the get and
@@ -54,5 +55,16 @@ type backlogCapability struct{ db *sql.DB }
 
 func (c backlogCapability) Attach(r *mcpkit.Registrar) error {
 	mcpkit.AddTool(r, &mcpx.Tool{Name: "backlog", Description: descBacklogToolV2}, handleBacklogV2(c.db))
+	return nil
+}
+
+// roadmapCapability is the mcpkit Capability for the roadmap write tool
+// (OU-4, the last write tool before OU-5 cutover). Annotations (destructive
+// hint) are DEFERRED per OU-293 -- same chokepoint limitation as
+// getCapability/searchCapability, see their comment.
+type roadmapCapability struct{ db *sql.DB }
+
+func (c roadmapCapability) Attach(r *mcpkit.Registrar) error {
+	mcpkit.AddTool(r, &mcpx.Tool{Name: "roadmap", Description: descRoadmapToolV2}, handleRoadmapV2(c.db))
 	return nil
 }
