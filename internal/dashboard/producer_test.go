@@ -182,6 +182,38 @@ func TestRunSegment_ParentDeadlineShorterThanSpecTimeout(t *testing.T) {
 	assert.Less(t, elapsed, 2*time.Second)
 }
 
+// TestRunSegment_BuiltinGithubCutByParentDeadline is the OU-252 regression
+// test: the github builtin's own `gh pr list` timeout is capped at 10s
+// internally, but it must be preempted by a shorter aggregate refresh
+// deadline (ctx), not left to run to its own cap. The stub gh sleeps far
+// longer than both the deadline and the test's elapsed-time assertion, so a
+// prompt return proves the subprocess was actually killed by ctx firing,
+// not merely raced.
+func TestRunSegment_BuiltinGithubCutByParentDeadline(t *testing.T) {
+	stubGh(t, "#!/bin/sh\nsleep 5\necho '[]'\n")
+
+	dir := initGitRepo(t)
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
+	db := newDashboardTestDB(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	spec := SegmentSpec{ID: "gh", Builtin: "github"}
+
+	start := time.Now()
+	_, _, err := RunSegment(ctx, db, spec, Context{Schema: 1, Repo: dir})
+	elapsed := time.Since(start)
+
+	// githubSegment degrades a killed subprocess to (nil, nil) rather than an
+	// error, so RunSegment itself reports success here — the assertion that
+	// matters is elapsed time: well under the stub's 5s sleep proves ctx
+	// actually cut the subprocess instead of the builtin running to
+	// completion (or to its own internal 10s cap).
+	require.NoError(t, err)
+	assert.Less(t, elapsed, 2*time.Second)
+}
+
 func TestRunSegment_UnknownBuiltin(t *testing.T) {
 	db := newDashboardTestDB(t)
 	spec := SegmentSpec{ID: "nope", Builtin: "nope"}

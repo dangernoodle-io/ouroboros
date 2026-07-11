@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -54,7 +55,7 @@ func TestGitSegment_Branch(t *testing.T) {
 	dir := initGitRepo(t)
 	db := newDashboardTestDB(t)
 
-	frags, err := gitSegment(Context{Repo: dir}, db)
+	frags, err := gitSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 2)
 
@@ -75,7 +76,7 @@ func TestGitSegment_UncommittedChange(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("changed"), 0o644))
 
-	frags, err := gitSegment(Context{Repo: dir}, db)
+	frags, err := gitSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 2)
 
@@ -91,7 +92,7 @@ func TestGitSegment_Worktrees(t *testing.T) {
 	wtDir := filepath.Join(t.TempDir(), "wt2")
 	runGit(t, dir, "worktree", "add", wtDir, "-b", "wt2")
 
-	frags, err := gitSegment(Context{Repo: dir}, db)
+	frags, err := gitSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 3)
 
@@ -118,7 +119,7 @@ func TestGitSegment_DetachedWorktree(t *testing.T) {
 	wtDir := filepath.Join(t.TempDir(), "wt-detached")
 	runGit(t, dir, "worktree", "add", "--detach", wtDir, "HEAD")
 
-	frags, err := gitSegment(Context{Repo: dir}, db)
+	frags, err := gitSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 3)
 
@@ -139,7 +140,7 @@ func TestGitSegment_NoLinkedWorktrees(t *testing.T) {
 	dir := initGitRepo(t)
 	db := newDashboardTestDB(t)
 
-	frags, err := gitSegment(Context{Repo: dir}, db)
+	frags, err := gitSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 2)
 
@@ -153,7 +154,7 @@ func TestGitSegment_NonGitDir(t *testing.T) {
 	dir := t.TempDir()
 	db := newDashboardTestDB(t)
 
-	frags, err := gitSegment(Context{Repo: dir}, db)
+	frags, err := gitSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -162,7 +163,7 @@ func TestGitSegment_UsesCwdWhenRepoEmpty(t *testing.T) {
 	dir := initGitRepo(t)
 	db := newDashboardTestDB(t)
 
-	frags, err := gitSegment(Context{Cwd: dir}, db)
+	frags, err := gitSegment(context.Background(), Context{Cwd: dir}, db)
 	require.NoError(t, err)
 	assert.Len(t, frags, 2)
 }
@@ -170,7 +171,7 @@ func TestGitSegment_UsesCwdWhenRepoEmpty(t *testing.T) {
 func TestRoadmapSegment_EmptyProject(t *testing.T) {
 	db := newDashboardTestDB(t)
 
-	frags, err := roadmapSegment(Context{Project: ""}, db)
+	frags, err := roadmapSegment(context.Background(), Context{Project: ""}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -178,7 +179,7 @@ func TestRoadmapSegment_EmptyProject(t *testing.T) {
 func TestRoadmapSegment_NoRoadmap(t *testing.T) {
 	db := newDashboardTestDB(t)
 
-	frags, err := roadmapSegment(Context{Project: "no-such-project"}, db)
+	frags, err := roadmapSegment(context.Background(), Context{Project: "no-such-project"}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -199,7 +200,7 @@ func TestRoadmapSegment_SectionCounts(t *testing.T) {
 		return err
 	}))
 
-	frags, err := roadmapSegment(Context{Project: "acme-corp"}, db)
+	frags, err := roadmapSegment(context.Background(), Context{Project: "acme-corp"}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 2)
 
@@ -257,7 +258,7 @@ func TestGitHubSegment_OpenPRs(t *testing.T) {
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
 	db := newDashboardTestDB(t)
 
-	frags, err := githubSegment(Context{Repo: dir}, db)
+	frags, err := githubSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 2)
 
@@ -285,7 +286,7 @@ func TestGitHubSegment_NoOpenPRs(t *testing.T) {
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
 	db := newDashboardTestDB(t)
 
-	frags, err := githubSegment(Context{Repo: dir}, db)
+	frags, err := githubSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 1)
 
@@ -298,7 +299,7 @@ func TestGitHubSegment_NoOriginRemote(t *testing.T) {
 	dir := initGitRepo(t)
 	db := newDashboardTestDB(t)
 
-	frags, err := githubSegment(Context{Repo: dir}, db)
+	frags, err := githubSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -308,7 +309,7 @@ func TestGitHubSegment_NonGitHubOrigin(t *testing.T) {
 	runGit(t, dir, "remote", "add", "origin", "git@gitlab.com:acme-corp/widget.git")
 	db := newDashboardTestDB(t)
 
-	frags, err := githubSegment(Context{Repo: dir}, db)
+	frags, err := githubSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -320,7 +321,7 @@ func TestGitHubSegment_GhFailure(t *testing.T) {
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
 	db := newDashboardTestDB(t)
 
-	frags, err := githubSegment(Context{Repo: dir}, db)
+	frags, err := githubSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -329,7 +330,7 @@ func TestGitHubSegment_NonGitDir(t *testing.T) {
 	dir := t.TempDir()
 	db := newDashboardTestDB(t)
 
-	frags, err := githubSegment(Context{Repo: dir}, db)
+	frags, err := githubSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -341,7 +342,7 @@ func TestGitHubSegment_MalformedJSON(t *testing.T) {
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/acme-corp/widget.git")
 	db := newDashboardTestDB(t)
 
-	frags, err := githubSegment(Context{Repo: dir}, db)
+	frags, err := githubSegment(context.Background(), Context{Repo: dir}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -355,7 +356,7 @@ func TestGitHubSegment_ResolvesDirFromCwd(t *testing.T) {
 
 	t.Chdir(dir)
 
-	frags, err := githubSegment(Context{}, db)
+	frags, err := githubSegment(context.Background(), Context{}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 2)
 
@@ -371,7 +372,7 @@ func TestGitHubSegment_ResolvesDirFromCwd(t *testing.T) {
 func TestTicketsSegment_EmptyProject(t *testing.T) {
 	db := newDashboardTestDB(t)
 
-	frags, err := ticketsSegment(Context{Project: ""}, db)
+	frags, err := ticketsSegment(context.Background(), Context{Project: ""}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -379,7 +380,7 @@ func TestTicketsSegment_EmptyProject(t *testing.T) {
 func TestTicketsSegment_UnknownProject(t *testing.T) {
 	db := newDashboardTestDB(t)
 
-	frags, err := ticketsSegment(Context{Project: "no-such-project"}, db)
+	frags, err := ticketsSegment(context.Background(), Context{Project: "no-such-project"}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -389,7 +390,7 @@ func TestTicketsSegment_NoOpenItems(t *testing.T) {
 	_, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 
-	frags, err := ticketsSegment(Context{Project: "acme-corp"}, db)
+	frags, err := ticketsSegment(context.Background(), Context{Project: "acme-corp"}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 1)
 
@@ -422,7 +423,7 @@ func TestTicketsSegment_RecentTickets(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, backlog.MarkDone(db, doneItem.ID))
 
-	frags, err := ticketsSegment(Context{Project: "acme-corp"}, db)
+	frags, err := ticketsSegment(context.Background(), Context{Project: "acme-corp"}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 2)
 
@@ -456,7 +457,7 @@ func TestTicketsSegment_ListItemsError(t *testing.T) {
 	_, err = db.Exec("DROP TABLE items")
 	require.NoError(t, err)
 
-	frags, err := ticketsSegment(Context{Project: "acme-corp"}, db)
+	frags, err := ticketsSegment(context.Background(), Context{Project: "acme-corp"}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -464,7 +465,7 @@ func TestTicketsSegment_ListItemsError(t *testing.T) {
 func TestKBSegment_EmptyProject(t *testing.T) {
 	db := newDashboardTestDB(t)
 
-	frags, err := kbSegment(Context{Project: ""}, db)
+	frags, err := kbSegment(context.Background(), Context{Project: ""}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -472,7 +473,7 @@ func TestKBSegment_EmptyProject(t *testing.T) {
 func TestKBSegment_UnknownProject(t *testing.T) {
 	db := newDashboardTestDB(t)
 
-	frags, err := kbSegment(Context{Project: "no-such-project"}, db)
+	frags, err := kbSegment(context.Background(), Context{Project: "no-such-project"}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }
@@ -493,7 +494,7 @@ func TestKBSegment_EntryCount(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	frags, err := kbSegment(Context{Project: "acme-corp"}, db)
+	frags, err := kbSegment(context.Background(), Context{Project: "acme-corp"}, db)
 	require.NoError(t, err)
 	require.Len(t, frags, 1)
 
@@ -514,7 +515,7 @@ func TestKBSegment_CountDocumentsError(t *testing.T) {
 	_, err = db.Exec("DROP TABLE documents")
 	require.NoError(t, err)
 
-	frags, err := kbSegment(Context{Project: "acme-corp"}, db)
+	frags, err := kbSegment(context.Background(), Context{Project: "acme-corp"}, db)
 	require.NoError(t, err)
 	assert.Nil(t, frags)
 }

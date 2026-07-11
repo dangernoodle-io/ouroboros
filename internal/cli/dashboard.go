@@ -203,7 +203,7 @@ func runDashboardSegment(in io.Reader, out io.Writer, db *sql.DB, name string) e
 		}
 	}
 
-	frags, err := prov(ctx, db)
+	frags, err := prov(context.Background(), ctx, db)
 	if err != nil {
 		return fmt.Errorf("dashboard segment %s: %w", name, err)
 	}

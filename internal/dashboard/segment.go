@@ -18,10 +18,15 @@ import (
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-// Provider produces fragments for one segment, given the invocation context
-// and an open database handle. A Provider degrades gracefully: it returns
-// (nil, nil) when it has nothing to say, never a panic.
-type Provider func(ctx Context, db *sql.DB) ([]Fragment, error)
+// Provider produces fragments for one segment, given the caller's deadline
+// ctx, the invocation context inv, and an open database handle. A Provider
+// degrades gracefully: it returns (nil, nil) when it has nothing to say,
+// never a panic. A builtin that spawns its own subprocess (e.g. githubSegment
+// via `gh pr list`) must derive that subprocess's timeout from ctx
+// (context.WithTimeout(ctx, ...) / exec.CommandContext(ctx, ...)) so it is cut
+// when the aggregate refresh deadline fires, not just when its own internal
+// cap elapses. Builtins that don't shell out may ignore ctx.
+type Provider func(ctx context.Context, inv Context, db *sql.DB) ([]Fragment, error)
 
 var builtins = map[string]Provider{
 	"git":     gitSegment,
@@ -56,11 +61,12 @@ func BuiltinNames() []string {
 
 // gitSegment reports the current branch and uncommitted-file count for the
 // resolved repo dir. It degrades to (nil, nil) whenever the dir isn't a git
-// repo or git errors — never an error return.
-func gitSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
-	dir := ctx.Repo
+// repo or git errors — never an error return. Its git subprocesses run under
+// ctx so they're cut when the aggregate refresh deadline fires.
+func gitSegment(ctx context.Context, inv Context, _ *sql.DB) ([]Fragment, error) {
+	dir := inv.Repo
 	if dir == "" {
-		dir = ctx.Cwd
+		dir = inv.Cwd
 	}
 	if dir == "" {
 		wd, err := os.Getwd()
@@ -70,13 +76,13 @@ func gitSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
 		dir = wd
 	}
 
-	branchOut, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branchOut, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return nil, nil //nolint:nilerr // degrade gracefully: not a git repo is not a segment error
 	}
 	branch := strings.TrimSpace(string(branchOut))
 
-	statusOut, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	statusOut, err := exec.CommandContext(ctx, "git", "-C", dir, "status", "--porcelain").Output()
 	if err != nil {
 		return nil, nil //nolint:nilerr // degrade gracefully: git status failure is not a segment error
 	}
@@ -92,7 +98,7 @@ func gitSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
 		NewTile("git", "uncommitted", strconv.Itoa(uncommitted)),
 	}
 
-	if group, ok := gitWorktreesGroup(dir); ok {
+	if group, ok := gitWorktreesGroup(ctx, dir); ok {
 		frags = append(frags, group)
 	}
 
@@ -108,8 +114,8 @@ type gitWorktree struct {
 // gitWorktreesGroup builds a "worktrees" Group fragment for dir's linked
 // worktrees. It returns ok=false when git errors (old git, not a repo) or
 // when there's only the one (main) worktree — not worth a group.
-func gitWorktreesGroup(dir string) (Group, bool) {
-	out, err := exec.Command("git", "-C", dir, "worktree", "list", "--porcelain").Output()
+func gitWorktreesGroup(ctx context.Context, dir string) (Group, bool) {
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return Group{}, false //nolint:nilerr // degrade gracefully: git worktree failure is not a segment error
 	}
@@ -165,14 +171,14 @@ func parseWorktreePorcelain(out string) []gitWorktree {
 	return worktrees
 }
 
-// roadmapSegment reports non-empty section counts from ctx.Project's
-// roadmap.
-func roadmapSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
-	if ctx.Project == "" {
+// roadmapSegment reports non-empty section counts from inv.Project's
+// roadmap. It doesn't shell out, so it ignores ctx.
+func roadmapSegment(_ context.Context, inv Context, db *sql.DB) ([]Fragment, error) {
+	if inv.Project == "" {
 		return nil, nil
 	}
 
-	rm, err := roadmap.Load(db, ctx.Project)
+	rm, err := roadmap.Load(db, inv.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -229,11 +235,13 @@ type githubPR struct {
 // tokenless. It resolves the repo dir the same way gitSegment does, reads
 // the origin remote, and degrades to (nil, nil) whenever the dir isn't a
 // git repo, has no github.com origin, or `gh` fails/is unavailable/times
-// out — never an error return.
-func githubSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
-	dir := ctx.Repo
+// out — never an error return. Its `gh` subprocess's timeout derives from
+// ctx (the caller's aggregate refresh deadline), capped at 10s, so it's cut
+// promptly when ctx fires instead of running to its own internal cap.
+func githubSegment(ctx context.Context, inv Context, _ *sql.DB) ([]Fragment, error) {
+	dir := inv.Repo
 	if dir == "" {
-		dir = ctx.Cwd
+		dir = inv.Cwd
 	}
 	if dir == "" {
 		wd, err := os.Getwd()
@@ -243,7 +251,7 @@ func githubSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
 		dir = wd
 	}
 
-	remoteOut, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
+	remoteOut, err := exec.CommandContext(ctx, "git", "-C", dir, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return nil, nil //nolint:nilerr // degrade gracefully: no origin remote is not a segment error
 	}
@@ -253,11 +261,12 @@ func githubSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
 		return nil, nil
 	}
 
-	ghCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ghCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ghCtx, "gh", "pr", "list", "--repo", repo, "--state", "open",
 		"--json", "number,title,author", "--limit", "20")
+	configureProcessGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
 
 	out, err := cmd.Output()
@@ -301,18 +310,19 @@ func githubSegment(ctx Context, _ *sql.DB) ([]Fragment, error) {
 	return frags, nil
 }
 
-// ticketsSegment reports ctx.Project's newest open backlog tickets: an
+// ticketsSegment reports inv.Project's newest open backlog tickets: an
 // "open" tile with the open count (see ticketsRecentLimit for the clamp
 // ceiling), plus a "recent tickets" group
 // carrying up to ticketsRecentLimit cards (newest first). It degrades to
-// (nil, nil) whenever ctx.Project is unset, the project doesn't exist, or
-// the backlog read fails — never an error return.
-func ticketsSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
-	if ctx.Project == "" {
+// (nil, nil) whenever inv.Project is unset, the project doesn't exist, or
+// the backlog read fails — never an error return. It doesn't shell out, so
+// it ignores ctx.
+func ticketsSegment(_ context.Context, inv Context, db *sql.DB) ([]Fragment, error) {
+	if inv.Project == "" {
 		return nil, nil
 	}
 
-	proj, err := backlog.GetProjectByName(db, ctx.Project)
+	proj, err := backlog.GetProjectByName(db, inv.Project)
 	if err != nil {
 		return nil, nil //nolint:nilerr // degrade gracefully: unknown project is not a segment error
 	}
@@ -360,9 +370,10 @@ func ticketsSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
 	return frags, nil
 }
 
-// kbSegment reports ctx.Project's total KB entry count as a single "entries"
-// tile. It degrades to (nil, nil) whenever ctx.Project is unset, the project
-// doesn't exist, or the KB count read fails — never an error return.
+// kbSegment reports inv.Project's total KB entry count as a single "entries"
+// tile. It degrades to (nil, nil) whenever inv.Project is unset, the project
+// doesn't exist, or the KB count read fails — never an error return. It
+// doesn't shell out, so it ignores ctx.
 //
 // kbSegment counts KB documents whose `project` exactly matches the backlog
 // project's canonical name. KB entries and backlog projects share the same
@@ -370,12 +381,12 @@ func ticketsSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
 // written under a case-divergent project string would be counted separately
 // (store.CountDocumentsByType is case-sensitive, unlike GetProjectByName) —
 // a known limitation tracked in the backlog.
-func kbSegment(ctx Context, db *sql.DB) ([]Fragment, error) {
-	if ctx.Project == "" {
+func kbSegment(_ context.Context, inv Context, db *sql.DB) ([]Fragment, error) {
+	if inv.Project == "" {
 		return nil, nil
 	}
 
-	proj, err := backlog.GetProjectByName(db, ctx.Project)
+	proj, err := backlog.GetProjectByName(db, inv.Project)
 	if err != nil {
 		return nil, nil //nolint:nilerr // degrade gracefully: unknown project is not a segment error
 	}
