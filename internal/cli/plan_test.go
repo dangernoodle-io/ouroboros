@@ -214,9 +214,10 @@ func TestRunPlanList(t *testing.T) {
 	err = runPlanList(&buf, db, "", "")
 	require.NoError(t, err)
 
-	var plans []backlog.Plan
+	var plans []backlog.PlanSummary
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &plans))
 	assert.Len(t, plans, 2)
+	assert.NotContains(t, buf.String(), "\"content\"", "plan list must not dump content")
 }
 
 func TestRunPlanListEmpty(t *testing.T) {
@@ -243,7 +244,7 @@ func TestRunPlanListProjectFilter(t *testing.T) {
 	err = runPlanList(&buf, db, "acme-corp", "")
 	require.NoError(t, err)
 
-	var plans []backlog.Plan
+	var plans []backlog.PlanSummary
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &plans))
 	require.Len(t, plans, 1)
 	assert.Equal(t, "AC Plan", plans[0].Title)
@@ -264,7 +265,7 @@ func TestRunPlanListStatusFilter(t *testing.T) {
 	err = runPlanList(&buf, db, "", "done")
 	require.NoError(t, err)
 
-	var plans []backlog.Plan
+	var plans []backlog.PlanSummary
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &plans))
 	require.Len(t, plans, 1)
 	assert.Equal(t, "Done Plan", plans[0].Title)

@@ -25,6 +25,16 @@ type Plan struct {
 	Updated   string  `json:"updated"`
 }
 
+// PlanSummary is a compact representation without content for list queries
+// (mirrors store.DocumentSummary). Full content is fetched by id via GetPlan.
+type PlanSummary struct {
+	ID        int64   `json:"id"`
+	ProjectID *int64  `json:"project_id,omitempty"`
+	ItemID    *string `json:"item_id,omitempty"`
+	Title     string  `json:"title"`
+	Status    string  `json:"status"`
+}
+
 func CreatePlan(d *sql.DB, title, content string, projectID *int64, itemID *string) (*Plan, error) {
 	if len(content) > MaxPlanContentBytes {
 		return nil, fmt.Errorf("content exceeds %d byte cap (got %d)", MaxPlanContentBytes, len(content))
@@ -99,8 +109,10 @@ type PlanFilter struct {
 	Status     *string
 }
 
-func ListPlans(d *sql.DB, f PlanFilter) ([]Plan, error) {
-	query := "SELECT id, project_id, item_id, title, content, status, created, updated FROM plans WHERE 1=1"
+// ListPlans returns compact PlanSummary rows (no content) to conserve
+// tokens; fetch full content by id via GetPlan.
+func ListPlans(d *sql.DB, f PlanFilter) ([]PlanSummary, error) {
+	query := "SELECT id, project_id, item_id, title, status FROM plans WHERE 1=1"
 	var args []interface{}
 
 	if len(f.ProjectIDs) == 1 {
@@ -127,10 +139,10 @@ func ListPlans(d *sql.DB, f PlanFilter) ([]Plan, error) {
 	}
 	defer rows.Close() //nolint:errcheck
 
-	var plans []Plan
+	var plans []PlanSummary
 	for rows.Next() {
-		var p Plan
-		if err := rows.Scan(&p.ID, &p.ProjectID, &p.ItemID, &p.Title, &p.Content, &p.Status, &p.Created, &p.Updated); err != nil {
+		var p PlanSummary
+		if err := rows.Scan(&p.ID, &p.ProjectID, &p.ItemID, &p.Title, &p.Status); err != nil {
 			return nil, err
 		}
 		plans = append(plans, p)

@@ -110,7 +110,7 @@ func runPlanList(w io.Writer, db *sql.DB, project, status string) error {
 		return fmt.Errorf("plan list: %w", err)
 	}
 	if plans == nil {
-		plans = []backlog.Plan{}
+		plans = []backlog.PlanSummary{}
 	}
 	data, err := json.MarshalIndent(plans, "", "  ")
 	if err != nil {

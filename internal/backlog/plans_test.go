@@ -93,6 +93,30 @@ func TestListPlans(t *testing.T) {
 	assert.Len(t, plans, 2)
 }
 
+// TestListPlansOmitsContent asserts list mode returns compact PlanSummary
+// rows (no content field to leak into agent context), while GetPlan by id
+// still returns the full Plan including content.
+func TestListPlansOmitsContent(t *testing.T) {
+	d := testDB(t)
+
+	created, err := backlog.CreatePlan(d, "summary-plan", "sensitive plan content", nil, nil)
+	require.NoError(t, err)
+
+	plans, err := backlog.ListPlans(d, backlog.PlanFilter{})
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	assert.Equal(t, created.ID, plans[0].ID)
+	assert.Equal(t, "summary-plan", plans[0].Title)
+	assert.Equal(t, "draft", plans[0].Status)
+
+	// PlanSummary has no Content field at all — compile-time enforcement via
+	// the struct shape itself; runtime check confirms the fetched-by-id path
+	// still returns full content.
+	full, err := backlog.GetPlan(d, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "sensitive plan content", full.Content)
+}
+
 func TestListPlansFilterStatus(t *testing.T) {
 	d := testDB(t)
 
