@@ -48,6 +48,10 @@ P0 (critical/blocking) through P6 (someday/maybe). Item ids are project-prefix +
 
 When filing, search the KB for related decisions or context to cite in the description (link the entry, don't restate it). Never write work status back into the KB — that direction only goes backlog → description references, not KB → task tracking.
 
+## Ouroboros self-bug protocol
+
+Hit a genuine ouroboros tool/server malfunction while working — get/search returns silently-wrong or unfiltered results, a tool crashes/errors unexpectedly, a validation/schema surprise, wrong-project resolution? File it in the `ouroboros` project via `backlog` before finishing, and mention the id in your report. Not for: empty/zero results, user-input errors, expected behavior, or your own mistakes. Dedup first — `search domain=backlog project=ouroboros` for the symptom; skip filing if a matching open item exists. Item: title + one-line symptom + exact repro (tool + args + observed-vs-expected) + `priority: P2` (P1 if it silently returns wrong data / corrupts). Leave `component` default unless clearly the plugin.
+
 ## Output
 
 Report all changes made in a concise summary — what was created/updated/closed and any epic linkage.
