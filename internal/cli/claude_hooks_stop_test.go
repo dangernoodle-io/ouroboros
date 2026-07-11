@@ -9,6 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/dangernoodle-io/mcpkit/host/claudecode/hooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -71,47 +72,36 @@ func longEnough(s string) string {
 	return s
 }
 
+func gitProjectDir(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "acme-corp")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
+	return root
+}
+
 func TestRunHookStop_StopHookActive_NoOutput(t *testing.T) {
 	isolateHookLog(t)
 	db := newTestDB(t)
-	input := `{"stop_hook_active":true,"transcript_path":"/tmp/x","cwd":"/tmp","session_id":"abc"}`
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, strings.NewReader(input), db))
-	assert.Empty(t, buf.String())
+	p := hooks.StopPayload{
+		Common:         hooks.Common{TranscriptPath: "/tmp/x", Cwd: "/tmp", SessionID: "abc"},
+		StopHookActive: true,
+	}
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 }
 
 func TestRunHookStop_MissingTranscriptPath_NoOutput(t *testing.T) {
 	isolateHookLog(t)
 	db := newTestDB(t)
-	input := `{"cwd":"/tmp","session_id":"abc"}`
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, strings.NewReader(input), db))
-	assert.Empty(t, buf.String())
-}
-
-func TestRunHookStop_MalformedStdin_NoOutput(t *testing.T) {
-	isolateHookLog(t)
-	db := newTestDB(t)
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, strings.NewReader("not json"), db))
-	assert.Empty(t, buf.String())
+	p := hooks.StopPayload{Common: hooks.Common{Cwd: "/tmp", SessionID: "abc"}}
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 }
 
 func TestRunHookStop_ShortMessage_NoOutput(t *testing.T) {
 	isolateHookLog(t)
 	db := newTestDB(t)
 	transcript := writeTranscript(t, []string{assistantLine("too short")})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": t.TempDir(), "session_id": "abc"})
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String())
-}
-
-func gitProjectDir(t *testing.T) string {
-	t.Helper()
-	root := filepath.Join(t.TempDir(), "acme-corp")
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
-	return root
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: t.TempDir(), SessionID: "abc"}}
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 }
 
 func TestRunHookStop_KbBlock_Persisted(t *testing.T) {
@@ -120,11 +110,10 @@ func TestRunHookStop_KbBlock_Persisted(t *testing.T) {
 	cwd := gitProjectDir(t)
 	message := longEnough("```kb\n{\"type\":\"decision\",\"category\":\"arch\",\"title\":\"Use PostgreSQL\",\"content\":\"performance\"}\n```\n")
 	transcript := writeTranscript(t, []string{assistantLine(message)})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess1234"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess1234"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String(), "kb block persisted, no nudge expected")
+	resp := runHookStop(p, db)
+	assert.Equal(t, hooks.Response{}, resp, "kb block persisted, no nudge expected")
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)
@@ -143,11 +132,9 @@ func TestRunHookStop_KbBlockArray_AllPersisted(t *testing.T) {
 	cwd := gitProjectDir(t)
 	message := longEnough("```kb\n[{\"type\":\"fact\",\"title\":\"Fact A\",\"content\":\"a\"},{\"type\":\"fact\",\"title\":\"Fact B\",\"content\":\"b\"}]\n```\n")
 	transcript := writeTranscript(t, []string{assistantLine(message)})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess5678"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess5678"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String())
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)
@@ -160,11 +147,9 @@ func TestRunHookStop_PersistSkillSentinel_Skipped(t *testing.T) {
 	cwd := gitProjectDir(t)
 	message := longEnough("```kb\n{\"type\":\"fact\",\"title\":\"Already Done\",\"content\":\"x\",\"_persisted_by\":\"persist-skill\"}\n```\n")
 	transcript := writeTranscript(t, []string{assistantLine(message)})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0001"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0001"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String())
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)
@@ -177,11 +162,9 @@ func TestRunHookStop_MalformedKbJSON_HandledNoWrite(t *testing.T) {
 	cwd := gitProjectDir(t)
 	message := longEnough("```kb\nnot valid json at all here\n```\n")
 	transcript := writeTranscript(t, []string{assistantLine(message)})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0002"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0002"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String())
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)
@@ -197,15 +180,10 @@ func TestRunHookStop_Tier1Nudge_NotSuppressed(t *testing.T) {
 		userLine("kick off the turn"),
 		assistantLine(message),
 	})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0003"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0003"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-
-	var out nudgeOutput
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
-	assert.Equal(t, "block", out.Decision)
-	assert.Contains(t, out.Reason, "tier-1")
+	resp := runHookStop(p, db)
+	assert.Contains(t, resp.Block, "tier-1")
 }
 
 func TestRunHookStop_Tier1Nudge_SuppressedWhenAlreadyPersistedThisTurn(t *testing.T) {
@@ -218,11 +196,10 @@ func TestRunHookStop_Tier1Nudge_SuppressedWhenAlreadyPersistedThisTurn(t *testin
 		ouroborosToolUseAssistantLine(),
 		assistantLine(message),
 	})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0004"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0004"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String(), "tier-1 nudge should be suppressed when already persisted this turn")
+	resp := runHookStop(p, db)
+	assert.Equal(t, hooks.Response{}, resp, "tier-1 nudge should be suppressed when already persisted this turn")
 }
 
 func TestRunHookStop_Tier2Nudge_NeverSuppressed(t *testing.T) {
@@ -235,15 +212,10 @@ func TestRunHookStop_Tier2Nudge_NeverSuppressed(t *testing.T) {
 		ouroborosToolUseAssistantLine(),
 		assistantLine(message),
 	})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0005"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0005"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-
-	var out nudgeOutput
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
-	assert.Equal(t, "block", out.Decision)
-	assert.Contains(t, out.Reason, "tier-2")
+	resp := runHookStop(p, db)
+	assert.Contains(t, resp.Block, "tier-2")
 }
 
 func TestRunHookStop_ExploratoryMessage_NoOutput(t *testing.T) {
@@ -252,14 +224,12 @@ func TestRunHookStop_ExploratoryMessage_NoOutput(t *testing.T) {
 	cwd := gitProjectDir(t)
 	message := longEnough("Here is a summary of the files I looked at while exploring the codebase.")
 	transcript := writeTranscript(t, []string{assistantLine(message)})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0006"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0006"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String())
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 }
 
-func TestHookStopCmd_DBOpenFailure_ExitsZeroNoStdout(t *testing.T) {
+func TestHookHandleStop_DBOpenFailure_SilentAllow(t *testing.T) {
 	isolateHookLog(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -272,36 +242,10 @@ func TestHookStopCmd_DBOpenFailure_ExitsZeroNoStdout(t *testing.T) {
 	t.Setenv("PROJECT_KB_PATH", filepath.Join(blocker, "sub", "kb.db"))
 	t.Setenv("QM_DB_PATH", "")
 
-	var out bytes.Buffer
-	hookStopCmd.SetOut(&out)
-	hookStopCmd.SetIn(strings.NewReader(`{"cwd":"/tmp","session_id":"abc"}`))
-	defer func() {
-		hookStopCmd.SetOut(nil)
-		hookStopCmd.SetIn(nil)
-	}()
-
-	err := hookStopCmd.RunE(hookStopCmd, nil)
-	require.NoError(t, err, "hook stop must never return a non-nil error to cobra")
-	assert.Empty(t, out.String(), "stdout must stay clean on a DB-open failure")
+	p := hooks.StopPayload{Common: hooks.Common{Cwd: "/tmp", SessionID: "abc"}}
+	resp := hookHandleStop(t.Context(), strings.NewReader(""), p)
+	assert.Equal(t, hooks.Response{}, resp, "a withDB failure must silently allow, never block")
 }
-
-func TestRunHookStop_ReadStdinError(t *testing.T) {
-	isolateHookLog(t)
-	db := newTestDB(t)
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, errReader{}, db))
-	assert.Empty(t, buf.String())
-}
-
-type errReader struct{}
-
-func (errReader) Read(p []byte) (int, error) { return 0, assertErr }
-
-var assertErr = &staticErr{"boom"}
-
-type staticErr struct{ msg string }
-
-func (e *staticErr) Error() string { return e.msg }
 
 // --- helper unit tests ---------------------------------------------------
 
@@ -656,11 +600,9 @@ func TestRunHookStop_KbBlock_NoProject_NotPersisted(t *testing.T) {
 	cwd := t.TempDir()
 	message := longEnough("```kb\n{\"type\":\"fact\",\"title\":\"Orphan\",\"content\":\"x\"}\n```\n")
 	transcript := writeTranscript(t, []string{assistantLine(message)})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0007"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0007"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String())
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 
 	summaries, err := store.QueryDocuments(db, nil, nil, nil, "", nil, 10)
 	require.NoError(t, err)
@@ -673,11 +615,10 @@ func TestRunHookStop_KbBlock_WriteBatchError_HandledNoNudge(t *testing.T) {
 	cwd := gitProjectDir(t)
 	message := longEnough("```kb\n{\"type\":\"not-a-real-type\",\"title\":\"Bad\",\"content\":\"x\"}\n```\n")
 	transcript := writeTranscript(t, []string{assistantLine(message)})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0008"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0008"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String(), "write failure is swallowed — handled, no nudge fallthrough")
+	resp := runHookStop(p, db)
+	assert.Equal(t, hooks.Response{}, resp, "write failure is swallowed — handled, no nudge fallthrough")
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)
@@ -831,14 +772,10 @@ func TestRunHookStop_EmptySessionID_DefaultsToMain(t *testing.T) {
 		userLine("kick off the turn"),
 		assistantLine(message),
 	})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-
-	var out nudgeOutput
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
-	assert.Contains(t, out.Reason, "main main:")
+	resp := runHookStop(p, db)
+	assert.Contains(t, resp.Block, "main main:")
 }
 
 func TestRunHookStop_LongSessionID_Truncated(t *testing.T) {
@@ -850,14 +787,10 @@ func TestRunHookStop_LongSessionID_Truncated(t *testing.T) {
 		userLine("kick off the turn"),
 		assistantLine(message),
 	})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "abcdefghijklmnop"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "abcdefghijklmnop"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-
-	var out nudgeOutput
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
-	assert.Contains(t, out.Reason, "main abcdefgh:")
+	resp := runHookStop(p, db)
+	assert.Contains(t, resp.Block, "main abcdefgh:")
 }
 
 // --- parseKbBlockEntries malformed array ------------------------------------
@@ -868,11 +801,9 @@ func TestRunHookStop_MalformedKbArrayJSON_HandledNoWrite(t *testing.T) {
 	cwd := gitProjectDir(t)
 	message := longEnough("```kb\n[not valid json array\n```\n")
 	transcript := writeTranscript(t, []string{assistantLine(message)})
-	input, _ := json.Marshal(map[string]any{"transcript_path": transcript, "cwd": cwd, "session_id": "sess0009"})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0009"}}
 
-	var buf bytes.Buffer
-	require.NoError(t, runHookStop(&buf, bytes.NewReader(input), db))
-	assert.Empty(t, buf.String())
+	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)

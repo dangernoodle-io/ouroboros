@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -11,85 +12,59 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/spf13/cobra"
+	"github.com/dangernoodle-io/mcpkit/host/claudecode/hooks"
 
 	"dangernoodle.io/ouroboros/internal/kb"
 )
 
-// hookStopCmd is the Stop-hook persist-nudge, a native port of
-// plugin/scripts/stop.js: reads the Stop event payload from stdin, either
-// auto-persists a fenced ```kb block from the last assistant turn or nudges
-// the user to persist decision language, writing at most one JSON line
-// ({"decision":"block","reason":...}) to stdout. This hook is advisory and
-// must never exit non-zero.
-var hookStopCmd = &cobra.Command{
-	Use:   "stop",
-	Short: "Stop-hook persist-nudge (Claude Code plugin integration)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Never propagate a non-nil error to cobra: this hook is advisory and
-		// must always exit 0 (a DB-open failure here — unwritable path, disk
-		// full, migration mismatch — must not fail-closed like the Node
-		// original never could). Log to stderr only; stdout is reserved for
-		// the exit-0 JSON decision protocol.
-		if err := withDB(func(db *sql.DB) error {
-			return runHookStop(cmd.OutOrStdout(), cmd.InOrStdin(), db)
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "[ouroboros] hook stop: %s\n", err)
-		}
+// hookHandleStop is the Stop-hook persist-nudge, a native port of
+// plugin/scripts/stop.js, wired as a hooks.Handler[hooks.StopPayload]: given
+// the Stop event's decoded payload, it either auto-persists a fenced ```kb
+// block from the last assistant turn or nudges the user to persist decision
+// language, returning at most one hooks.Response.Block. This hook is
+// advisory: a withDB failure (unwritable path, disk full, migration
+// mismatch) is logged to stderr only and never surfaces as a blocking
+// Response — the zero hooks.Response ("silent allow") is returned instead,
+// matching stop.js's catch-all exit(0). The raw stdin reader is unused: the
+// Stop payload carries every field this handler needs.
+func hookHandleStop(_ context.Context, _ io.Reader, p hooks.StopPayload) hooks.Response {
+	var resp hooks.Response
+	if err := withDB(func(db *sql.DB) error {
+		resp = runHookStop(p, db)
 		return nil
-	},
-}
-
-func init() {
-	hookCmd.AddCommand(hookStopCmd)
-}
-
-// hookStopInput is the subset of the Stop hook's stdin payload this command
-// consumes.
-type hookStopInput struct {
-	TranscriptPath string `json:"transcript_path"`
-	Cwd            string `json:"cwd"`
-	SessionID      string `json:"session_id"`
-	StopHookActive bool   `json:"stop_hook_active"`
-}
-
-// runHookStop implements the Stop-hook flow. It never returns a non-nil
-// error on the advisory hook path — any failure is swallowed (matching
-// stop.js's catch-all exit(0)) so the caller's RunE always signals success;
-// stdout presence/absence carries the exit-0 decision protocol instead.
-func runHookStop(out io.Writer, in io.Reader, db *sql.DB) error {
-	data, err := io.ReadAll(in)
-	if err != nil {
-		return nil //nolint:nilerr
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[ouroboros] hook stop: %s\n", err)
 	}
+	return resp
+}
 
-	var payload hookStopInput
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil //nolint:nilerr
-	}
-
+// runHookStop implements the Stop-hook flow. It never blocks the advisory
+// hook path on failure — every early-exit/failure case returns the zero
+// hooks.Response value ("silent allow"), matching stop.js's catch-all
+// exit(0) behavior.
+func runHookStop(p hooks.StopPayload, db *sql.DB) hooks.Response {
 	// CRITICAL: avoid infinite loop when this hook causes the next turn.
-	if payload.StopHookActive {
-		return nil
+	if p.StopHookActive {
+		return hooks.Response{}
 	}
-	if payload.TranscriptPath == "" {
-		return nil
+	if p.TranscriptPath == "" {
+		return hooks.Response{}
 	}
 
 	project := ""
-	if payload.Cwd != "" {
-		project = projectFromPath(payload.Cwd)
+	if p.Cwd != "" {
+		project = projectFromPath(p.Cwd)
 	}
 
-	logHookEvent(map[string]any{"hook": "stop", "kind": "fire", "session_id": payload.SessionID, "project": project})
+	logHookEvent(map[string]any{"hook": "stop", "kind": "fire", "session_id": p.SessionID, "project": project})
 
-	message := readLastMainAssistantText(payload.TranscriptPath)
+	message := readLastMainAssistantText(p.TranscriptPath)
 	if utf8.RuneCountInString(message) < 80 {
-		return nil
+		return hooks.Response{}
 	}
 	message = truncateMessage(message, 5000)
 
-	sessionShort := payload.SessionID
+	sessionShort := p.SessionID
 	if sessionShort == "" {
 		sessionShort = "main"
 	}
@@ -97,32 +72,27 @@ func runHookStop(out io.Writer, in io.Reader, db *sql.DB) error {
 		sessionShort = sessionShort[:8]
 	}
 
-	if persistKbBlock(message, db, "main", sessionShort, "stop", payload.SessionID, project) {
-		return nil
+	if persistKbBlock(message, db, "main", sessionShort, "stop", p.SessionID, project) {
+		return hooks.Response{}
 	}
 
-	nudge, tier := checkNudgePatterns(message, "main", sessionShort, "stop", payload.SessionID, project)
+	nudge, tier := checkNudgePatterns(message, "main", sessionShort, "stop", p.SessionID, project)
 	if nudge != nil {
 		// Tier-1 fires on decision language with no kb block in the FINAL
 		// message — but the session may have already persisted earlier THIS
 		// TURN (an ouroboros MCP write tool_use, or a prior ```kb block).
 		// Suppress only the tier-1 nudge in that case; tier-2 (self-claim) is
 		// unaffected since it already implies persistence was referenced.
-		if tier == 1 && turnAlreadyPersisted(payload.TranscriptPath) {
-			logHookEvent(map[string]any{"hook": "stop", "kind": "suppressed", "session_id": payload.SessionID, "project": project, "reason": "tier-1-persisted-this-turn"})
-			return nil
+		if tier == 1 && turnAlreadyPersisted(p.TranscriptPath) {
+			logHookEvent(map[string]any{"hook": "stop", "kind": "suppressed", "session_id": p.SessionID, "project": project, "reason": "tier-1-persisted-this-turn"})
+			return hooks.Response{}
 		}
-		data, err := json.Marshal(nudge)
-		if err != nil {
-			return nil //nolint:nilerr
-		}
-		fmt.Fprintf(out, "%s\n", data)
-		return nil
+		return hooks.Response{Block: nudge.Reason}
 	}
 
 	// Default: exit silently (exploratory output).
-	logHookEvent(map[string]any{"hook": "stop", "kind": "noop", "session_id": payload.SessionID, "project": project})
-	return nil
+	logHookEvent(map[string]any{"hook": "stop", "kind": "noop", "session_id": p.SessionID, "project": project})
+	return hooks.Response{}
 }
 
 // hookKbEntry decodes a single fenced ```kb block entry, capturing the
