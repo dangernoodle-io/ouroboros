@@ -9,7 +9,15 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
    - `decision` — architectural choices, technology selections, design trade-offs with clear rationale
    - `fact` — configuration values, endpoints, credential references, version numbers, environment details
    - `note` — procedures, processes, how-tos, important observations
-   - `relation` — dependencies between components, projects, or systems
+   - `relation` — dependencies between components, projects, or systems, e.g.
+     ```
+     type: relation
+     title: breadboard depends on ouroboros KB
+     content:
+       Rule: breadboard's persist hooks call ouroboros MCP tools directly.
+       Trigger: any breadboard release that changes hook payloads.
+       Effect: bump the ouroboros plugin pin in breadboard's marketplace ref.
+     ```
    - `plan` — implementation plans discussed or deferred; terse step list in `content`, narrative in `notes`
 
 3. **Search before kb.** Collect all candidate titles, then call `search` once with `queries: [title1, title2, ...]` and `projects: ["<project>"]`. The response is positional — `results[i]` corresponds to `queries[i]`. If a matching entry exists for the same project, reuse its title verbatim — the server upserts on `type+project+category+title`. Only skip if existing content is already identical.

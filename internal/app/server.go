@@ -14,7 +14,7 @@ const (
 	descFilterTypes    = "Filter by types (kb only)"
 	descFilterCats     = "Filter by categories (kb only)"
 	descLimit          = "Limit, default 10, max 500"
-	descVerbose        = "Include notes (default: false)"
+	descVerbose        = "Include notes on ids[] fetch only, default false; filter/list results are always compact regardless"
 	descDomain         = `Required: "kb", "backlog", or "roadmap"`
 	descPriorityMin    = "Min priority P0-P6 (backlog only)"
 	descPriorityMax    = "Max priority P0-P6 (backlog only)"
@@ -38,7 +38,8 @@ get/search are reads (required domain: kb|backlog|roadmap); kb/backlog/roadmap a
 - Default response is summary; verbose=true only when full content/notes are needed.
 - roadmap is a per-project singleton (now/next/deferred/parked/dropped/done sections); items carry two single-valued grouping axes, component and epic (an epic is a backlog item); get format=md|html&by=component|epic renders Markdown/HTML grouped on that axis, filterable by component/epic.
 - Edges (blocks/relates/explains) link items/kb docs: backlog entries[].edges[] creates them inline at write time; kb content [[Title]] autolinks; get verbose=true surfaces an edges sidecar; CLI link/unlink/ls edges for retrofits.
-- Checkpoint after multi-step tasks; persist non-obvious decisions, update or delete stale ones.`
+- Checkpoint after multi-step tasks; persist non-obvious decisions, update or delete stale ones.
+- Never run sqlite3/raw SQL against the ouroboros DB file — on a tool failure, stop and report rather than improvising.`
 
 // buildServer creates a new MCP server with all tools registered at startup.
 func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServer {
@@ -48,7 +49,7 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 	)
 
 	s.AddTool(mcp.NewTool("get",
-		mcp.WithDescription("Fetch entries by ID or filters (required domain: kb|backlog). ids[] returns exact matches; omit ids for a filtered list."),
+		mcp.WithDescription("Fetch entries by ID or filters (required domain: kb|backlog|roadmap). ids[] returns exact matches; omit ids for a filtered list."),
 		mcp.WithString("domain", mcp.Required(), mcp.Description(descDomain)),
 		mcp.WithArray("ids", mcp.Description("IDs to fetch (kb: document IDs, backlog: item IDs)")),
 		mcp.WithArray("types", mcp.Description(descFilterTypes), mcp.Items(map[string]any{"type": "string"})),
@@ -72,7 +73,7 @@ func buildServer(db *sql.DB, bk *backup.Backup, version string) *server.MCPServe
 	), withRecover(handleGet(db)))
 
 	s.AddTool(mcp.NewTool("search",
-		mcp.WithDescription("Full-text search over entries (required domain: kb|backlog). domain=kb supports query or a batched queries[]; domain=backlog takes a single query over title/description/notes."),
+		mcp.WithDescription("Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes)."),
 		mcp.WithString("domain", mcp.Required(), mcp.Description(descDomain)),
 		mcp.WithString("query", mcp.Description("Single query")),
 		mcp.WithArray("queries", mcp.Description("Batch queries sharing filters, kb only; response is positional [[...], [...]]")),

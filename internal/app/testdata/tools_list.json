@@ -25,7 +25,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Fetch entries by ID or filters (required domain: kb|backlog). ids[] returns exact matches; omit ids for a filtered list.",
+      "description": "Fetch entries by ID or filters (required domain: kb|backlog|roadmap). ids[] returns exact matches; omit ids for a filtered list.",
       "inputSchema": {
         "properties": {
           "by": {
@@ -107,7 +107,7 @@
             "type": "array"
           },
           "verbose": {
-            "description": "Include notes (default: false)",
+            "description": "Include notes on ids[] fetch only, default false; filter/list results are always compact regardless",
             "type": "boolean"
           }
         },
@@ -217,7 +217,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Full-text search over entries (required domain: kb|backlog). domain=kb supports query or a batched queries[]; domain=backlog takes a single query over title/description/notes.",
+      "description": "Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes).",
       "inputSchema": {
         "properties": {
           "categories": {
