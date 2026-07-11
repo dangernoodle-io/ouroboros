@@ -120,6 +120,12 @@ func backupCommit(bk *backup.Backup, msg string) {
 	}
 }
 
+// backupCommitFn is a test seam: tests swap this to a recorder to assert
+// call count/arguments deterministically (git-log inspection alone can't
+// distinguish "committed once" from "committed N times, only the first
+// staged anything").
+var backupCommitFn = backupCommit
+
 // parseItemFilter builds a backlog.ItemFilter from projects/priority_min/priority_max/status/component
 // arguments, shared by domain=backlog reads (get list mode, search).
 func parseItemFilter(d *sql.DB, req mcp.CallToolRequest) (backlog.ItemFilter, error) {
@@ -468,7 +474,7 @@ func handleBacklog(d *sql.DB, bk *backup.Backup) server.ToolHandlerFunc {
 
 			// Single backup commit at end with batch count
 			if writeCount > 0 {
-				backupCommit(bk, fmt.Sprintf("batch: %d items written", writeCount))
+				backupCommitFn(bk, fmt.Sprintf("batch: %d items written", writeCount))
 			}
 
 			return jsonResult(results)

@@ -935,6 +935,34 @@ func TestWriteAndUpdateBatch_CreateValidationFailure_AbortsBeforeTx(t *testing.T
 	assert.Equal(t, "untouched", full.Title)
 }
 
+// TestWriteAndUpdateBatch_UpdateValidationFailure_AbortsBeforeTx verifies a
+// bad update entry (e.g. an explicit empty title) fails validateUpdates
+// before any DB interaction — a valid create in the same call must not
+// persist either, since validation happens before BeginTx.
+func TestWriteAndUpdateBatch_UpdateValidationFailure_AbortsBeforeTx(t *testing.T) {
+	db := testDB(t)
+
+	seeded, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "fact", Project: "acme-corp", Title: "untouched-by-update", Content: "c1"},
+	}, "")
+	require.NoError(t, err)
+	id := seeded[0].ID
+
+	creates, updates, err := kb.WriteAndUpdateBatch(db,
+		[]kb.Entry{{Type: "fact", Project: "acme-corp", Title: "should-not-persist", Content: "c2"}},
+		[]kb.EntryUpdate{{ID: id, Title: strPtr("")}},
+		"",
+	)
+	require.Error(t, err)
+	assert.Nil(t, creates)
+	assert.Nil(t, updates)
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, docs, 1, "only the pre-seeded doc should exist; the create must not persist")
+	assert.Equal(t, "untouched-by-update", docs[0].Title)
+}
+
 // TestWriteAndUpdateBatch_BeginTxError exercises the db.BeginTx() error
 // path (closed DB).
 func TestWriteAndUpdateBatch_BeginTxError(t *testing.T) {

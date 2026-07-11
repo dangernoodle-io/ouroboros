@@ -210,6 +210,13 @@ func WriteBatch(db *sql.DB, entries []Entry, projectFlag string) ([]PutResult, e
 // (type+project+category+title), an update targets an existing row by id,
 // so changing the title updates that row in place instead of inserting a
 // new one under the new key.
+//
+// No production caller currently invokes UpdateBatch directly — the kb tool
+// handler dispatches through WriteAndUpdateBatch, which folds create and
+// update entries into one transaction. UpdateBatch is kept as the
+// standalone, update-only entry point symmetric with WriteBatch, for a
+// future update-only CLI surface (e.g. `ouroboros kb update`) that has no
+// create side to fold in.
 func UpdateBatch(db *sql.DB, updates []EntryUpdate) ([]PutResult, error) {
 	if err := validateUpdates(updates); err != nil {
 		return nil, err
