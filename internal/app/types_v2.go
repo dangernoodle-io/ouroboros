@@ -197,6 +197,94 @@ type edgeInput struct {
 	Target string `json:"target,omitempty"`
 }
 
+// roadmapInput is the mcpkit-typed input for the roadmap write tool (OU-4):
+// a single flat arg set (NOT entries[]) dispatched by Op across
+// add|update|move|reorder|done|remove. Every field the old handler
+// validates with a verbatim message (Op, Project, Section, To, per-op
+// ID-presence, BlockedBy[].Project/Ref) is tagged omitempty -- NOT
+// schema-required -- for the same missing-key-parity reason as every
+// other required-looking field in this file (see getInput.Domain's
+// comment): schema-requiring them would let go-sdk reject a missing key
+// before handleRoadmapV2 ever runs, with a generic schema-validation error
+// instead of the old verbatim text. handleRoadmapV2 and its per-op helpers
+// reproduce every check itself.
+//
+// ID/Position are typed pointers (not the kbEntryInput.ID `any` dual-type
+// dance): roadmap has no number-or-string dual-type field to reproduce
+// here (the old intArg only ever read a JSON number), so plain pointers
+// give presence (nil = absent) while staying compatible with go-sdk's
+// schema inference -- unlike a custom decode type, which broke inference
+// for kbEntryInput.ID (see its comment).
+//
+// The pointer fields (Title..Position) serve BOTH add and update: add
+// reads them as "value or absent -> zero" (deref-or-default, matching the
+// old handler's strArg/parseIntSlice/parseStringSlice/parseBlockers
+// absent-is-zero behavior); update carries their presence straight into
+// roadmap.Patch (nil = untouched field, non-nil (even an empty slice/"")
+// = clears -- matches the old handler's stringPtrArg/intSlicePtrArg/
+// stringSlicePtrArg/blockedByPtrArg present-but-empty-clears semantics
+// exactly). One struct serves both operations; handleRoadmapV2 branches on
+// Op.
+//
+// ACCEPTED DIVERGENCE (explicit JSON null on update, slice fields only):
+// on the update op, an explicit `"kb": null` / `"ticket": null` /
+// `"blocked_by": null` decodes the pointer-to-slice field (KB/Ticket/
+// BlockedBy) to a nil pointer -- indistinguishable from the key being
+// absent -- so handleRoadmapUpdateV2 leaves the field UNTOUCHED. The old
+// handler instead CLEARED it: its map-key-presence check (`if _, ok :=
+// args[key]; !ok`) passes for a present null value, so intSlicePtrArg/
+// stringSlicePtrArg/blockedByPtrArg went on to parse it (a non-object/
+// non-array null parses to an empty slice) and returned a non-nil pointer
+// to that empty slice, clearing the field. This is the flip side of the
+// present-empty-clears rule above: an empty ARRAY `[]` still clears
+// identically in both old and new (present -> non-nil pointer to an empty
+// slice); only the null-to-clear idiom differs. To clear a slice field
+// here, send `[]`, not `null`. Can't be fixed with typed pointers alone --
+// the same schema-inference constraint kbEntryInput.ID's comment
+// describes for id:null at OU-2: distinguishing "key present with value
+// null" from "key absent" needs a raw-args fallback, which a plain
+// `*[]T` field can't provide. Tracked for the OU-5 cutover decision.
+type roadmapInput struct {
+	Op            string          `json:"op,omitempty" jsonschema:"Required: \"add\", \"update\", \"move\", \"reorder\", \"done\", or \"remove\""`
+	Project       string          `json:"project,omitempty" jsonschema:"Project name (roadmap singleton)"`
+	Section       string          `json:"section,omitempty" jsonschema:"now|next|deferred|parked|dropped|done (add only)"`
+	To            string          `json:"to,omitempty" jsonschema:"now|next|deferred|parked|dropped|done (move only)"`
+	ID            *int            `json:"id,omitempty" jsonschema:"Item ID (update/move/reorder/done/remove)"`
+	Title         *string         `json:"title,omitempty" jsonschema:"Item title (add/update)"`
+	Body          *string         `json:"body,omitempty" jsonschema:"Item body (add/update)"`
+	Component     *string         `json:"component,omitempty" jsonschema:"Component tag, single-valued (add/update)"`
+	Why           *string         `json:"why,omitempty" jsonschema:"Why parked (add/update)"`
+	ResumeTrigger *string         `json:"resume_trigger,omitempty" jsonschema:"Resume trigger (add/update)"`
+	KB            *[]int          `json:"kb,omitempty" jsonschema:"Related KB doc IDs (add/update)"`
+	Ticket        *[]string       `json:"ticket,omitempty" jsonschema:"Ticket refs (add/update)"`
+	BlockedBy     *[]blockerInput `json:"blocked_by,omitempty" jsonschema:"Cross-project blockers: {project,ref,note} (add/update)"`
+	Epic          *string         `json:"epic,omitempty" jsonschema:"Epic backlog item id, single-valued (add/update)"`
+	Position      *float64        `json:"position,omitempty" jsonschema:"Sort position within the section (add/move/reorder; required for reorder)"`
+}
+
+// blockerInput is the typed counterpart to parseBlockers' raw blocked_by[]
+// element ({project,ref,note}). Project/Ref are tagged omitempty for the
+// same missing-key-parity reason as every other required-looking field in
+// this file: an absent key decodes to "" instead of failing go-sdk schema
+// validation, reaching blockersFromInputV2's existing empty-project/ref
+// check, which fires the old parseBlockers verbatim message exactly
+// ("blocked_by[%d] missing project"/"missing ref") -- full parity
+// restored, not a divergence.
+//
+// ACCEPTED DIVERGENCE (non-object element): the old parseBlockers treated
+// a non-object blocked_by[] element (e.g. a bare string) as a hard error
+// ("blocked_by[%d] must be an object with project and ref"). A typed
+// []blockerInput can't receive a non-object element at all -- go-sdk's
+// decode rejects the whole call with a decode error instead. This mirrors
+// edgeInput's identical accepted divergence (see its comment); the
+// missing-project/missing-ref messages (produced by blockersFromInputV2,
+// which still runs after decode) are unaffected and reproduced exactly.
+type blockerInput struct {
+	Project string `json:"project,omitempty" jsonschema:"Blocking project name"`
+	Ref     string `json:"ref,omitempty" jsonschema:"Blocking item/ticket ref"`
+	Note    string `json:"note,omitempty" jsonschema:"Optional note"`
+}
+
 // searchInput is the mcpkit-typed union of every search tool parameter
 // across all three domains. Differs from getInput: no ids/verbose/tags,
 // adds Queries (kb batch mode), no by/format (search has no roadmap

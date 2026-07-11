@@ -8,9 +8,9 @@ import (
 )
 
 // buildServerV2 composes the mcpkit-typed successor to buildServer (OU-1:
-// get+search; OU-2 adds kb write; OU-3 adds backlog write). It is NOT wired
-// into app.Serve/cli — dark until cutover, which will add the remaining
-// write tool (roadmap) and swap this in for buildServer.
+// get+search; OU-2 adds kb write; OU-3 adds backlog write; OU-4 adds
+// roadmap write — the last write tool). It is NOT wired into app.Serve/cli
+// — dark until OU-5 cutover, which swaps this in for buildServer.
 //
 // mcpkit.New has no server-instructions knob yet (as of the mcpkit pin this
 // PR bumps to), so serverInstructions is not carried over here — a cutover
@@ -29,5 +29,6 @@ func buildServerV2(db *sql.DB, version string) (*mcpkit.App, error) {
 		searchCapability{db: db},
 		kbCapability{db: db},
 		backlogCapability{db: db},
+		roadmapCapability{db: db},
 	)
 }

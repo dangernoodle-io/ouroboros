@@ -13,6 +13,7 @@ import (
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/kb"
+	"dangernoodle.io/ouroboros/internal/roadmap"
 )
 
 // TestWireGetV2_OmittedDomain_ReturnsVerbatimMessage is the regression guard
@@ -381,6 +382,188 @@ func TestWireBacklogV2_ComponentNotScalar_Errors(t *testing.T) {
 				"component": []any{"a", "b"},
 			},
 		},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+	assert.NotEmpty(t, mcpx.ResultText(res))
+}
+
+// TestWireRoadmapV2_OmittedOp_ReturnsVerbatimMessage proves op's omitempty
+// tag (see roadmapInput's comment) restores wire parity: an omitted op key
+// reaches handleRoadmapV2's own switch-default check instead of failing
+// go-sdk schema validation, preserving the verbatim invalid-op message over
+// the wire.
+func TestWireRoadmapV2_OmittedOp_ReturnsVerbatimMessage(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "roadmap", map[string]any{"project": "acme-corp"})
+	require.NoError(t, err, "an omitted op key must not fail schema validation")
+	require.True(t, res.IsError)
+	assert.Equal(t, errRoadmapOpRequired, mcpx.ResultText(res))
+}
+
+// TestWireRoadmapV2_OmittedProject_ReturnsVerbatimMessage is op's counterpart:
+// project is checked FIRST (matching handleRoadmap's dispatch order), so an
+// omitted project key must still return the verbatim project-required
+// message over the wire even with op present.
+func TestWireRoadmapV2_OmittedProject_ReturnsVerbatimMessage(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "roadmap", map[string]any{"op": "add", "section": "now", "title": "x"})
+	require.NoError(t, err, "an omitted project key must not fail schema validation")
+	require.True(t, res.IsError)
+	assert.Equal(t, errRoadmapProjectRequired, mcpx.ResultText(res))
+}
+
+// TestWireRoadmapV2_Add_RoundTripsThroughRealCodec is a regression guard the
+// direct handler tests (handlers_roadmap_v2_test.go) can't provide: drives
+// the "roadmap" tool over the real in-process testkit wiring with a raw
+// map[string]any, proving op=add decodes and validates against the
+// generated schema and returns the expected {id,section} result.
+func TestWireRoadmapV2_Add_RoundTripsThroughRealCodec(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "roadmap", map[string]any{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "wire add item",
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal([]byte(mcpx.ResultText(res)), &resp))
+	assert.Equal(t, float64(1), resp["id"])
+	assert.Equal(t, "now", resp["section"])
+}
+
+// TestWireRoadmapV2_UpdatePresentEmpty_ClearsField proves the presence-vs-
+// empty pointer round-trip works over the REAL wire codec (not just direct
+// roadmapInput construction): an update entry with body="" (present, empty)
+// clears the field, distinguishing it from an update that omits body
+// entirely (which leaves it untouched) -- this is the build spec's
+// mandated update-clear wire test.
+func TestWireRoadmapV2_UpdatePresentEmpty_ClearsField(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+
+	addRes, err := h.CallTool(context.Background(), "roadmap", map[string]any{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "orig", "body": "orig body",
+	})
+	require.NoError(t, err)
+	require.False(t, addRes.IsError)
+
+	// Present-but-empty body clears; omitted title leaves it untouched.
+	updRes, err := h.CallTool(context.Background(), "roadmap", map[string]any{
+		"op": "update", "project": "acme-corp", "id": 1, "body": "",
+	})
+	require.NoError(t, err)
+	require.False(t, updRes.IsError)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Now, 1)
+	assert.Equal(t, "orig", rm.Sections.Now[0].Title, "title untouched — omitted from the update call")
+	assert.Empty(t, rm.Sections.Now[0].Body, "body cleared — present-but-empty in the update call")
+}
+
+// TestWireRoadmapV2_UpdateEmptyArray_ClearsKB proves the SUPPORTED clear
+// path for slice-typed update fields: an update with kb: [] (present,
+// empty array) decodes to a non-nil pointer to an empty slice, clearing
+// the item's kb over the real wire codec -- the flip side of
+// TestWireRoadmapV2_UpdateNullKB_LeavesUnchanged below (see roadmapInput's
+// ACCEPTED DIVERGENCE comment on explicit null vs empty array).
+func TestWireRoadmapV2_UpdateEmptyArray_ClearsKB(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+
+	addRes, err := h.CallTool(context.Background(), "roadmap", map[string]any{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "wire kb item",
+		"kb": []any{1, 2},
+	})
+	require.NoError(t, err)
+	require.False(t, addRes.IsError)
+
+	updRes, err := h.CallTool(context.Background(), "roadmap", map[string]any{
+		"op": "update", "project": "acme-corp", "id": 1, "kb": []any{},
+	})
+	require.NoError(t, err)
+	require.False(t, updRes.IsError)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Now, 1)
+	assert.Empty(t, rm.Sections.Now[0].KB, "kb: [] (present, empty) clears the field")
+}
+
+// TestWireRoadmapV2_UpdateNullKB_LeavesUnchanged documents+guards the
+// ACCEPTED DIVERGENCE on roadmapInput (explicit JSON null on a slice
+// update field): an update with kb: null decodes *[]int to a nil pointer
+// -- indistinguishable from the key being absent -- so the field is left
+// UNTOUCHED here, whereas the old handler cleared it on an explicit null
+// (see roadmapInput's comment for the full mechanism). This is a no-op,
+// not an error.
+func TestWireRoadmapV2_UpdateNullKB_LeavesUnchanged(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+
+	addRes, err := h.CallTool(context.Background(), "roadmap", map[string]any{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "wire kb null item",
+		"kb": []any{3, 4},
+	})
+	require.NoError(t, err)
+	require.False(t, addRes.IsError)
+
+	updRes, err := h.CallTool(context.Background(), "roadmap", map[string]any{
+		"op": "update", "project": "acme-corp", "id": 1, "kb": nil,
+	})
+	require.NoError(t, err)
+	require.False(t, updRes.IsError)
+
+	rm, err := roadmap.Load(db, "acme-corp")
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Now, 1)
+	assert.Equal(t, []int{3, 4}, rm.Sections.Now[0].KB, "kb: null is a no-op here (divergence from the old handler, which cleared it)")
+}
+
+// TestWireRoadmapV2_ComponentNotScalar_Errors documents+guards the accepted
+// divergence (see roadmapInput's comment): a non-scalar component (a JSON
+// list) over the real wire codec still errors, just with a different
+// (go-sdk decode/schema) message than a hypothetical verbatim "single
+// string value" text -- intentionally NOT asserted here, only that the
+// call errors, mirroring TestWireBacklogV2_ComponentNotScalar_Errors.
+func TestWireRoadmapV2_ComponentNotScalar_Errors(t *testing.T) {
+	resetDB(t)
+
+	app, err := buildServerV2(db, "test")
+	require.NoError(t, err)
+
+	h := testkit.New(t, app)
+	res, err := h.CallTool(context.Background(), "roadmap", map[string]any{
+		"op": "add", "project": "acme-corp", "section": "now", "title": "t",
+		"component": []any{"a", "b"},
 	})
 	require.NoError(t, err)
 	require.True(t, res.IsError)
