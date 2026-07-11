@@ -159,20 +159,18 @@ type transcriptContentBlock struct {
 
 // readLastMainAssistantText scans a transcript JSONL backwards and returns
 // the concatenated text of the most recent main-context (non-sidechain)
-// assistant turn. Returns "" if not found or on any read error.
+// assistant turn. Returns "" if not found or on any read error. Only scans
+// the tail of the transcript (readTranscriptTail's maxHookTailBytes cap),
+// same bound turnAlreadyPersisted uses, so a very large transcript file
+// never triggers an unbounded read.
 func readLastMainAssistantText(transcriptPath string) string {
-	data, err := os.ReadFile(transcriptPath)
-	if err != nil {
-		return ""
-	}
-	lines := bytes.Split(data, []byte("\n"))
+	// Also applies maxHookScanLines (unconditionally, even on sub-cap
+	// files) — a benign alignment with turnAlreadyPersisted's bounded
+	// tail+scan-line window; this function previously had no line cap.
+	lines := readTranscriptTail(transcriptPath)
 	for i := len(lines) - 1; i >= 0; i-- {
-		line := lines[i]
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
 		var entry transcriptLine
-		if err := json.Unmarshal(line, &entry); err != nil {
+		if err := json.Unmarshal(lines[i], &entry); err != nil {
 			continue
 		}
 		if entry.Type != "assistant" || entry.IsSidechain {
