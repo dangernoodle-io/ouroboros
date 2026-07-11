@@ -7,6 +7,12 @@ const os = require('os');
 
 const SCRIPT_PATH = path.join(__dirname, '..', 'scripts', 'post-commit-nudge.js');
 
+// cooldownFileFor mirrors the script's getCooldownDir('post-commit-nudge', key)
+// path construction, scoped to the given HOME dir (test isolation).
+function cooldownFileFor(home, key) {
+  return path.join(home, '.ouroboros', 'cooldowns', 'post-commit-nudge', key);
+}
+
 let homeDir;
 
 test('setup: create HOME isolation', () => {
@@ -45,7 +51,7 @@ test('post-commit-nudge: git commit with no cooldown → nudge on stderr', () =>
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-post-commit-nudge-work-'));
   try {
     // Remove per-project cooldown files to ensure test runs
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-unknown'); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'unknown')); } catch (e) {}
 
     const input = JSON.stringify({
       session_id: 'sess-nudge-test',
@@ -70,7 +76,7 @@ test('post-commit-nudge: git commit case-insensitive match', () => {
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-post-commit-nudge-case-'));
   try {
     // Remove per-project cooldown files to ensure test runs
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-unknown'); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'unknown')); } catch (e) {}
 
     const input = JSON.stringify({
       session_id: 'sess-case-test',
@@ -95,7 +101,7 @@ test('post-commit-nudge: fire event logged', () => {
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-post-commit-nudge-fire-'));
   try {
     // Remove per-project cooldown files to ensure test runs
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-unknown'); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'unknown')); } catch (e) {}
 
     const input = JSON.stringify({
       session_id: 'sess-fire-test',
@@ -130,7 +136,7 @@ test('post-commit-nudge: nudge event logged when git commit detected', () => {
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-post-commit-nudge-nudge-'));
   try {
     // Remove per-project cooldown files to ensure test runs
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-unknown'); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'unknown')); } catch (e) {}
 
     const input = JSON.stringify({
       session_id: 'sess-nudge-event-test',
@@ -167,7 +173,7 @@ test('post-commit-nudge: nudge on stderr (no stdout)', () => {
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-post-commit-nudge-streams-'));
   try {
     // Remove per-project cooldown files to ensure test runs
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-unknown'); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'unknown')); } catch (e) {}
 
     const input = JSON.stringify({
       session_id: 'sess-streams-test',
@@ -193,8 +199,8 @@ test('post-commit-nudge: cooldown scoped per-project — project A cooldown does
   const testHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ouroboros-post-commit-nudge-per-proj-'));
   try {
     // Clean up any leftover cooldown files
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-project-a'); } catch (e) {}
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-project-b'); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'project-a')); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'project-b')); } catch (e) {}
 
     // Create project-a repo: testHomeDir/project-a/.git/ with a file inside
     const projectARoot = path.join(testHomeDir, 'project-a');
@@ -220,7 +226,7 @@ test('post-commit-nudge: cooldown scoped per-project — project A cooldown does
     assert.match(resultA.stderr, /\/persist to save decisions/, 'project-a should nudge');
 
     // Verify cooldown file was created for project-a
-    assert(fs.existsSync('/tmp/.ouroboros-commit-nudge-project-a'), 'project-a cooldown should exist');
+    assert(fs.existsSync(cooldownFileFor(testHomeDir, 'project-a')), 'project-a cooldown should exist');
 
     // Create project-b repo: testHomeDir/project-b/.git/ with a file inside
     const projectBRoot = path.join(testHomeDir, 'project-b');
@@ -245,8 +251,8 @@ test('post-commit-nudge: cooldown scoped per-project — project A cooldown does
     assert.match(resultB.stderr, /\/persist to save decisions/, 'project-b should nudge despite project-a cooldown');
   } finally {
     fs.rmSync(testHomeDir, { recursive: true });
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-project-a'); } catch (e) {}
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-project-b'); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'project-a')); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'project-b')); } catch (e) {}
   }
 });
 
@@ -263,7 +269,7 @@ test('post-commit-nudge: project name sanitization replaces unsafe chars with hy
     fs.writeFileSync(projectFile, 'test');
 
     // Clean up cooldown file with sanitized name
-    const cooldownFile = `/tmp/.ouroboros-commit-nudge-${expectedSanitized}`;
+    const cooldownFile = cooldownFileFor(testHomeDir, expectedSanitized);
     try { fs.unlinkSync(cooldownFile); } catch (e) {}
 
     const input = JSON.stringify({
@@ -286,7 +292,7 @@ test('post-commit-nudge: project name sanitization replaces unsafe chars with hy
     assert(fs.existsSync(cooldownFile), `cooldown file with sanitized name should exist at ${cooldownFile}`);
   } finally {
     fs.rmSync(testHomeDir, { recursive: true });
-    try { fs.unlinkSync('/tmp/.ouroboros-commit-nudge-project-name-test'); } catch (e) {}
+    try { fs.unlinkSync(cooldownFileFor(testHomeDir, 'project-name-test')); } catch (e) {}
   }
 });
 

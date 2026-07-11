@@ -1,10 +1,21 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execSync } = require('child_process');
 
 const SKIP_AGENT_TYPES = ['Explore', 'knowledge-explorer', 'backlog-manager'];
 const LOG_PATH = `${process.env.HOME}/.ouroboros/hooks.log`;
 let logDirCreated = false;
+
+// getCooldownDir builds a path under ~/.ouroboros/cooldowns/ (resolved via
+// HOME, falling back to os.homedir()), mirroring where hook logs already
+// live. /tmp is shared multi-user and only sometimes survives reboot, so
+// cooldown files live alongside the logs instead. Optional path segments
+// (e.g. a per-hook subdir + key) are joined onto the base dir.
+function getCooldownDir(...parts) {
+  const home = process.env.HOME || os.homedir();
+  return path.join(home, '.ouroboros', 'cooldowns', ...parts);
+}
 
 
 function readStdin() {
@@ -41,7 +52,10 @@ function isWithinCooldown(filePath, cooldownMs) {
 }
 
 function touchFile(filePath) {
-  try { fs.writeFileSync(filePath, ''); } catch (e) {}
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, '');
+  } catch (e) {}
 }
 
 function extractKbBlock(message) {
@@ -683,4 +697,4 @@ function queryKb(project, opts = {}) {
   }
 }
 
-module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, checkNudgePatterns, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, readLastMainAssistantText, persistKbBlock, queryKb, isOuroborosWriteTool, turnAlreadyPersisted };
+module.exports = { readStdin, getBinaryPath, isWithinCooldown, touchFile, extractKbBlock, extractAllKbBlocks, MAX_TAIL_BYTES, matchesAnyPattern, ALREADY_PERSISTED_PATTERNS, DECISION_PATTERNS, checkNudgePatterns, formatContextLines, findGitRoot, projectFromPath, findWorkspaceRoot, listWorkspaceProjects, resolveProject, logHookEvent, getMaxLogSize, getMaxLogFiles, rotateLogFiles, SKIP_AGENT_TYPES, isSkippedAgentType, readLastMainAssistantText, persistKbBlock, queryKb, isOuroborosWriteTool, turnAlreadyPersisted, getCooldownDir };
