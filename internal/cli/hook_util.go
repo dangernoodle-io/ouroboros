@@ -2,14 +2,18 @@ package cli
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"dangernoodle.io/ouroboros/internal/backlog"
 )
 
 // maxHookTailBytes caps how much of a transcript file is read into memory
@@ -139,56 +143,24 @@ func isMarketplaceRepo(gitRoot string) bool {
 	return err == nil
 }
 
-// findWorkspaceRoot walks up from cwd to the filesystem root, returning the
-// first ancestor directory containing a `.claude` entry, or "" if none
-// found. Faithful port of lib.js findWorkspaceRoot, EXCEPT it takes cwd as
-// an explicit parameter instead of reading process.cwd() — the Node
-// original's use of process.cwd() (rather than the hook payload's cwd
-// field) is a latent bug: a hook process's OS cwd need not match the
-// session's reported cwd. This port fixes that by requiring the caller to
-// pass the payload's cwd explicitly.
-func findWorkspaceRoot(cwd string) string {
-	if cwd == "" {
-		return ""
-	}
-	current, err := filepath.Abs(cwd)
-	if err != nil {
-		return ""
-	}
-	root := filepath.VolumeName(current) + string(filepath.Separator)
-
-	for current != root {
-		claudeDir := filepath.Join(current, ".claude")
-		if _, err := os.Stat(claudeDir); err == nil {
-			return current
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
-	}
-	return ""
-}
-
-// listWorkspaceProjects returns the non-hidden directory names directly
-// under root, or an empty slice if root is "" or unreadable. Faithful port
-// of lib.js listWorkspaceProjects.
-func listWorkspaceProjects(root string) []string {
-	if root == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(root)
+// registeredProjectNamesLongestFirst returns the Names of ouroboros's own
+// registered projects (backlog.ListProjects — the projects table), sorted by
+// length descending, so a more-specific registered project name is checked
+// before a shorter one that might also match — a short registered name must
+// never win over a longer, more-specific registered name that also appears
+// in the same message (OU-309). On any ListProjects error, returns nil
+// (advisory hook: fail open to "no mention match", never fail the hook).
+func registeredProjectNamesLongestFirst(db *sql.DB) []string {
+	projects, err := backlog.ListProjects(db)
 	if err != nil {
 		return nil
 	}
-	var projects []string
-	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-			projects = append(projects, e.Name())
-		}
+	names := make([]string, len(projects))
+	for i, p := range projects {
+		names[i] = p.Name
 	}
-	return projects
+	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
+	return names
 }
 
 // resolveProjectFromMessage returns the first project in projects that

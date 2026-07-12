@@ -43,6 +43,8 @@ func TestRunHookSubagentStart_PromptMention_WinsOverMarketplaceHubCwd(t *testing
 	_, marketplaceDir, _ := upcWorkspace(t)
 	subagentSeedFillerDocs(t, db)
 	seedKbDoc(t, db, "ouroboros", "Use PostgreSQL for storage")
+	_, err := backlog.CreateProject(db, "ouroboros", "OU")
+	require.NoError(t, err)
 
 	p := hooks.SubagentStartPayload{
 		Common:    hooks.Common{Cwd: marketplaceDir, SessionID: "sub-sess2"},
@@ -258,6 +260,64 @@ func subagentSeedFillerDocs(t *testing.T, db *sql.DB) {
 		Type: "note", Project: "filler", Title: "Plan team lunch venue", Content: "restaurant booking logistics",
 	})
 	require.NoError(t, err)
+}
+
+// --- OU-309: mention resolution uses ouroboros's registered projects ------
+
+// TestRunHookSubagentStart_MentionOfUnregisteredSubdir_NoSpuriousMatch is the
+// OU-309 regression for the spurious-subdirectory-match bug: with a
+// NON-EMPTY, realistic candidate list (two REGISTERED projects, neither
+// named "internal"), the subagent's prompt mentions "internal/cli" (a path
+// fragment, never a registered project) and no registered project name.
+// Mention resolution must NOT resolve to a project named "internal" —
+// proving the unregistered name is correctly rejected from a populated
+// candidate list, not merely absent because no candidates existed.
+// Resolution falls through to the cwd tier, injecting the cwd repo's
+// ("ouroboros") own KB.
+func TestRunHookSubagentStart_MentionOfUnregisteredSubdir_NoSpuriousMatch(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, _, ouroborosDir := upcWorkspace(t)
+	_, err := backlog.CreateProject(db, "ouroboros", "OU")
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "breadboard", "BB")
+	require.NoError(t, err)
+	subagentSeedFillerDocs(t, db)
+	seedKbDoc(t, db, "ouroboros", "Use gRPC for internal APIs")
+
+	p := hooks.SubagentStartPayload{
+		Common:    hooks.Common{Cwd: ouroborosDir, SessionID: "sub-ou309-subdir"},
+		AgentType: "worker",
+		Prompt:    "please look at internal/cli and explain how we use gRPC for internal APIs here",
+	}
+	resp := runHookSubagentStart(p, db)
+	assert.Contains(t, resp.AdditionalContext, "Use gRPC for internal APIs", "falls through to the cwd tier despite a non-empty registered-project candidate list")
+	assert.NotContains(t, resp.AdditionalContext, "[ouroboros] internal", "the unregistered \"internal\" subdir-shaped mention must never resolve to a project label")
+}
+
+// TestRunHookSubagentStart_LongerRegisteredProjectNameWins is the OU-309
+// longest-match regression: two registered projects both appear in the
+// prompt ("ouroboros" is a substring-word of "ouroboros-plugin"); the
+// longer, more-specific registered name must win.
+func TestRunHookSubagentStart_LongerRegisteredProjectNameWins(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, marketplaceDir, _ := upcWorkspace(t)
+	_, err := backlog.CreateProject(db, "ouroboros", "OU")
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "ouroboros-plugin", "OP")
+	require.NoError(t, err)
+	subagentSeedFillerDocs(t, db)
+	seedKbDoc(t, db, "ouroboros", "Core KB decision")
+	seedKbDoc(t, db, "ouroboros-plugin", "Plugin hook decision")
+
+	p := hooks.SubagentStartPayload{
+		Common:    hooks.Common{Cwd: marketplaceDir, SessionID: "sub-ou309-longest"},
+		AgentType: "worker",
+		Prompt:    "let's discuss the ouroboros-plugin hook decision in detail",
+	}
+	resp := runHookSubagentStart(p, db)
+	assert.Contains(t, resp.AdditionalContext, "Plugin hook decision")
 }
 
 // --- mutation-verify (documented, not part of the permanent suite) --------

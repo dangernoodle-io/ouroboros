@@ -88,6 +88,8 @@ func TestRunHookUserPromptSubmit_PromptMention_WinsOverMarketplaceHubCwd(t *test
 	_, marketplaceDir, _ := upcWorkspace(t)
 	upcSeedFillerDocs(t, db)
 	seedKbDoc(t, db, "ouroboros", "Use PostgreSQL for storage")
+	_, err := backlog.CreateProject(db, "ouroboros", "OU")
+	require.NoError(t, err)
 
 	p := hooks.UserPromptSubmitPayload{
 		Common: hooks.Common{Cwd: marketplaceDir, SessionID: "sess2"},
@@ -120,6 +122,8 @@ func TestRunHookUserPromptSubmit_PromptMention_OrderedBeforeOtherCwdProject(t *t
 	root, _, _ := upcWorkspace(t)
 	upcSeedFillerDocs(t, db)
 	seedKbDoc(t, db, "ouroboros", "Ouroboros hook migration status")
+	_, err := backlog.CreateProject(db, "ouroboros", "OU")
+	require.NoError(t, err)
 	breadboardDir := filepath.Join(root, "breadboard")
 
 	// cwd resolves to "breadboard", but the prompt mentions "ouroboros" —
@@ -390,37 +394,7 @@ func TestIsMarketplaceRepo(t *testing.T) {
 	assert.False(t, isMarketplaceRepo(""))
 }
 
-// --- findWorkspaceRoot / listWorkspaceProjects / resolveProjectFromMessage --
-
-func TestFindWorkspaceRoot_WalksUpFromCwdParam(t *testing.T) {
-	root, marketplaceDir, _ := upcWorkspace(t)
-	nested := filepath.Join(marketplaceDir, "sub", "dir")
-	require.NoError(t, os.MkdirAll(nested, 0o755))
-	assert.Equal(t, root, findWorkspaceRoot(nested))
-}
-
-func TestFindWorkspaceRoot_NoClaudeDir(t *testing.T) {
-	assert.Equal(t, "", findWorkspaceRoot(t.TempDir()))
-}
-
-func TestFindWorkspaceRoot_EmptyCwd(t *testing.T) {
-	assert.Equal(t, "", findWorkspaceRoot(""))
-}
-
-func TestListWorkspaceProjects_FiltersHiddenAndFiles(t *testing.T) {
-	root, _, _ := upcWorkspace(t)
-	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("x"), 0o644))
-	projects := listWorkspaceProjects(root)
-	assert.Contains(t, projects, "ouroboros")
-	assert.Contains(t, projects, "breadboard")
-	assert.Contains(t, projects, "dangernoodle-marketplace")
-	assert.NotContains(t, projects, ".claude")
-	assert.NotContains(t, projects, "README.md")
-}
-
-func TestListWorkspaceProjects_EmptyRoot(t *testing.T) {
-	assert.Nil(t, listWorkspaceProjects(""))
-}
+// --- resolveProjectFromMessage ------------------------------------------
 
 func TestResolveProjectFromMessage_WordBoundaryMatch(t *testing.T) {
 	projects := []string{"ouroboros", "breadboard"}
@@ -436,6 +410,66 @@ func TestResolveProjectFromMessage_NoSubstringFalsePositive(t *testing.T) {
 	// string does not.
 	projects := []string{"ouroboros"}
 	assert.Equal(t, "", resolveProjectFromMessage("", projects))
+}
+
+// --- OU-309: mention resolution uses ouroboros's registered projects ------
+
+// TestRunHookUserPromptSubmit_MentionOfUnregisteredSubdir_NoSpuriousMatch is
+// the OU-309 regression for the spurious-subdirectory-match bug: with a
+// NON-EMPTY, realistic candidate list (two REGISTERED projects, neither
+// named "internal"), the prompt mentions "internal/cli" (a path fragment,
+// never a registered project) and no registered project name. Mention
+// resolution must NOT resolve to a project named "internal" — proving the
+// unregistered name is correctly rejected from a populated candidate list,
+// not merely absent because no candidates existed. Resolution falls through
+// to the cwd tier, injecting the cwd repo's ("ouroboros") own KB.
+func TestRunHookUserPromptSubmit_MentionOfUnregisteredSubdir_NoSpuriousMatch(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, _, ouroborosDir := upcWorkspace(t)
+	_, err := backlog.CreateProject(db, "ouroboros", "OU")
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "breadboard", "BB")
+	require.NoError(t, err)
+	upcSeedFillerDocs(t, db)
+	seedKbDoc(t, db, "ouroboros", "Use gRPC for internal APIs")
+
+	p := hooks.UserPromptSubmitPayload{
+		Common: hooks.Common{Cwd: ouroborosDir, SessionID: "sess-ou309-subdir"},
+		Prompt: "please look at internal/cli and explain how we use gRPC for internal APIs here",
+	}
+	resp := runHookUserPromptSubmit(p, db)
+	assert.Contains(t, resp.AdditionalContext, "ouroboros KB", "falls through to the cwd tier despite a non-empty registered-project candidate list")
+	assert.Contains(t, resp.AdditionalContext, "Use gRPC for internal APIs")
+	assert.NotContains(t, resp.AdditionalContext, "internal KB", "the unregistered \"internal\" subdir-shaped mention must never resolve to a project")
+}
+
+// TestRunHookUserPromptSubmit_LongerRegisteredProjectNameWins is the OU-309
+// longest-match regression: two registered projects both appear in the
+// prompt ("ouroboros" is a substring-word of "ouroboros-plugin"); the
+// longer, more-specific registered name must win.
+func TestRunHookUserPromptSubmit_LongerRegisteredProjectNameWins(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, marketplaceDir, _ := upcWorkspace(t)
+	_, err := backlog.CreateProject(db, "ouroboros", "OU")
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "ouroboros-plugin", "OP")
+	require.NoError(t, err)
+	upcSeedFillerDocs(t, db)
+	seedKbDoc(t, db, "ouroboros", "Core KB decision")
+	seedKbDoc(t, db, "ouroboros-plugin", "Plugin hook decision")
+
+	p := hooks.UserPromptSubmitPayload{
+		Common: hooks.Common{Cwd: marketplaceDir, SessionID: "sess-ou309-longest"},
+		// "continue" triggers the resume intent (bypasses the BM25
+		// weak-match filter, which would otherwise make this test depend on
+		// FTS scoring rather than the project-resolution logic under test).
+		Prompt: "let's continue working on ouroboros-plugin's hook decision",
+	}
+	resp := runHookUserPromptSubmit(p, db)
+	assert.Contains(t, resp.AdditionalContext, "ouroboros-plugin KB")
+	assert.Contains(t, resp.AdditionalContext, "Plugin hook decision")
 }
 
 // --- truncateRunes ----------------------------------------------------
