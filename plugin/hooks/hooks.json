@@ -12,7 +12,7 @@
       "matcher": "tool == \"Bash\"",
       "hooks": [{
         "type": "command",
-        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/post-commit-nudge.js",
+        "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros claude hooks post-tool-use",
         "timeout": 3
       }],
       "description": "Nudge to /persist after git commits"

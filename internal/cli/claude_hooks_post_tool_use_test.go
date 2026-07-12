@@ -152,9 +152,9 @@ func TestRunPostEditCheck_PerFileCooldown_KeyedByPath_DifferentFileNotSuppressed
 	assert.Contains(t, out2, "store.go", "a different file's cooldown key must be independent — no cross-file suppression")
 }
 
-// --- non-Edit ToolName: no-op, proves the dispatch structure ----------------
+// --- unhandled ToolName: no-op, proves the dispatch structure ---------------
 
-func TestHookHandlePostToolUse_NonEditToolName_NoOp(t *testing.T) {
+func TestHookHandlePostToolUse_UnhandledToolName_NoOp(t *testing.T) {
 	isolateHookLog(t)
 	t.Setenv("HOME", t.TempDir())
 	dbPath := filepath.Join(t.TempDir(), "kb.db")
@@ -163,6 +163,24 @@ func TestHookHandlePostToolUse_NonEditToolName_NoOp(t *testing.T) {
 
 	p := hooks.PostToolUsePayload{
 		Common:    hooks.Common{SessionID: "sess5"},
+		ToolName:  "Read",
+		ToolInput: json.RawMessage(`{"file_path":"/tmp/x"}`),
+	}
+
+	var resp hooks.Response
+	out := captureStderr(t, func() { resp = hookHandlePostToolUse(t.Context(), nil, p) })
+	assert.Equal(t, hooks.Response{}, resp)
+	assert.Empty(t, out, "a ToolName that is neither Edit-family nor Bash must not run either branch's stderr logic")
+}
+
+// --- Bash ToolName: dispatches to post-commit-nudge -------------------------
+
+func TestHookHandlePostToolUse_BashGitCommit_EmitsPersistNudge(t *testing.T) {
+	isolateHookLog(t)
+	t.Setenv("HOME", t.TempDir())
+
+	p := hooks.PostToolUsePayload{
+		Common:    hooks.Common{SessionID: "sess5b"},
 		ToolName:  "Bash",
 		ToolInput: json.RawMessage(`{"command":"git commit -m x"}`),
 	}
@@ -170,7 +188,7 @@ func TestHookHandlePostToolUse_NonEditToolName_NoOp(t *testing.T) {
 	var resp hooks.Response
 	out := captureStderr(t, func() { resp = hookHandlePostToolUse(t.Context(), nil, p) })
 	assert.Equal(t, hooks.Response{}, resp)
-	assert.Empty(t, out, "a non-Edit-family ToolName must not run post-edit-check's DB/stderr logic today — OU-277 will add its own branch")
+	assert.Contains(t, out, "[ouroboros] /persist to save decisions")
 }
 
 // --- withDB failure: fail-open silent ---------------------------------------

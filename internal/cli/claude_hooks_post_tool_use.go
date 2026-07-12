@@ -49,13 +49,12 @@ var editToolNames = map[string]bool{
 }
 
 // hookHandlePostToolUse is the single PostToolUse-event registry handler; it
-// dispatches on payload.ToolName. Today it only handles the Edit family
+// dispatches on payload.ToolName. Two branches today: the Edit family
 // (post-edit-check.js's per-file KB-staleness nudge on Edit/Write/MultiEdit/
-// NotebookEdit) — any other ToolName (e.g. Bash) is a silent no-op (zero
-// Response). OU-277 extends this same switch with a Bash/git-commit branch
-// (post-commit-nudge.js): add a case alongside editToolNames' branch below,
-// keeping each branch's DB access scoped to its own withDB call so a
-// non-matching ToolName never pays the DB-open cost.
+// NotebookEdit, OU-275) opens its own scoped DB via withDB; Bash
+// (post-commit-nudge.js's post-git-commit /persist nudge, OU-277) does no KB
+// read at all, so it runs with no DB access whatsoever. Any other ToolName
+// is a silent no-op (zero Response).
 func hookHandlePostToolUse(_ context.Context, _ io.Reader, p hooks.PostToolUsePayload) hooks.Response {
 	switch {
 	case editToolNames[p.ToolName]:
@@ -65,6 +64,8 @@ func hookHandlePostToolUse(_ context.Context, _ io.Reader, p hooks.PostToolUsePa
 		}); err != nil {
 			logHookEvent(map[string]any{"hook": "post_edit_check", "kind": "error", "detail": err.Error(), "session_id": p.SessionID})
 		}
+	case p.ToolName == "Bash":
+		runPostCommitNudge(p)
 	}
 	return hooks.Response{}
 }

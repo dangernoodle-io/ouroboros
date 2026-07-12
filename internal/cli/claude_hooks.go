@@ -11,9 +11,8 @@ import (
 // `claude` host namespace ("everything Claude Code's plugin protocol
 // invokes against this binary"): `claude hooks` (Stop, SubagentStop,
 // UserPromptSubmit, SubagentStart, and PostToolUse are registered today —
-// PostToolUse currently only dispatches its Edit-family branch (OU-275);
-// OU-277 adds a Bash/git-commit branch to the same handler. PreCompact
-// ports over in a follow-on PR)
+// PostToolUse dispatches its Edit-family branch (OU-275) and Bash/git-commit
+// branch (OU-277). PreCompact ports over in a follow-on PR)
 // plus `claude statusline` (OU-272), which replaces the old top-level
 // `ouroboros statusline` command. WithAppPrefix("OUROBOROS") wires the
 // session resolver's env-var override tier for parity with a future
