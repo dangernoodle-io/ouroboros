@@ -119,7 +119,11 @@ func hookHandleUserPromptSubmit(_ context.Context, _ io.Reader, p hooks.UserProm
 // can be — always won, unconditionally injecting that repo's KB/backlog
 // regardless of an explicit project mention in the prompt. The fixed order:
 //  1. Prompt-mention first (resolveProjectFromMessage): if the prompt
-//     names a known workspace project, that wins outright.
+//     names one of ouroboros's own REGISTERED projects (backlog.ListProjects
+//     — the projects table, not a filesystem walk of workspace
+//     subdirectories; see OU-309), that wins outright. Candidate names are
+//     sorted longest-first so a more-specific registered project name wins
+//     over a shorter one that also happens to match.
 //  2. Else cwd, UNLESS the cwd's git root is the marketplace hub itself
 //     (isMarketplaceRepo) — the hub is a repo, but never a "project" whose
 //     KB/backlog a hook should inject.
@@ -144,10 +148,7 @@ func runHookUserPromptSubmit(p hooks.UserPromptSubmitPayload, db *sql.DB) hooks.
 		return hooks.Response{}
 	}
 
-	workspaceRoot := findWorkspaceRoot(p.Cwd)
-	projects := listWorkspaceProjects(workspaceRoot)
-
-	project := resolveProjectFromMessage(p.Prompt, projects)
+	project := resolveProjectFromMessage(p.Prompt, registeredProjectNamesLongestFirst(db))
 	if project == "" && p.Cwd != "" {
 		gitRoot := findGitRoot(p.Cwd)
 		if gitRoot != "" && !isMarketplaceRepo(gitRoot) {

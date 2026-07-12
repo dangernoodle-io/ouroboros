@@ -46,7 +46,11 @@ func hookHandleSubagentStart(_ context.Context, _ io.Reader, p hooks.SubagentSta
 // deviation from the Node original, which resolved solely via
 // projectFromPath(cwd)): mirrors runHookUserPromptSubmit's hub-aware order —
 //  1. Prompt-mention first (resolveProjectFromMessage): if the subagent's
-//     prompt names a known workspace project, that wins outright.
+//     prompt names one of ouroboros's own REGISTERED projects
+//     (backlog.ListProjects — the projects table, not a filesystem walk of
+//     workspace subdirectories; see OU-309), that wins outright. Candidate
+//     names are sorted longest-first so a more-specific registered project
+//     name wins over a shorter one that also happens to match.
 //  2. Else cwd, UNLESS the cwd's git root is the marketplace hub itself
 //     (isMarketplaceRepo) — the hub is a repo, but never a "project" whose
 //     KB/backlog a hook should inject.
@@ -64,10 +68,7 @@ func hookHandleSubagentStart(_ context.Context, _ io.Reader, p hooks.SubagentSta
 // carry it forward — every non-skipped spawn with something to inject
 // injects.
 func runHookSubagentStart(p hooks.SubagentStartPayload, db *sql.DB) hooks.Response {
-	workspaceRoot := findWorkspaceRoot(p.Cwd)
-	projects := listWorkspaceProjects(workspaceRoot)
-
-	project := resolveProjectFromMessage(p.Prompt, projects)
+	project := resolveProjectFromMessage(p.Prompt, registeredProjectNamesLongestFirst(db))
 	if project == "" && p.Cwd != "" {
 		gitRoot := findGitRoot(p.Cwd)
 		if gitRoot != "" && !isMarketplaceRepo(gitRoot) {
