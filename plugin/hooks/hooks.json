@@ -65,10 +65,10 @@
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-compact.js",
-        "timeout": 10
+        "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros claude hooks pre-compact",
+        "timeout": 5
       }],
-      "description": "Persistence safety net: block compaction if unpersisted decisions detected"
+      "description": "Log observability breadcrumb when unpersisted decisions are detected before compaction (never blocks)"
     }]
   }
 }
