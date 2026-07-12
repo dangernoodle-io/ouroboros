@@ -21,7 +21,7 @@ func TestClaudeHooksStop_WireDecodesStdinAndRuns(t *testing.T) {
 	t.Setenv("PROJECT_KB_PATH", filepath.Join(home, "kb.db"))
 	t.Setenv("QM_DB_PATH", "")
 
-	provider := claudeHooksProvider()
+	provider := claudeProvider()
 	cmds := provider.Commands()
 	require.Len(t, cmds, 1, "claude namespace is a single top-level command")
 	assert.Equal(t, "claude", cmds[0].Use)

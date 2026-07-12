@@ -162,7 +162,7 @@ func init() {
 }
 
 // resolveDashboardContext builds a base Context from cwd/.git auto-detection,
-// mirroring statusline.go's project-detection approach.
+// mirroring the projectFromPath helper in hook_util.go.
 func resolveDashboardContext() dashboard.Context {
 	ctx := dashboard.Context{
 		Schema: 1,
