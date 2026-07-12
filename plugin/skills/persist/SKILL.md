@@ -41,7 +41,7 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
    - Stored: `[type] title — project`
    - Skipped: `[type] title — already identical`
 
-6. **Emit KB block.** After storing, emit a summary ```kb``` fenced block listing all persisted entries (JSON array with `"_persisted_by": "persist-skill"` at the top level or on the first entry). This sentinel prevents stop.js from re-persisting the same entries. Do not run `kb` twice.
+6. **Emit KB block.** After storing, emit a summary ```kb``` fenced block listing all persisted entries (JSON array with `"_persisted_by": "persist-skill"` at the top level or on the first entry). This sentinel prevents the stop hook from re-persisting the same entries. Do not run `kb` twice.
 
 ## Be selective
 

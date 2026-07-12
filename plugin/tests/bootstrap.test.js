@@ -491,9 +491,8 @@ test('checkStatusline: ok when the referenced script exists', () => {
 
 // --- stale subagent-stop.js guard (OU-254) ----------------------------------
 
-test('isStaleSubagentHook: false on the current clean subagent-stop.js', () => {
-  const contents = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'subagent-stop.js'), 'utf8');
-  assert.equal(bootstrap.isStaleSubagentHook(contents), false);
+test('isStaleSubagentHook: false on clean hook contents', () => {
+  assert.equal(bootstrap.isStaleSubagentHook('// native Go hook, nothing stale here\n'), false);
 });
 
 test('isStaleSubagentHook: true on a stale pre-OU-222 fixture containing "tier-1 nudge fired"', () => {
@@ -506,11 +505,11 @@ test('isStaleSubagentHook: false on non-string input', () => {
   assert.equal(bootstrap.isStaleSubagentHook(null), false);
 });
 
-test('checkSubagentHookStale: ok on the real plugin scripts/subagent-stop.js', () => {
+test('checkSubagentHookStale: skipped on the real plugin root (subagent-stop.js no longer shipped, OU-264)', () => {
   const pluginRoot = path.resolve(__dirname, '..');
   const result = bootstrap.checkSubagentHookStale(pluginRoot);
   assert.equal(result.ok, true);
-  assert.equal(result.skipped, undefined);
+  assert.equal(result.skipped, true);
 });
 
 test('checkSubagentHookStale: not ok when subagent-stop.js is the stale fixture', () => {
@@ -557,7 +556,7 @@ test('bootstrap: no warning when subagent-stop.js is clean', async () => {
     buildPluginRoot(pluginRoot, { scripts: ['bootstrap.js'] });
     fs.writeFileSync(
       path.join(pluginRoot, 'scripts', 'subagent-stop.js'),
-      fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'subagent-stop.js'), 'utf8')
+      '// native Go hook, nothing stale here\n'
     );
     fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
     writeExecutable(path.join(pluginData, 'bin', 'ouroboros'));

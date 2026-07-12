@@ -85,10 +85,9 @@ When in doubt: the caller can always ask for more. They cannot un-spend tokens o
 `plugin/` contains the Claude Code plugin wrapper (`ouroboros-mcp`) — registers this binary as an MCP server.
 
 - `plugin/.claude-plugin/plugin.json` — manifest; `mcpServers.ouroboros.command` points at `${CLAUDE_PLUGIN_DATA}/bin/ouroboros`
-- `plugin/hooks/hooks.json` — hooks for SessionStart (install), PostToolUse, SubagentStart, SubagentStop, Stop, UserPromptSubmit
+- `plugin/hooks/hooks.json` — hooks for SessionStart (install), PostToolUse, SubagentStart, SubagentStop, Stop, UserPromptSubmit, PreCompact
 - `plugin/scripts/bootstrap.js` — single pure-Node SessionStart installer + validator (no npm deps): installs the binary (dev path, local Homebrew, or GitHub release archive, verified via SHA256), then checks the binary and every hook script are on disk, repairing the binary when missing/broken; fail-open, always exits 0
-- `plugin/scripts/lib.js` — shared hook utilities (stdin, project resolution, cooldown, KB formatting)
-- `plugin/scripts/*.js` — hook scripts for KB persistence nudges, context injection, staleness warnings
+- All non-SessionStart hooks (KB persistence nudges, context injection, staleness warnings) are native Go handlers in the binary (`ouroboros claude hooks <event>`); `plugin/scripts/` contains only `bootstrap.js`
 - `plugin/skills/` — persist, recall, triage, epic skills
 - `plugin/agents/` — backlog-manager, knowledge-explorer subagents
 - `plugin/tests/` — node:test suite (zero npm deps), run via `plugin/tests/run.sh`
@@ -97,7 +96,7 @@ When in doubt: the caller can always ask for more. They cannot un-spend tokens o
 
 - Items scoped to the Go binary/library code: omit `component` (project-level).
 - Items scoped to the plugin wrapper (`plugin/` directory): set `component: "plugin"`.
-- Examples: an MCP handler bug = no component; a `stop.js` hook fix = `component: "plugin"`.
+- Examples: an MCP handler bug = no component; a `hooks.json`/`bootstrap.js` change = `component: "plugin"`; a Go hook-handler change (`internal/cli`) = no component (project-level).
 
 **No plugin version field**: `plugin/.claude-plugin/plugin.json` intentionally omits `version`. When absent, Claude Code keys its plugin cache on the source commit sha, so changing the `marketplace.json` ref to a new tag automatically invalidates the cache — no lockstep bump required. Release automation only needs to update the marketplace ref.
 
