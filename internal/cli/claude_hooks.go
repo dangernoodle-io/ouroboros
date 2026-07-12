@@ -9,8 +9,8 @@ import (
 
 // claudeProvider returns the mcpkit cli.CommandProvider contributing the
 // `claude` host namespace ("everything Claude Code's plugin protocol
-// invokes against this binary"): `claude hooks` (only Stop is registered
-// today — the remaining 6 events (SubagentStop, SubagentStart,
+// invokes against this binary"): `claude hooks` (Stop and SubagentStop are
+// registered today — the remaining 5 events (SubagentStart,
 // UserPromptSubmit, PostToolUse ×2, PreCompact) port over in follow-on
 // PRs) plus `claude statusline` (OU-272), which replaces the old
 // top-level `ouroboros statusline` command. WithAppPrefix("OUROBOROS")
@@ -24,7 +24,9 @@ import (
 // install (the chicken-and-egg installer problem).
 func claudeProvider() mcpkitcli.CommandProvider {
 	return claudecode.NewProvider(
-		hooks.NewRegistry().Stop(hookHandleStop),
+		hooks.NewRegistry().
+			Stop(hookHandleStop).
+			SubagentStop(hookHandleSubagentStop),
 		statusline.Command(ouroborosStatuslineProvider(), statusline.WithAppPrefix("OUROBOROS")),
 	)
 }
