@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,28 @@ func gitDir(t *testing.T, name string) string {
 	return dir
 }
 
+// marketplaceHubDir creates a temp dir shaped like the dangernoodle-marketplace
+// hub repo (.git + .claude-plugin/marketplace.json) and returns its path.
+func marketplaceHubDir(t *testing.T, name string) string {
+	t.Helper()
+	dir := gitDir(t, name)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude-plugin", "marketplace.json"), []byte("{}"), 0o644))
+	return dir
+}
+
+// openStatuslineDB isolates a fresh DB (see isolateStatuslineDB) and opens
+// it, returning the *sql.DB for direct project registration in
+// statuslineProject unit tests.
+func openStatuslineDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dbPath := isolateStatuslineDB(t)
+	db, err := store.InitDB(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
 func TestOuroborosStatuslineProvider_Empty(t *testing.T) {
 	isolateStatuslineDB(t)
 
@@ -53,6 +76,8 @@ func TestOuroborosStatuslineProvider_KBOnly(t *testing.T) {
 	dir := gitDir(t, "ouroboros")
 
 	db, err := store.InitDB(dbPath)
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "ouroboros", "OUR")
 	require.NoError(t, err)
 	_, err = store.UpsertDocument(db, store.Document{Type: "decision", Project: "ouroboros", Title: "Use SQLite"})
 	require.NoError(t, err)
@@ -118,15 +143,149 @@ func TestOuroborosStatuslineProvider_Full(t *testing.T) {
 	assert.Equal(t, "ouroboros: [ouroboros] KB 1 (1D) | BL 1 open (1×P2)", line)
 }
 
-func TestOuroborosStatuslineProvider_NoCwdFallsBackToGetwd(t *testing.T) {
-	isolateStatuslineDB(t)
+// TestOuroborosStatuslineProvider_NoCwdAggregates proves an empty
+// payload.Cwd never falls back to os.Getwd — it always resolves to the
+// aggregate ("entire status") view, summing counts across every project
+// (OU-311: restores the fallback regressed by OU-272).
+func TestOuroborosStatuslineProvider_NoCwdAggregates(t *testing.T) {
+	dbPath := isolateStatuslineDB(t)
 
-	// No payload.Cwd and no .git in the process cwd (a Go test's working
-	// dir is the package source dir, which is inside the ouroboros repo —
-	// so this actually resolves to "ouroboros" via os.Getwd's git-root
-	// walk-up). Assert only that it doesn't error and doesn't panic.
-	_, err := ouroborosStatuslineProvider().Statusline(context.Background(), statusline.Payload{}, "")
+	db, err := store.InitDB(dbPath)
 	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, 1, "AC", "P1", "Some task", "", "", "", "")
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, store.Document{Type: "decision", Project: "acme-corp", Title: "Use SQLite"})
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	segs, err := ouroborosStatuslineProvider().Statusline(context.Background(), statusline.Payload{}, "")
+	require.NoError(t, err)
+
+	line := statusline.Render(segs, statusline.RenderOptions{Plain: true})
+	assert.NotContains(t, line, "[", "empty cwd must aggregate, never label a project")
+	assert.Contains(t, line, "KB 1")
+	assert.Contains(t, line, "BL 1 open")
+}
+
+// projectName returns p.Name, or "" for nil (aggregate) — mirrors
+// buildStatuslineSegments's own nil-means-aggregate convention, for
+// asserting statuslineProject's *backlog.Project return in tests.
+func projectName(p *backlog.Project) string {
+	if p == nil {
+		return ""
+	}
+	return p.Name
+}
+
+// TestStatuslineProject_EmptyCwdAggregates covers spec case 1: an empty
+// payload.Cwd resolves to nil (aggregate), never falling back to os.Getwd.
+func TestStatuslineProject_EmptyCwdAggregates(t *testing.T) {
+	db := openStatuslineDB(t)
+	assert.Nil(t, statuslineProject(db, statusline.Payload{}))
+}
+
+// TestStatuslineProject_MarketplaceHubAggregates covers spec case 2: the
+// marketplace hub repo never resolves to a project, even when a project
+// sharing its basename is registered (OU-283's guard).
+func TestStatuslineProject_MarketplaceHubAggregates(t *testing.T) {
+	db := openStatuslineDB(t)
+	dir := marketplaceHubDir(t, "dangernoodle-marketplace")
+	_, err := backlog.CreateProject(db, "dangernoodle-marketplace", "DNM")
+	require.NoError(t, err)
+
+	assert.Nil(t, statuslineProject(db, statusline.Payload{Cwd: dir}))
+}
+
+// TestStatuslineProject_RegisteredGitRepoResolves covers spec case 3: a
+// cwd inside a registered project's repo resolves to that project.
+func TestStatuslineProject_RegisteredGitRepoResolves(t *testing.T) {
+	db := openStatuslineDB(t)
+	dir := gitDir(t, "acme-corp")
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	assert.Equal(t, "acme-corp", projectName(statuslineProject(db, statusline.Payload{Cwd: dir})))
+}
+
+// TestStatuslineProject_UnregisteredGitRepoAggregates covers spec case 4:
+// a cwd inside a repo whose basename is NOT a registered project
+// aggregates rather than resolving to that basename. A sibling project IS
+// registered, so the candidate list is non-empty and rejection is a
+// genuine per-name mismatch, not an empty-DB coincidence.
+func TestStatuslineProject_UnregisteredGitRepoAggregates(t *testing.T) {
+	db := openStatuslineDB(t)
+	_, err := backlog.CreateProject(db, "some-registered-sibling", "SRS")
+	require.NoError(t, err)
+	dir := gitDir(t, "some-other-repo")
+
+	assert.Nil(t, statuslineProject(db, statusline.Payload{Cwd: dir}))
+}
+
+// TestStatuslineProject_WorkspaceRootAggregates covers spec case 5: cwd ==
+// Workspace.ProjectDir (the workspace root itself, no subproject segment)
+// aggregates.
+func TestStatuslineProject_WorkspaceRootAggregates(t *testing.T) {
+	db := openStatuslineDB(t)
+	pd := t.TempDir()
+
+	payload := statusline.Payload{Cwd: pd, Workspace: statusline.Workspace{ProjectDir: pd}}
+	assert.Nil(t, statuslineProject(db, payload))
+}
+
+// TestStatuslineProject_RegisteredSubprojectResolves covers spec case 6:
+// a single-.claude workspace where cwd is <project_dir>/<subproj> and
+// subproj is registered resolves to subproj.
+func TestStatuslineProject_RegisteredSubprojectResolves(t *testing.T) {
+	db := openStatuslineDB(t)
+	pd := t.TempDir()
+	subDir := filepath.Join(pd, "breadboard")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	_, err := backlog.CreateProject(db, "breadboard", "BB")
+	require.NoError(t, err)
+
+	payload := statusline.Payload{Cwd: subDir, Workspace: statusline.Workspace{ProjectDir: pd}}
+	assert.Equal(t, "breadboard", projectName(statuslineProject(db, payload)))
+}
+
+// TestStatuslineProject_UnregisteredSubprojectAggregates covers spec case
+// 7: cwd is <project_dir>/<subproj> but subproj is NOT registered — the
+// mixed-registration case aggregates. A sibling project IS registered, so
+// the candidate list is non-empty and rejection is a genuine per-name
+// mismatch, not an empty-DB coincidence.
+func TestStatuslineProject_UnregisteredSubprojectAggregates(t *testing.T) {
+	db := openStatuslineDB(t)
+	_, err := backlog.CreateProject(db, "some-registered-sibling", "SRS")
+	require.NoError(t, err)
+	pd := t.TempDir()
+	subDir := filepath.Join(pd, "unregistered-subproj")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+
+	payload := statusline.Payload{Cwd: subDir, Workspace: statusline.Workspace{ProjectDir: pd}}
+	assert.Nil(t, statuslineProject(db, payload))
+}
+
+// TestStatuslineProject_SubprojectWinsOverGitRootBasename covers spec case
+// 8: when both a registered project_dir-subproject AND a registered
+// git-root basename apply (and differ), the project_dir subproject
+// candidate wins (tried first). pd itself is the git root (outer repo);
+// cwd is a subdirectory under it with no .git of its own, so the git-root
+// candidate is pd's basename while the workspace candidate is the
+// subproject segment.
+func TestStatuslineProject_SubprojectWinsOverGitRootBasename(t *testing.T) {
+	db := openStatuslineDB(t)
+	pd := filepath.Join(t.TempDir(), "outer-repo")
+	require.NoError(t, os.MkdirAll(filepath.Join(pd, ".git"), 0o755))
+	subDir := filepath.Join(pd, "subproj-name")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	_, err := backlog.CreateProject(db, "subproj-name", "SP")
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "outer-repo", "OR")
+	require.NoError(t, err)
+
+	payload := statusline.Payload{Cwd: subDir, Workspace: statusline.Workspace{ProjectDir: pd}}
+	assert.Equal(t, "subproj-name", projectName(statuslineProject(db, payload)))
 }
 
 func TestTypeAbbrev(t *testing.T) {
@@ -211,6 +370,8 @@ func TestClaudeStatusline_WireDecodesStdinAndRenders(t *testing.T) {
 	dir := gitDir(t, "ouroboros")
 
 	db, err := store.InitDB(dbPath)
+	require.NoError(t, err)
+	_, err = backlog.CreateProject(db, "ouroboros", "OUR")
 	require.NoError(t, err)
 	_, err = store.UpsertDocument(db, store.Document{Type: "decision", Project: "ouroboros", Title: "Use SQLite"})
 	require.NoError(t, err)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -39,26 +40,72 @@ func ouroborosStatuslineProvider() statusline.StatuslineProvider {
 	})
 }
 
-// statuslineProject resolves the project name for a statusline payload:
-// the Claude Code cwd (or os.Getwd, when the payload carries none) walked
-// up to its nearest git root's base name, via the same projectFromPath
-// helper the Stop hook uses.
-func statuslineProject(payload statusline.Payload) string {
+// statuslineProject resolves the REGISTERED ouroboros project (backlog
+// project row) for a statusline payload, or nil (aggregate — the "entire
+// status" render across every project, restoring the fallback regressed
+// by the OU-272 refactor). An empty payload.Cwd always aggregates (no
+// os.Getwd fallback); the marketplace hub repo never resolves (OU-283's
+// guard — it's a repo, never a work project).
+//
+// Two topologies are supported, tried in order as candidates:
+//  1. single-.claude workspace with subprojects: payload.Workspace.ProjectDir
+//     is the workspace root; a cwd under it resolves via the first path
+//     segment of cwd relative to ProjectDir (the subproject dir name).
+//  2. multi-repo: cwd resolves via its nearest git root's base name.
+//
+// The first candidate that is a REGISTERED project wins (a single
+// backlog.GetProjectByName lookup per candidate, so the caller can reuse
+// the returned *Project's ID without a second lookup); if neither candidate
+// is registered (or there are none), the result aggregates.
+func statuslineProject(db *sql.DB, payload statusline.Payload) *backlog.Project {
 	cwd := payload.Cwd
 	if cwd == "" {
-		cwd, _ = os.Getwd()
+		return nil
 	}
-	return projectFromPath(cwd)
+
+	gitRoot := findGitRoot(cwd)
+	if gitRoot != "" && isMarketplaceRepo(gitRoot) {
+		return nil
+	}
+
+	var candidates []string
+
+	if pd := payload.Workspace.ProjectDir; pd != "" {
+		if rel, err := filepath.Rel(pd, cwd); err == nil &&
+			rel != "." && !strings.HasPrefix(rel, "..") {
+			seg := strings.SplitN(rel, string(os.PathSeparator), 2)[0]
+			if seg != "" && seg != "." {
+				candidates = append(candidates, seg)
+			}
+		}
+	}
+
+	if gitRoot != "" {
+		candidates = append(candidates, filepath.Base(gitRoot))
+	}
+
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if p, err := backlog.GetProjectByName(db, c); err == nil {
+			return p
+		}
+	}
+
+	return nil
 }
 
 // statuslineSegmentsForPayload runs the KB/backlog count queries for
 // payload's resolved project and renders them as Segments, or (nil, nil)
 // when both totals are zero.
 func statuslineSegmentsForPayload(db *sql.DB, payload statusline.Payload) ([]statusline.Segment, error) {
-	project := statuslineProject(payload)
+	proj := statuslineProject(db, payload)
 
+	var project string
 	var projects []string
-	if project != "" {
+	if proj != nil {
+		project = proj.Name
 		projects = []string{project}
 	}
 
@@ -71,14 +118,8 @@ func statuslineSegmentsForPayload(db *sql.DB, payload statusline.Payload) ([]sta
 	status := "open"
 	backlogFilter.Status = &status
 
-	if project != "" {
-		p, err := backlog.GetProjectByName(db, project)
-		if err == nil {
-			backlogFilter.ProjectIDs = []int64{p.ID}
-		} else {
-			// Project not in backlog — use sentinel ID to return 0 items.
-			backlogFilter.ProjectIDs = []int64{-1}
-		}
+	if proj != nil {
+		backlogFilter.ProjectIDs = []int64{proj.ID}
 	}
 
 	backlogCounts, err := backlog.CountItemsByPriority(db, backlogFilter)
