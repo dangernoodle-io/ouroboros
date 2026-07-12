@@ -1,7 +1,9 @@
 .PHONY: build test acc cover bench lint clean install
 
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
 build:
-	go build -o ouroboros ./
+	go build -ldflags "-X dangernoodle.io/ouroboros/internal/cli.Version=$(VERSION)" -o ouroboros ./
 
 test:
 	go test ./...
