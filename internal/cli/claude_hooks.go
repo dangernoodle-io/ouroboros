@@ -9,14 +9,14 @@ import (
 
 // claudeProvider returns the mcpkit cli.CommandProvider contributing the
 // `claude` host namespace ("everything Claude Code's plugin protocol
-// invokes against this binary"): `claude hooks` (Stop and SubagentStop are
-// registered today — the remaining 5 events (SubagentStart,
-// UserPromptSubmit, PostToolUse ×2, PreCompact) port over in follow-on
-// PRs) plus `claude statusline` (OU-272), which replaces the old
-// top-level `ouroboros statusline` command. WithAppPrefix("OUROBOROS")
-// wires the session resolver's env-var override tier for parity with a
-// future session-scoped consumer, even though the statusline provider
-// itself is project-scoped, not session-scoped, today.
+// invokes against this binary"): `claude hooks` (Stop, SubagentStop, and
+// UserPromptSubmit are registered today — the remaining 4 events
+// (SubagentStart, PostToolUse ×2, PreCompact) port over in follow-on PRs)
+// plus `claude statusline` (OU-272), which replaces the old top-level
+// `ouroboros statusline` command. WithAppPrefix("OUROBOROS") wires the
+// session resolver's env-var override tier for parity with a future
+// session-scoped consumer, even though the statusline provider itself is
+// project-scoped, not session-scoped, today.
 //
 // SessionStart is intentionally NOT registered here: plugin/scripts/
 // bootstrap.js stays Node — it's what installs this very binary, so a
@@ -26,7 +26,8 @@ func claudeProvider() mcpkitcli.CommandProvider {
 	return claudecode.NewProvider(
 		hooks.NewRegistry().
 			Stop(hookHandleStop).
-			SubagentStop(hookHandleSubagentStop),
+			SubagentStop(hookHandleSubagentStop).
+			UserPromptSubmit(hookHandleUserPromptSubmit),
 		statusline.Command(ouroborosStatuslineProvider(), statusline.WithAppPrefix("OUROBOROS")),
 	)
 }

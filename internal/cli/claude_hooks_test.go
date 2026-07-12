@@ -88,3 +88,40 @@ func TestRootCmd_ClaudeHooksSubagentStopMounted(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "subagent-stop", cmd.Use)
 }
+
+// TestClaudeHooksUserPromptSubmit_WireDecodesStdinAndRuns mirrors
+// TestClaudeHooksStop_WireDecodesStdinAndRuns for the UserPromptSubmit
+// event: build the provider's command tree, locate
+// `hooks user-prompt-submit`, feed it real stdin JSON, and confirm it
+// decodes and runs to a silent exit-0 (no cwd/no reachable project, so
+// runHookUserPromptSubmit short-circuits).
+func TestClaudeHooksUserPromptSubmit_WireDecodesStdinAndRuns(t *testing.T) {
+	isolateHookLog(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PROJECT_KB_PATH", filepath.Join(home, "kb.db"))
+	t.Setenv("QM_DB_PATH", "")
+
+	provider := claudeProvider()
+	cmds := provider.Commands()
+	require.Len(t, cmds, 1, "claude namespace is a single top-level command")
+
+	upsCmd, _, err := cmds[0].Find([]string{"hooks", "user-prompt-submit"})
+	require.NoError(t, err)
+
+	var out bytes.Buffer
+	upsCmd.SetOut(&out)
+	upsCmd.SetIn(strings.NewReader(`{"cwd":"/tmp","session_id":"abc","prompt":"please help me understand this codebase in detail"}`))
+
+	require.NoError(t, upsCmd.RunE(upsCmd, nil))
+	assert.Empty(t, out.String())
+}
+
+// TestRootCmd_ClaudeHooksUserPromptSubmitMounted confirms
+// `ouroboros claude hooks user-prompt-submit` is reachable from the real
+// rootCmd (root.go wiring), not just from a freshly-built provider.
+func TestRootCmd_ClaudeHooksUserPromptSubmitMounted(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"claude", "hooks", "user-prompt-submit"})
+	require.NoError(t, err)
+	assert.Equal(t, "user-prompt-submit", cmd.Use)
+}

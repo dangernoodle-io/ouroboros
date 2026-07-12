@@ -125,6 +125,91 @@ func truncateMessage(s string, maxBytes int) string { //nolint:unparam
 	return b
 }
 
+// isMarketplaceRepo reports whether gitRoot is the dangernoodle-marketplace
+// hub repo (identified by a `.claude-plugin/marketplace.json` file at its
+// root), as opposed to an ordinary project checkout. Used by the
+// UserPromptSubmit resolution order (OU-283) to suppress cwd-based project
+// resolution when the session's cwd is the plugin-marketplace hub itself —
+// a repo, but never the "project" whose KB/backlog a hook should inject.
+func isMarketplaceRepo(gitRoot string) bool {
+	if gitRoot == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(gitRoot, ".claude-plugin", "marketplace.json"))
+	return err == nil
+}
+
+// findWorkspaceRoot walks up from cwd to the filesystem root, returning the
+// first ancestor directory containing a `.claude` entry, or "" if none
+// found. Faithful port of lib.js findWorkspaceRoot, EXCEPT it takes cwd as
+// an explicit parameter instead of reading process.cwd() — the Node
+// original's use of process.cwd() (rather than the hook payload's cwd
+// field) is a latent bug: a hook process's OS cwd need not match the
+// session's reported cwd. This port fixes that by requiring the caller to
+// pass the payload's cwd explicitly.
+func findWorkspaceRoot(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	current, err := filepath.Abs(cwd)
+	if err != nil {
+		return ""
+	}
+	root := filepath.VolumeName(current) + string(filepath.Separator)
+
+	for current != root {
+		claudeDir := filepath.Join(current, ".claude")
+		if _, err := os.Stat(claudeDir); err == nil {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return ""
+}
+
+// listWorkspaceProjects returns the non-hidden directory names directly
+// under root, or an empty slice if root is "" or unreadable. Faithful port
+// of lib.js listWorkspaceProjects.
+func listWorkspaceProjects(root string) []string {
+	if root == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var projects []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			projects = append(projects, e.Name())
+		}
+	}
+	return projects
+}
+
+// resolveProjectFromMessage returns the first project in projects that
+// appears as a whole word (case-insensitive) in message, or "" if none
+// match. This is a faithful port of ONLY lib.js resolveProject's
+// priority-2 (hints.message) branch — priority-1 (filePath) and priority-3
+// (transcriptPath backward-scan) are deliberately not ported (see
+// runHookUserPromptSubmit's doc comment).
+func resolveProjectFromMessage(message string, projects []string) string {
+	if message == "" {
+		return ""
+	}
+	for _, name := range projects {
+		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `\b`)
+		if re.MatchString(message) {
+			return name
+		}
+	}
+	return ""
+}
+
 // findGitRoot walks up from startPath to the filesystem root, returning the
 // first ancestor directory containing a .git entry, or "" if none found.
 // Faithful port of lib.js findGitRoot.
