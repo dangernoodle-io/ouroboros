@@ -56,7 +56,7 @@
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt-context.js",
+        "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros claude hooks user-prompt-submit",
         "timeout": 5
       }],
       "description": "Inject KB context for current project"
