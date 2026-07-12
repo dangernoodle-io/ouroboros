@@ -9,9 +9,9 @@ import (
 
 // claudeProvider returns the mcpkit cli.CommandProvider contributing the
 // `claude` host namespace ("everything Claude Code's plugin protocol
-// invokes against this binary"): `claude hooks` (Stop, SubagentStop, and
-// UserPromptSubmit are registered today — the remaining 4 events
-// (SubagentStart, PostToolUse ×2, PreCompact) port over in follow-on PRs)
+// invokes against this binary"): `claude hooks` (Stop, SubagentStop,
+// UserPromptSubmit, and SubagentStart are registered today — the remaining
+// 3 events (PostToolUse ×2, PreCompact) port over in follow-on PRs)
 // plus `claude statusline` (OU-272), which replaces the old top-level
 // `ouroboros statusline` command. WithAppPrefix("OUROBOROS") wires the
 // session resolver's env-var override tier for parity with a future
@@ -27,7 +27,8 @@ func claudeProvider() mcpkitcli.CommandProvider {
 		hooks.NewRegistry().
 			Stop(hookHandleStop).
 			SubagentStop(hookHandleSubagentStop).
-			UserPromptSubmit(hookHandleUserPromptSubmit),
+			UserPromptSubmit(hookHandleUserPromptSubmit).
+			SubagentStart(hookHandleSubagentStart),
 		statusline.Command(ouroborosStatuslineProvider(), statusline.WithAppPrefix("OUROBOROS")),
 	)
 }
