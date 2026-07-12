@@ -238,8 +238,12 @@ func upcBacklogLines(db *sql.DB, project string) []string {
 }
 
 // truncateRunes caps s at maxRunes runes (a rune-safe analog of the Node
-// hook's `substring(0, 200)` character truncation).
-func truncateRunes(s string, maxRunes int) string {
+// hook's `substring(0, 200)` character truncation). maxRunes is a parameter
+// (rather than a hardcoded 200) so this stays directly unit-testable at
+// multiple cut points; both of its current call sites (user-prompt-submit
+// and subagent-start) happen to pass the same 200 today.
+func truncateRunes(s string, maxRunes int) string { //nolint:unparam
+
 	runes := []rune(s)
 	if len(runes) <= maxRunes {
 		return s
