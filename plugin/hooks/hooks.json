@@ -20,7 +20,7 @@
       "matcher": "tool == \"Edit\" || tool == \"Write\" || tool == \"MultiEdit\" || tool == \"NotebookEdit\"",
       "hooks": [{
         "type": "command",
-        "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/post-edit-check.js",
+        "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros claude hooks post-tool-use",
         "timeout": 3
       }],
       "description": "Check KB for entries referencing edited files"
