@@ -26,7 +26,7 @@ func (c getCapability) Attach(r *mcpkit.Registrar) error {
 		Name:        "get",
 		Description: descGetToolV2,
 		Annotations: &mcpx.ToolAnnotations{ReadOnlyHint: true},
-	}, handleGetV2(c.st))
+	}, mcpkit.ReadOnly, handleGetV2(c.st))
 	return nil
 }
 
@@ -37,7 +37,7 @@ func (c searchCapability) Attach(r *mcpkit.Registrar) error {
 		Name:        "search",
 		Description: descSearchToolV2,
 		Annotations: &mcpx.ToolAnnotations{ReadOnlyHint: true},
-	}, handleSearchV2(c.st))
+	}, mcpkit.ReadOnly, handleSearchV2(c.st))
 	return nil
 }
 
@@ -51,7 +51,7 @@ func (c kbCapability) Attach(r *mcpkit.Registrar) error {
 		Name:        "kb",
 		Description: descKBToolV2,
 		Annotations: &mcpx.ToolAnnotations{IdempotentHint: true},
-	}, handleKBV2(c.st))
+	}, mcpkit.Write, handleKBV2(c.st))
 	return nil
 }
 
@@ -66,7 +66,7 @@ func (c backlogCapability) Attach(r *mcpkit.Registrar) error {
 		Name:        "backlog",
 		Description: descBacklogToolV2,
 		Annotations: &mcpx.ToolAnnotations{DestructiveHint: mcpx.BoolPtr(true)},
-	}, handleBacklogV2(c.st))
+	}, mcpkit.Destructive, handleBacklogV2(c.st))
 	return nil
 }
 
@@ -81,6 +81,6 @@ func (c roadmapCapability) Attach(r *mcpkit.Registrar) error {
 		Name:        "roadmap",
 		Description: descRoadmapToolV2,
 		Annotations: &mcpx.ToolAnnotations{DestructiveHint: mcpx.BoolPtr(true)},
-	}, handleRoadmapV2(c.st))
+	}, mcpkit.Destructive, handleRoadmapV2(c.st))
 	return nil
 }
