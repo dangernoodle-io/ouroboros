@@ -164,11 +164,149 @@ func TestRunHookStop_MalformedKbJSON_HandledNoWrite(t *testing.T) {
 	transcript := writeTranscript(t, []string{assistantLine(message)})
 	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0002"}}
 
-	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
+	resp := runHookStop(p, db)
+	assert.NotEmpty(t, resp.SystemMessage, "malformed block must warn via SystemMessage, not silent stderr-only")
+	assert.Empty(t, resp.Block, "a malformed block must never Block")
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)
 	assert.Empty(t, summaries)
+}
+
+// TestRunHookStop_MidTurnKbBlock_Persisted is the regression test for the
+// OU-316 silent-loss bug: a well-formed ```kb block emitted in a NON-FINAL
+// assistant message of the turn (the WiFi-FSM scenario) must actually be
+// persisted, not silently dropped while turnAlreadyPersisted correctly
+// detects it and would otherwise suppress the tier-1 nudge with no other
+// signal.
+func TestRunHookStop_MidTurnKbBlock_Persisted(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	cwd := gitProjectDir(t)
+	midTurnBlock := "```kb\n{\"type\":\"decision\",\"category\":\"arch\",\"title\":\"WiFi FSM Retry Backoff\",\"content\":\"exponential backoff\"}\n```"
+	finalMessage := longEnough("Summary of the work done this turn, no kb block here.")
+	transcript := writeTranscript(t, []string{
+		userLine("kick off the turn"),
+		assistantLine(midTurnBlock),
+		assistantLine(finalMessage),
+	})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0010"}}
+
+	resp := runHookStop(p, db)
+	assert.Equal(t, hooks.Response{}, resp, "mid-turn block persisted cleanly, no nudge/warning expected")
+
+	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1, "the mid-turn kb block must be persisted, not silently dropped")
+	assert.Equal(t, "WiFi FSM Retry Backoff", summaries[0].Title)
+}
+
+// TestRunHookStop_MidTurnBlockPlusFinalTier2SelfClaim_NeverSuppressed is the
+// OU-316 HIGH-regression test: the whole-turn kb persist (a DATA fix) must
+// NOT short-circuit the nudge decision on an UNRELATED final message. A
+// mid-turn kb block persists cleanly, and the FINAL message (with no block
+// of its own) contains a tier-2 self-claim — the self-claim nudge must
+// STILL fire, exactly as it would if the mid-turn block had never existed.
+func TestRunHookStop_MidTurnBlockPlusFinalTier2SelfClaim_NeverSuppressed(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	cwd := gitProjectDir(t)
+	midTurnBlock := "```kb\n{\"type\":\"decision\",\"category\":\"arch\",\"title\":\"Mid Turn Decision\",\"content\":\"x\"}\n```"
+	finalMessage := longEnough("[ouroboros] main abcd1234: persisted 1 entries to acme-corp [ids: 1]")
+	transcript := writeTranscript(t, []string{
+		userLine("kick off the turn"),
+		assistantLine(midTurnBlock),
+		assistantLine(finalMessage),
+	})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0013"}}
+
+	resp := runHookStop(p, db)
+	assert.NotEmpty(t, resp.Block, "tier-2 self-claim must fire even though an unrelated mid-turn block was already persisted")
+	assert.Contains(t, resp.Block, "tier-2")
+
+	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1, "the mid-turn kb block must still be persisted — the data fix stays intact")
+	assert.Equal(t, "Mid Turn Decision", summaries[0].Title)
+}
+
+// TestRunHookStop_MidTurnBlockPlusFinalTier1Decision_Suppressed pins the
+// companion case: a mid-turn kb block plus a FINAL message with tier-1
+// decision language (no self-claim, no block) — turnAlreadyPersisted still
+// detects the mid-turn block as an already-persisted signal and suppresses
+// ONLY the tier-1 nudge, exactly like the pre-OU-316 behavior.
+func TestRunHookStop_MidTurnBlockPlusFinalTier1Decision_Suppressed(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	cwd := gitProjectDir(t)
+	midTurnBlock := "```kb\n{\"type\":\"decision\",\"category\":\"arch\",\"title\":\"Mid Turn Decision Two\",\"content\":\"x\"}\n```"
+	finalMessage := longEnough("We decided to use PostgreSQL for the new service.")
+	transcript := writeTranscript(t, []string{
+		userLine("kick off the turn"),
+		assistantLine(midTurnBlock),
+		assistantLine(finalMessage),
+	})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0014"}}
+
+	resp := runHookStop(p, db)
+	assert.Equal(t, hooks.Response{}, resp, "tier-1 nudge suppressed: turnAlreadyPersisted detects the mid-turn block")
+
+	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1, "the mid-turn kb block must still be persisted")
+	assert.Equal(t, "Mid Turn Decision Two", summaries[0].Title)
+}
+
+// TestRunHookStop_MultipleKbBlocksAcrossTurn_AllPersisted pins that every
+// fenced kb block across multiple assistant messages of the same turn is
+// persisted, not just the first or the final one.
+func TestRunHookStop_MultipleKbBlocksAcrossTurn_AllPersisted(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	cwd := gitProjectDir(t)
+	first := "```kb\n{\"type\":\"fact\",\"title\":\"Fact One\",\"content\":\"a\"}\n```"
+	second := "```kb\n{\"type\":\"fact\",\"title\":\"Fact Two\",\"content\":\"b\"}\n```"
+	third := longEnough("```kb\n{\"type\":\"fact\",\"title\":\"Fact Three\",\"content\":\"c\"}\n```\n")
+	transcript := writeTranscript(t, []string{
+		userLine("kick off the turn"),
+		assistantLine(first),
+		assistantLine(second),
+		assistantLine(third),
+	})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0011"}}
+
+	resp := runHookStop(p, db)
+	assert.Equal(t, hooks.Response{}, resp)
+
+	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
+	require.NoError(t, err)
+	assert.Len(t, summaries, 3)
+}
+
+// TestRunHookStop_SanctionedFlow_ToolUseMidTurnPlusFinalSentinel pins the
+// sanctioned persist-skill flow: the kb tool is called mid-turn and the
+// final message emits only the anti-double-write sentinel block. No double
+// write, and no spurious nudge (the sentinel block still counts as
+// foundAnyBlock, so the Stop hook never falls through to checkNudgePatterns
+// on this message).
+func TestRunHookStop_SanctionedFlow_ToolUseMidTurnPlusFinalSentinel(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	cwd := gitProjectDir(t)
+	finalMessage := longEnough("```kb\n{\"type\":\"fact\",\"title\":\"Already Done\",\"content\":\"x\",\"_persisted_by\":\"persist-skill\"}\n```\nWe decided to use PostgreSQL for the new service.\n")
+	transcript := writeTranscript(t, []string{
+		userLine("kick off the turn"),
+		ouroborosToolUseAssistantLine(),
+		assistantLine(finalMessage),
+	})
+	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0012"}}
+
+	resp := runHookStop(p, db)
+	assert.Equal(t, hooks.Response{}, resp, "sentinel-only block: no warning, no nudge fallthrough")
+
+	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
+	require.NoError(t, err)
+	assert.Empty(t, summaries, "sentinel must skip persistence — no double-write")
 }
 
 func TestRunHookStop_Tier1Nudge_NotSuppressed(t *testing.T) {
@@ -602,7 +740,9 @@ func TestRunHookStop_KbBlock_NoProject_NotPersisted(t *testing.T) {
 	transcript := writeTranscript(t, []string{assistantLine(message)})
 	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0007"}}
 
-	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
+	resp := runHookStop(p, db)
+	assert.NotEmpty(t, resp.SystemMessage, "a kb block with no resolvable project must warn, not silently drop")
+	assert.Empty(t, resp.Block)
 
 	summaries, err := store.QueryDocuments(db, nil, nil, nil, "", nil, 10)
 	require.NoError(t, err)
@@ -618,7 +758,8 @@ func TestRunHookStop_KbBlock_WriteBatchError_HandledNoNudge(t *testing.T) {
 	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0008"}}
 
 	resp := runHookStop(p, db)
-	assert.Equal(t, hooks.Response{}, resp, "write failure is swallowed — handled, no nudge fallthrough")
+	assert.NotEmpty(t, resp.SystemMessage, "a kb.WriteBatch failure must warn, not silently drop")
+	assert.Empty(t, resp.Block, "write failure never falls through to the decision-language nudge")
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)
@@ -803,7 +944,9 @@ func TestRunHookStop_MalformedKbArrayJSON_HandledNoWrite(t *testing.T) {
 	transcript := writeTranscript(t, []string{assistantLine(message)})
 	p := hooks.StopPayload{Common: hooks.Common{TranscriptPath: transcript, Cwd: cwd, SessionID: "sess0009"}}
 
-	assert.Equal(t, hooks.Response{}, runHookStop(p, db))
+	resp := runHookStop(p, db)
+	assert.NotEmpty(t, resp.SystemMessage, "malformed block must warn via SystemMessage, not silent stderr-only")
+	assert.Empty(t, resp.Block, "a malformed block must never Block")
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)

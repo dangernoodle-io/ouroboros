@@ -198,7 +198,7 @@ func runHookUserPromptSubmit(p hooks.UserPromptSubmitPayload, db *sql.DB) hooks.
 	for _, r := range rows {
 		lines = append(lines, "  ["+r.Type+"] "+r.Title)
 	}
-	lines = append(lines, "if a decision or fact is worth persisting, emit a fenced kb block (project: "+project+"); otherwise say nothing")
+	lines = append(lines, "if a decision or fact is worth persisting, call the kb tool for project "+project+" (then search to confirm it landed); otherwise say nothing")
 
 	if intent == "resume" {
 		if backlogLines := upcBacklogLines(db, project); len(backlogLines) > 0 {

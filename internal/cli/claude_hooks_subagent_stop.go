@@ -13,22 +13,26 @@ import (
 )
 
 // hookHandleSubagentStop is the SubagentStop-hook persist-only port of
-// plugin/scripts/subagent-stop.js, wired as a
-// hooks.Handler[hooks.SubagentStopPayload]: it opportunistically persists an
-// explicit fenced ```kb block found in the subagent's final message, and
-// otherwise does nothing. This hook is advisory: a withDB failure
-// (unwritable path, disk full, migration mismatch) is logged to stderr only
-// and never surfaces as a blocking Response — the zero hooks.Response
-// ("silent allow") is returned instead, matching subagent-stop.js's
-// catch-all exit(0). The raw stdin reader is unused: the SubagentStop
-// payload carries every field this handler needs.
+// plugin/scripts/subagent-stop.js (extended per OU-316), wired as a
+// hooks.Handler[hooks.SubagentStopPayload]: it opportunistically persists
+// every fenced ```kb block found in the subagent's final message (not just
+// the first), and otherwise does nothing. A malformed/failed block surfaces
+// as a Response.SystemMessage warning — never Block (see CRITICAL below).
+// This hook is advisory: a withDB failure (unwritable path, disk full,
+// migration mismatch) is logged to stderr only and never surfaces as a
+// blocking Response — the zero hooks.Response ("silent allow") is returned
+// instead, matching subagent-stop.js's catch-all exit(0). The raw stdin
+// reader is unused: the SubagentStop payload carries every field this
+// handler needs.
 //
 // CRITICAL (OU-222/OU-254): unlike the Stop hook, this handler NEVER emits a
-// decision-language nudge and NEVER blocks. A subagent's final message IS
-// its return value to the orchestrator — a blocking Response would force the
-// subagent to take another turn to address it, and that meta-acknowledgement
-// turn would overwrite the real report as the "final" message, destroying
-// the report the caller actually needs. See runHookSubagentStop.
+// decision-language nudge and NEVER sets Response.Block, even to warn on a
+// malformed block. A subagent's final message IS its return value to the
+// orchestrator — a blocking Response would force the subagent to take
+// another turn to address it, and that meta-acknowledgement turn would
+// overwrite the real report as the "final" message, destroying the report
+// the caller actually needs. SystemMessage is safe here because it does not
+// block or force another turn — only Block does. See runHookSubagentStop.
 func hookHandleSubagentStop(_ context.Context, _ io.Reader, p hooks.SubagentStopPayload) hooks.Response {
 	var resp hooks.Response
 	if err := withDB(func(db *sql.DB) error {
@@ -40,13 +44,12 @@ func hookHandleSubagentStop(_ context.Context, _ io.Reader, p hooks.SubagentStop
 	return resp
 }
 
-// runHookSubagentStop implements the SubagentStop-hook flow. It never
-// blocks: every path — including a matched kb block, a too-short message, a
-// skipped agent type, or the re-entrancy guard — returns the zero
-// hooks.Response value ("silent allow"), matching subagent-stop.js's
-// catch-all exit(0) behavior. There is no nudge/Block path at all (see
-// hookHandleSubagentStop's doc comment).
-func runHookSubagentStop(p hooks.SubagentStopPayload, db *sql.DB) hooks.Response { //nolint:unparam // always the zero Response by design (OU-222/OU-254: never block/nudge a subagent's final turn); hooks.Response's return shape is kept for hooks.Handler[SubagentStopPayload] conformance, mirroring the Stop-hook's handler signature.
+// runHookSubagentStop implements the SubagentStop-hook flow. It NEVER sets
+// Response.Block (OU-222/OU-254 — see hookHandleSubagentStop's doc comment):
+// every path either returns the zero hooks.Response ("silent allow") or, on
+// a malformed/failed kb block, a Response with ONLY SystemMessage set. There
+// is no nudge/Block path at all.
+func runHookSubagentStop(p hooks.SubagentStopPayload, db *sql.DB) hooks.Response {
 	project := ""
 	if p.Cwd != "" {
 		project = projectFromPath(p.Cwd)
@@ -86,7 +89,12 @@ func runHookSubagentStop(p hooks.SubagentStopPayload, db *sql.DB) hooks.Response
 		extraMeta["agent_type"] = p.AgentType
 	}
 
-	if persistKbBlock(message, db, "subagent", agentIDShort, "subagent_stop", p.SessionID, project, extraMeta) {
+	// Persist EVERY kb block in the message (OU-316), not just the first.
+	_, warnings, foundAnyBlock := persistAllKbBlocksInMessage(message, db, "subagent", agentIDShort, "subagent_stop", p.SessionID, project, extraMeta)
+	if foundAnyBlock {
+		if len(warnings) > 0 {
+			return hooks.Response{SystemMessage: "[ouroboros] " + strings.Join(warnings, "; ") + " — persist reliably by calling the kb tool, then search to confirm."}
+		}
 		return hooks.Response{}
 	}
 
