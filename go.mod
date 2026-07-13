@@ -3,8 +3,9 @@ module dangernoodle.io/ouroboros
 go 1.26.1
 
 require (
-	github.com/dangernoodle-io/mcpkit v0.0.0-20260712220625-c8fb1d9fbf58
+	github.com/dangernoodle-io/mcpkit v0.0.0-20260713054545-876336333f0b
 	github.com/mark3labs/mcp-go v0.56.0
+	github.com/muesli/termenv v0.16.0
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
@@ -23,7 +24,6 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/modelcontextprotocol/go-sdk v1.6.1 // indirect
-	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

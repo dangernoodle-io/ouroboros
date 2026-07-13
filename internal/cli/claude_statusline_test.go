@@ -371,9 +371,11 @@ func TestClaudeStatusline_WireDecodesStdinAndRenders(t *testing.T) {
 
 	db, err := store.InitDB(dbPath)
 	require.NoError(t, err)
-	_, err = backlog.CreateProject(db, "ouroboros", "OUR")
+	p, err := backlog.CreateProject(db, "ouroboros", "OUR")
 	require.NoError(t, err)
 	_, err = store.UpsertDocument(db, store.Document{Type: "decision", Project: "ouroboros", Title: "Use SQLite"})
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, p.ID, "OUR", "P2", "Task 1", "", "", "", "")
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
@@ -392,6 +394,11 @@ func TestClaudeStatusline_WireDecodesStdinAndRenders(t *testing.T) {
 	require.NoError(t, statuslineCmd.RunE(statuslineCmd, nil))
 	assert.Contains(t, out.String(), "KB 1")
 	assert.Contains(t, out.String(), "[ouroboros]")
+	// OU-314: the wired command must force the ANSI profile so priority
+	// color escapes survive non-TTY (pipe) stdout — the default termenv
+	// resolution would strip these to plain text (Ascii profile).
+	assert.Contains(t, out.String(), "\x1b[", "wired statusline must emit ANSI escapes (WithForceProfile)")
+	assert.Contains(t, out.String(), "\x1b[36m", "P2 priority segment must render cyan (color \"6\")")
 }
 
 // TestClaudeStatusline_PlainFlagNoEscapes proves --plain renders no ANSI
