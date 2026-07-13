@@ -5,6 +5,7 @@ import (
 	"github.com/dangernoodle-io/mcpkit/host/claudecode"
 	"github.com/dangernoodle-io/mcpkit/host/claudecode/hooks"
 	"github.com/dangernoodle-io/mcpkit/host/claudecode/statusline"
+	"github.com/muesli/termenv"
 )
 
 // claudeProvider returns the mcpkit cli.CommandProvider contributing the
@@ -33,6 +34,10 @@ func claudeProvider() mcpkitcli.CommandProvider {
 			SubagentStart(hookHandleSubagentStart).
 			PostToolUse(hookHandlePostToolUse).
 			PreCompact(hookHandlePreCompact),
-		statusline.Command(ouroborosStatuslineProvider(), statusline.WithAppPrefix("OUROBOROS")),
+		statusline.Command(
+			ouroborosStatuslineProvider(),
+			statusline.WithAppPrefix("OUROBOROS"),
+			statusline.WithForceProfile(termenv.ANSI),
+		),
 	)
 }
