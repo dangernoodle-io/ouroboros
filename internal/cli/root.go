@@ -59,7 +59,17 @@ func init() {
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(unlinkCmd)
 	rootCmd.AddCommand(dashboardCmd)
-	mcpkitcli.MountProviders(rootCmd, claudeProvider())
+	mustMountProviders(rootCmd, claudeProvider())
+}
+
+// mustMountProviders mounts providers onto root via mcpkit's MountProviders,
+// panicking on a non-nil error (an unresolved Mount.Under path) — a mount
+// failure is a startup-config bug, not a runtime condition to recover from.
+// Extracted from init() so the panic path is independently testable.
+func mustMountProviders(root *cobra.Command, providers ...mcpkitcli.CommandProvider) {
+	if err := mcpkitcli.MountProviders(root, providers...); err != nil {
+		panic(fmt.Sprintf("ouroboros: mount claude provider: %v", err))
+	}
 }
 
 // Execute runs the root command.

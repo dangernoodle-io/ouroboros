@@ -22,11 +22,11 @@ func TestClaudeHooksStop_WireDecodesStdinAndRuns(t *testing.T) {
 	t.Setenv("QM_DB_PATH", "")
 
 	provider := claudeProvider()
-	cmds := provider.Commands()
-	require.Len(t, cmds, 1, "claude namespace is a single top-level command")
-	assert.Equal(t, "claude", cmds[0].Use)
+	mounts := provider.Mounts()
+	require.Len(t, mounts, 1, "claude namespace is a single top-level command")
+	assert.Equal(t, "claude", mounts[0].Cmd.Use)
 
-	stopCmd, _, err := cmds[0].Find([]string{"hooks", "stop"})
+	stopCmd, _, err := mounts[0].Cmd.Find([]string{"hooks", "stop"})
 	require.NoError(t, err)
 
 	var out bytes.Buffer
@@ -66,10 +66,10 @@ func TestClaudeHooksSubagentStop_WireDecodesStdinAndRuns(t *testing.T) {
 	t.Setenv("QM_DB_PATH", "")
 
 	provider := claudeProvider()
-	cmds := provider.Commands()
-	require.Len(t, cmds, 1, "claude namespace is a single top-level command")
+	mounts := provider.Mounts()
+	require.Len(t, mounts, 1, "claude namespace is a single top-level command")
 
-	subagentStopCmd, _, err := cmds[0].Find([]string{"hooks", "subagent-stop"})
+	subagentStopCmd, _, err := mounts[0].Cmd.Find([]string{"hooks", "subagent-stop"})
 	require.NoError(t, err)
 
 	var out bytes.Buffer
@@ -103,10 +103,10 @@ func TestClaudeHooksUserPromptSubmit_WireDecodesStdinAndRuns(t *testing.T) {
 	t.Setenv("QM_DB_PATH", "")
 
 	provider := claudeProvider()
-	cmds := provider.Commands()
-	require.Len(t, cmds, 1, "claude namespace is a single top-level command")
+	mounts := provider.Mounts()
+	require.Len(t, mounts, 1, "claude namespace is a single top-level command")
 
-	upsCmd, _, err := cmds[0].Find([]string{"hooks", "user-prompt-submit"})
+	upsCmd, _, err := mounts[0].Cmd.Find([]string{"hooks", "user-prompt-submit"})
 	require.NoError(t, err)
 
 	var out bytes.Buffer

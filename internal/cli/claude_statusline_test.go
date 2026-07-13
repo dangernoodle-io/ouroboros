@@ -378,11 +378,11 @@ func TestClaudeStatusline_WireDecodesStdinAndRenders(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	provider := claudeProvider()
-	cmds := provider.Commands()
-	require.Len(t, cmds, 1)
-	assert.Equal(t, "claude", cmds[0].Use)
+	mounts := provider.Mounts()
+	require.Len(t, mounts, 1)
+	assert.Equal(t, "claude", mounts[0].Cmd.Use)
 
-	statuslineCmd, _, err := cmds[0].Find([]string{"statusline"})
+	statuslineCmd, _, err := mounts[0].Cmd.Find([]string{"statusline"})
 	require.NoError(t, err)
 
 	var out bytes.Buffer
