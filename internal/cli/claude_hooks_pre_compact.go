@@ -82,7 +82,7 @@ func extractAllKbBlocks(transcriptPath string) (blockCount, decisionTurnCount in
 			continue
 		}
 
-		if matched, _ := extractKbBlock(text); matched {
+		if extractKbBlock(text) {
 			blockCount++
 		}
 		if hasDecisionLanguage(text) {

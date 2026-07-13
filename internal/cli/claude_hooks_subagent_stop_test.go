@@ -158,11 +158,31 @@ func TestRunHookSubagentStop_MalformedKbJSON_HandledNoWrite(t *testing.T) {
 		LastAssistantMessage: message,
 	}
 
-	assert.Equal(t, hooks.Response{}, runHookSubagentStop(p, db))
+	resp := runHookSubagentStop(p, db)
+	assert.NotEmpty(t, resp.SystemMessage, "malformed block must warn via SystemMessage, not silent stderr-only")
+	assert.Empty(t, resp.Block, "SubagentStop must NEVER Block (OU-222/OU-254), even to warn on a malformed block")
 
 	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
 	require.NoError(t, err)
 	assert.Empty(t, summaries)
+}
+
+func TestRunHookSubagentStop_MultipleKbBlocksInMessage_AllPersisted(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	cwd := gitProjectDir(t)
+	message := longEnough("```kb\n{\"type\":\"fact\",\"title\":\"Sub Fact One\",\"content\":\"a\"}\n```\nsome narration\n```kb\n{\"type\":\"fact\",\"title\":\"Sub Fact Two\",\"content\":\"b\"}\n```\n")
+	p := hooks.SubagentStopPayload{
+		Common:               hooks.Common{Cwd: cwd, SessionID: "sess0010"},
+		LastAssistantMessage: message,
+	}
+
+	resp := runHookSubagentStop(p, db)
+	assert.Equal(t, hooks.Response{}, resp)
+
+	summaries, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 10)
+	require.NoError(t, err)
+	assert.Len(t, summaries, 2)
 }
 
 func TestRunHookSubagentStop_KbBlock_NoProject_NotPersisted(t *testing.T) {
@@ -176,7 +196,9 @@ func TestRunHookSubagentStop_KbBlock_NoProject_NotPersisted(t *testing.T) {
 		LastAssistantMessage: message,
 	}
 
-	assert.Equal(t, hooks.Response{}, runHookSubagentStop(p, db))
+	resp := runHookSubagentStop(p, db)
+	assert.NotEmpty(t, resp.SystemMessage, "a kb block with no resolvable project must warn, not silently drop")
+	assert.Empty(t, resp.Block)
 
 	summaries, err := store.QueryDocuments(db, nil, nil, nil, "", nil, 10)
 	require.NoError(t, err)

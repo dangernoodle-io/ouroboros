@@ -85,14 +85,12 @@ var tier1Patterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\binstead of\b.{0,30}\bbecause\b`),
 }
 
-// extractKbBlock returns the body of the first fenced ```kb block in message
-// and whether one was found.
-func extractKbBlock(message string) (bool, string) {
-	m := kbFenceRe.FindStringSubmatch(message)
-	if m == nil {
-		return false, ""
-	}
-	return true, m[1]
+// extractKbBlock reports whether message contains at least one fenced ```kb
+// block. Callers needing the block bodies use extractAllKbBlockBodies
+// instead; this narrower presence-only check is what turnAlreadyPersisted
+// and extractAllKbBlocks (pre-compact) actually need.
+func extractKbBlock(message string) bool {
+	return kbFenceRe.MatchString(message)
 }
 
 // isOuroborosWriteTool reports whether name looks like an ouroboros MCP
@@ -375,13 +373,16 @@ func isGenuineUserTurnBoundary(content json.RawMessage) bool {
 	return false
 }
 
-// turnAlreadyPersisted scans a transcript JSONL backwards from the end,
-// within the CURRENT turn only (stopping at the most recent genuine
-// user-prompt record), looking for a signal that the session already
-// persisted knowledge this turn: either an ouroboros MCP KB/backlog write
-// tool_use, or a prior emitted ```kb fenced block in an earlier assistant
-// message this turn. Fail-open: returns false on any read/parse failure.
-func turnAlreadyPersisted(transcriptPath string) bool {
+// walkCurrentTurn scans a transcript JSONL backwards from the end, within
+// the CURRENT turn only (stopping at the most recent genuine user-prompt
+// boundary), invoking visit with each raw JSONL line's decoded entry, newest
+// to oldest, until visit returns false or the turn boundary is reached. This
+// is the shared turn-boundary walk used by turnAlreadyPersisted (looking for
+// an already-persisted signal) and scanTurnAssistantTexts (collecting every
+// assistant message's text this turn) — both must agree on what "this turn"
+// means, so the boundary logic lives here exactly once. Fail-open: a
+// malformed line is skipped, never treated as a boundary or an error.
+func walkCurrentTurn(transcriptPath string, visit func(entry transcriptLine) (keepGoing bool)) {
 	lines := readTranscriptTail(transcriptPath)
 	for i := len(lines) - 1; i >= 0; i-- {
 		var entry transcriptLine
@@ -395,31 +396,99 @@ func turnAlreadyPersisted(transcriptPath string) bool {
 				content = entry.Message.Content
 			}
 			if isGenuineUserTurnBoundary(content) {
-				break
+				return
 			}
 			continue
 		}
 
+		if !visit(entry) {
+			return
+		}
+	}
+}
+
+// turnAlreadyPersisted scans the current turn (walkCurrentTurn) looking for
+// a signal that the session already persisted knowledge this turn: either an
+// ouroboros MCP KB/backlog write tool_use, or a prior emitted ```kb fenced
+// block in an earlier assistant message this turn. Fail-open: returns false
+// on any read/parse failure.
+//
+// NOTE: unlike scanTurnAssistantTexts (below), this does not filter
+// entry.IsSidechain. This asymmetry is intentional, not an oversight: a
+// sidechain (subagent) tool_use/kb-block signal here only suppresses this
+// function's own callers' nudges — actually persisting a sidechain's kb
+// block is SubagentStop's job (persistAllKbBlocksInMessage on
+// p.LastAssistantMessage), not the Stop hook's whole-turn scan. Tracked
+// separately (P4) rather than expanded here.
+func turnAlreadyPersisted(transcriptPath string) bool {
+	found := false
+	walkCurrentTurn(transcriptPath, func(entry transcriptLine) bool {
 		if entry.Type != "assistant" || entry.Message == nil {
-			continue
+			return true
 		}
 
 		var blocks []transcriptContentBlock
 		if err := json.Unmarshal(entry.Message.Content, &blocks); err != nil {
-			continue
+			return true
 		}
 		for _, b := range blocks {
 			if b.Type == "tool_use" && isOuroborosWriteTool(b.Name) {
-				return true
+				found = true
+				return false
 			}
-			if b.Type == "text" && b.Text != "" {
-				if matched, _ := extractKbBlock(b.Text); matched {
-					return true
-				}
+			if b.Type == "text" && b.Text != "" && extractKbBlock(b.Text) {
+				found = true
+				return false
 			}
 		}
+		return true
+	})
+	return found
+}
+
+// scanTurnAssistantTexts scans the current turn (walkCurrentTurn, the same
+// boundary turnAlreadyPersisted uses) and collects the joined text of every
+// main-context (non-sidechain) assistant message in that turn, oldest first.
+// This is the whole-turn counterpart to readLastMainAssistantText (which
+// returns only the FINAL message) — used by the Stop hook's whole-turn kb
+// persist so a fenced ```kb block emitted mid-turn (not just in the final
+// message) is still found. Fail-open: returns nil on any read failure.
+func scanTurnAssistantTexts(transcriptPath string) []string {
+	var texts []string
+	walkCurrentTurn(transcriptPath, func(entry transcriptLine) bool {
+		if entry.Type != "assistant" || entry.IsSidechain || entry.Message == nil {
+			return true
+		}
+
+		var blocks []transcriptContentBlock
+		if err := json.Unmarshal(entry.Message.Content, &blocks); err != nil {
+			return true
+		}
+		if text := joinTextBlocks(blocks); text != "" {
+			texts = append(texts, text)
+		}
+		return true
+	})
+
+	for l, r := 0, len(texts)-1; l < r; l, r = l+1, r-1 {
+		texts[l], texts[r] = texts[r], texts[l]
 	}
-	return false
+	return texts
+}
+
+// extractAllKbBlockBodies returns the body of every fenced ```kb block found
+// in message, in order. Unlike extractKbBlock (first match only), this finds
+// every block a single message may contain.
+func extractAllKbBlockBodies(message string) []string {
+	matches := kbFenceRe.FindAllStringSubmatch(message, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	bodies := make([]string, len(matches))
+	for i, m := range matches {
+		bodies[i] = m[1]
+	}
+	return bodies
 }
 
 // logHookEvent best-effort appends a JSONL event line to
