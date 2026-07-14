@@ -22,15 +22,12 @@ func tokenize(t *testing.T, enc *tiktoken.Tiktoken, s string) (int, int) {
 	return len(s), len(enc.Encode(s, nil, nil))
 }
 
-// TestToolsListFootprintV2 is buildServerV2's counterpart to the old
-// buildServer's TestToolsListFootprint (deleted at the OU-5 cutover):
-// measures the wire-cost of every component a client pays for at session
-// start against the SERVED server. V2's schemas are go-sdk-generated and
-// richer (typed entry sub-schemas, jsonschema-tag descriptions on every
-// field) than mark3labs's hand-authored ones, so this is a fresh
-// measurement, not a byte-for-byte replay of the old numbers — see the
-// require.Less budget below and the OU-5b build report for the actual
-// counts.
+// TestToolsListFootprintV2 measures the wire-cost of every component a
+// client pays for at session start against the SERVED server: total and
+// per-tool/per-component (name/description/schema) breakdowns for
+// tools/list, plus serverInstructions. Descriptions were trimmed at OU-298
+// (tools/list ~1996 tokens); the require.Less budgets below are a conscious
+// ceiling, not a byte-for-byte replay of any prior measurement.
 func TestToolsListFootprintV2(t *testing.T) {
 	enc, err := tiktoken.GetEncoding("cl100k_base")
 	require.NoError(t, err)
@@ -119,7 +116,10 @@ func TestToolsListFootprintV2(t *testing.T) {
 	t.Logf("session constant cost: tokens=%d (instructions=%d + tools/list=%d)", totalTokens, instrTokens, listTokens)
 
 	require.Less(t, instrTokens, 4000, "serverInstructions exceeds 4000 tokens")
-	require.Less(t, listTokens, 4000, "tools/list exceeds 4000 tokens")
+	// Tightened at OU-298 from the old loose 4000 ceiling to a conscious
+	// budget ~10% above the trimmed measured cost (~1996 tokens): a
+	// deliberate increase must consciously raise this budget.
+	require.Less(t, listTokens, 2200, "tools/list exceeds 2200 tokens — a deliberate increase must consciously raise this budget")
 
 	// Ensure testdata directory exists for snapshot files
 	require.NoError(t, os.MkdirAll("testdata", 0o755))

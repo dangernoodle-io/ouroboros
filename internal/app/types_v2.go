@@ -17,7 +17,7 @@ type getInput struct {
 	// handler performs its own explicit missing/empty check instead.
 	Domain      string   `json:"domain,omitempty" jsonschema:"Required: \"kb\", \"backlog\", or \"roadmap\""`
 	IDs         []any    `json:"ids,omitempty" jsonschema:"IDs to fetch (kb: document IDs, backlog: item IDs)"`
-	Verbose     bool     `json:"verbose,omitempty" jsonschema:"Include notes on ids[] fetch only, default false; filter/list results are always compact regardless"`
+	Verbose     bool     `json:"verbose,omitempty" jsonschema:"Include notes (ids[] fetch only), default false"`
 	Types       []string `json:"types,omitempty" jsonschema:"Filter by types (kb only)"`
 	Projects    []string `json:"projects,omitempty" jsonschema:"Filter by project names"`
 	Categories  []string `json:"categories,omitempty" jsonschema:"Filter by categories (kb only)"`
@@ -27,12 +27,12 @@ type getInput struct {
 	PriorityMin string   `json:"priority_min,omitempty" jsonschema:"Min priority P0-P6 (backlog only)"`
 	PriorityMax string   `json:"priority_max,omitempty" jsonschema:"Max priority P0-P6 (backlog only)"`
 	Status      string   `json:"status,omitempty" jsonschema:"open or done (backlog only)"`
-	Component   string   `json:"component,omitempty" jsonschema:"Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)"`
-	Epic        string   `json:"epic,omitempty" jsonschema:"Epic backlog item id filter — that epic's children (backlog, roadmap; single-valued — an epic IS a backlog item, see the EPIC: convention)"`
-	EpicsOnly   bool     `json:"epics_only,omitempty" jsonschema:"List only epic items, EPIC:-titled (backlog only); takes precedence over epic"`
-	Since       string   `json:"since,omitempty" jsonschema:"Created-time window for backlog items: a duration (24h, 7d), a date (2006-01-02), or an RFC3339 timestamp (backlog only)"`
+	Component   string   `json:"component,omitempty" jsonschema:"Component tag filter (backlog subproject/plugin; roadmap grouping axis)"`
+	Epic        string   `json:"epic,omitempty" jsonschema:"Epic item id filter — its children (backlog/roadmap)"`
+	EpicsOnly   bool     `json:"epics_only,omitempty" jsonschema:"List only epics (backlog only); overrides epic"`
+	Since       string   `json:"since,omitempty" jsonschema:"Created-at cutoff (backlog only): duration (24h, 7d), date (2006-01-02), or RFC3339"`
 	Sort        string   `json:"sort,omitempty" jsonschema:"\"created\" sorts backlog items newest-first (backlog only)"`
-	By          string   `json:"by,omitempty" jsonschema:"Grouping axis: \"component\" (default) or \"epic\"; the other axis renders as an inline chip (roadmap get format=md|html only)"`
+	By          string   `json:"by,omitempty" jsonschema:"Grouping axis: component (default) or epic (roadmap md/html only); other axis shown inline"`
 	Format      string   `json:"format,omitempty" jsonschema:"structured, md, or html, default structured (roadmap only)"`
 }
 
@@ -48,7 +48,7 @@ type kbInput struct {
 	// schema validation before handleKBV2 ever runs, with a generic
 	// schema-validation error instead of that message. The handler performs
 	// its own explicit len(in.Entries)==0 check instead.
-	Entries []kbEntryInput `json:"entries,omitempty" jsonschema:"Documents to create/update: {id?}, type, project, category?, title, content, notes?, append_notes?, tags?, metadata?. content max 500 chars; put narrative in notes"`
+	Entries []kbEntryInput `json:"entries,omitempty" jsonschema:"KB docs to create (id absent) or update in place (id present). content max 500 chars; put narrative in notes"`
 }
 
 // kbEntryInput uses POINTER fields (except ID, see below) for presence: a
@@ -122,7 +122,7 @@ type backlogInput struct {
 	// schema-validated entries as required, an omitted key would fail
 	// schema validation before handleBacklogV2 ever runs. The handler
 	// performs its own explicit "neither present" check instead.
-	Entries   []backlogEntryInput `json:"entries,omitempty" jsonschema:"Items to create/update: {id?}, project, priority, title, description?, notes?, append_notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent"`
+	Entries   []backlogEntryInput `json:"entries,omitempty" jsonschema:"Backlog items to create (id absent) or update in place (id present)."`
 	DeleteIDs []string            `json:"delete_ids,omitempty" jsonschema:"Item IDs to delete"`
 }
 
@@ -303,10 +303,10 @@ type searchInput struct {
 	PriorityMin string   `json:"priority_min,omitempty" jsonschema:"Min priority P0-P6 (backlog only)"`
 	PriorityMax string   `json:"priority_max,omitempty" jsonschema:"Max priority P0-P6 (backlog only)"`
 	Status      string   `json:"status,omitempty" jsonschema:"open or done (backlog only)"`
-	Component   string   `json:"component,omitempty" jsonschema:"Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)"`
-	Epic        string   `json:"epic,omitempty" jsonschema:"Epic backlog item id filter — that epic's children (backlog, roadmap; single-valued — an epic IS a backlog item, see the EPIC: convention)"`
-	EpicsOnly   bool     `json:"epics_only,omitempty" jsonschema:"List only epic items, EPIC:-titled (backlog only); takes precedence over epic"`
-	Since       string   `json:"since,omitempty" jsonschema:"Created-time window for backlog items: a duration (24h, 7d), a date (2006-01-02), or an RFC3339 timestamp (backlog only)"`
+	Component   string   `json:"component,omitempty" jsonschema:"Component tag filter (backlog subproject/plugin; roadmap grouping axis)"`
+	Epic        string   `json:"epic,omitempty" jsonschema:"Epic item id filter — its children (backlog/roadmap)"`
+	EpicsOnly   bool     `json:"epics_only,omitempty" jsonschema:"List only epics (backlog only); overrides epic"`
+	Since       string   `json:"since,omitempty" jsonschema:"Created-at cutoff (backlog only): duration (24h, 7d), date (2006-01-02), or RFC3339"`
 	Sort        string   `json:"sort,omitempty" jsonschema:"\"created\" sorts backlog items newest-first (backlog only)"`
 	Limit       int      `json:"limit,omitempty" jsonschema:"Limit, default 10, max 500"`
 }

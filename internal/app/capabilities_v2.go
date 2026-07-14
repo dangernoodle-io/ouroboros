@@ -5,15 +5,14 @@ import (
 	"github.com/dangernoodle-io/mcpkit/mcpx"
 )
 
-// descGetToolV2/descSearchToolV2 mirror the mcp-go tool descriptions in
-// server.go verbatim, so the tool surface presented to a client is unchanged
-// across the mcp-go/mcpkit seam.
+// Tool-level descriptions for the five MCP tools (kept tight per the
+// token-conservation principle in CLAUDE.md).
 const (
-	descGetToolV2     = "Fetch entries by ID or filters (required domain: kb|backlog|roadmap). ids[] returns exact matches; omit ids for a filtered list."
-	descSearchToolV2  = "Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes)."
-	descKBToolV2      = "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. On update, notes replaces; set append_notes=true to append instead (update-only). Reads live under get/search domain=kb."
-	descBacklogToolV2 = "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. On update, notes replaces; set append_notes=true to append instead (update-only). Reads live under get/search domain=backlog."
-	descRoadmapToolV2 = "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done sections) via op=add|update|move|reorder|done|remove. Items carry two single-valued grouping axes: component (structural) and epic (optional; an epic IS a backlog item). Reads live under get/search domain=roadmap."
+	descGetToolV2     = "Fetch entries by id or filters (required domain: kb|backlog|roadmap). ids[] = exact matches; omit for a filtered list."
+	descSearchToolV2  = "Full-text search (required domain: kb|backlog|roadmap). kb takes query or batched queries[]; backlog/roadmap take one query."
+	descKBToolV2      = "Create/update knowledge entries via entries[]: with id updates that doc in place (partial), else upserts by type+project+category+title. content [[Title]] autolinks create explains edges. Read via get/search domain=kb."
+	descBacklogToolV2 = "Create/update/delete backlog items via entries[] (id = update, else create) or delete_ids[]. Read via get/search domain=backlog."
+	descRoadmapToolV2 = "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done) via op=add|update|move|reorder|done|remove. Items group by component and epic (both single-valued). Read via get/search domain=roadmap."
 )
 
 // getCapability and searchCapability are mcpkit Capabilities for the get and
