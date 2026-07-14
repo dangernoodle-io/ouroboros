@@ -71,16 +71,18 @@ func hookHandlePostToolUse(_ context.Context, _ io.Reader, p hooks.PostToolUsePa
 }
 
 // postEditCheckToolInput is the subset of PostToolUsePayload.ToolInput this
-// hook reads. Edit/Write/NotebookEdit carry a single file_path; MultiEdit
-// carries an edits array of {file_path, ...}. Faithful port of
+// hook reads. Edit/Write carry a single file_path; NotebookEdit carries a
+// single notebook_path instead (Claude Code's NotebookEdit tool_input shape);
+// MultiEdit carries an edits array of {file_path, ...}. Faithful port of
 // post-edit-check.js's tool_input field extraction.
 // Edits is a pointer to distinguish "key absent" (nil) from "key present but
 // empty" (non-nil pointing to an empty slice), matching the JS behavior:
 // if Array.isArray(tool_input.edits) is true, we use its contents even if
 // empty, with no fallback to file_path.
 type postEditCheckToolInput struct {
-	FilePath string `json:"file_path"`
-	Edits    *[]struct {
+	FilePath     string `json:"file_path"`
+	NotebookPath string `json:"notebook_path"`
+	Edits        *[]struct {
 		FilePath string `json:"file_path"`
 	} `json:"edits"`
 }
@@ -111,6 +113,10 @@ func runPostEditCheck(p hooks.PostToolUsePayload, db *sql.DB) {
 	} else if input.FilePath != "" {
 		// edits key absent: fall back to top-level file_path.
 		filePaths = []string{input.FilePath}
+	} else if input.NotebookPath != "" {
+		// edits and file_path both absent: fall back to notebook_path
+		// (NotebookEdit's tool_input shape).
+		filePaths = []string{input.NotebookPath}
 	}
 
 	firstFilePath := ""
