@@ -133,6 +133,7 @@ func truncateMessage(s string, maxBytes int) string { //nolint:unparam
 // UserPromptSubmit resolution order (OU-283) to suppress cwd-based project
 // resolution when the session's cwd is the plugin-marketplace hub itself —
 // a repo, but never the "project" whose KB/backlog a hook should inject.
+// Also used by resolveHookProject (OU-301) for the same hub-exclusion.
 func isMarketplaceRepo(gitRoot string) bool {
 	if gitRoot == "" {
 		return false
@@ -221,6 +222,24 @@ func projectFromPath(startPath string) string {
 		return ""
 	}
 	return filepath.Base(root)
+}
+
+// resolveHookProject picks the auto-persist target project from the
+// authoritative CLAUDE_PROJECT_DIR (projectDir) else the cwd, excluding the
+// marketplace hub (a repo, but never a persist target). Returns "" when
+// neither yields a non-hub project — callers must NOT silently mis-target in
+// that case (a kb block's own project: field still wins downstream; a
+// project-less block surfaces a visible warning instead).
+func resolveHookProject(projectDir, cwd string) string {
+	for _, base := range []string{projectDir, cwd} {
+		if base == "" {
+			continue
+		}
+		if root := findGitRoot(base); root != "" && !isMarketplaceRepo(root) {
+			return filepath.Base(root)
+		}
+	}
+	return ""
 }
 
 // transcriptLine is the minimal shape of a Claude Code transcript JSONL

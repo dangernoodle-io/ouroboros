@@ -127,17 +127,12 @@ func runHookPreCompact(p hooks.PreCompactPayload, db *sql.DB) hooks.Response { /
 	// before it knows the project, so this breadcrumb omits it too.
 	logHookEvent(map[string]any{"hook": "pre_compact", "kind": "fire"})
 
-	// NOTE: project resolution below is intentionally BARE
-	// projectFromPath(p.Cwd) — the hub-aware suppression used by
-	// UserPromptSubmit/SubagentStart (OU-283) is deliberately NOT applied
-	// here. This is a faithful port of pre-compact.js, which resolves the
-	// project the same simple way; applying hub-aware suppression here
-	// would only affect which project name this handler's log breadcrumbs
-	// carry (this hook never writes to the KB), so there is no
-	// data-loss risk either way — the OU-301 ticket is where a considered
-	// decision about aligning this hook's project resolution (if at all)
-	// belongs.
-	project := projectFromPath(p.Cwd)
+	// Project resolution is hub-aware (OU-301): resolveHookProject prefers
+	// CLAUDE_PROJECT_DIR else cwd, excluding the marketplace hub, matching
+	// UserPromptSubmit/SubagentStart/Stop/SubagentStop. This hook never
+	// writes to the KB — the resolved project only affects which project
+	// name this handler's log breadcrumbs carry.
+	project := resolveHookProject(p.ProjectDir, p.Cwd)
 
 	if p.TranscriptPath == "" {
 		logHookEvent(map[string]any{"hook": "pre_compact", "kind": "skip", "reason": "no_transcript"})
