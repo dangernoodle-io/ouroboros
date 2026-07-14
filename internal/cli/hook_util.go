@@ -413,17 +413,15 @@ func walkCurrentTurn(transcriptPath string, visit func(entry transcriptLine) (ke
 // block in an earlier assistant message this turn. Fail-open: returns false
 // on any read/parse failure.
 //
-// NOTE: unlike scanTurnAssistantTexts (below), this does not filter
-// entry.IsSidechain. This asymmetry is intentional, not an oversight: a
-// sidechain (subagent) tool_use/kb-block signal here only suppresses this
-// function's own callers' nudges — actually persisting a sidechain's kb
-// block is SubagentStop's job (persistAllKbBlocksInMessage on
-// p.LastAssistantMessage), not the Stop hook's whole-turn scan. Tracked
-// separately (P4) rather than expanded here.
+// NOTE: like scanTurnAssistantTexts (below), this is main-context-only —
+// both filter entry.IsSidechain, so the Stop hook's persist-detection
+// (this function) and persist-execution (scanTurnAssistantTexts) agree on
+// scope. Persisting a subagent's own kb block remains SubagentStop's job
+// (persistAllKbBlocksInMessage on p.LastAssistantMessage).
 func turnAlreadyPersisted(transcriptPath string) bool {
 	found := false
 	walkCurrentTurn(transcriptPath, func(entry transcriptLine) bool {
-		if entry.Type != "assistant" || entry.Message == nil {
+		if entry.Type != "assistant" || entry.IsSidechain || entry.Message == nil {
 			return true
 		}
 

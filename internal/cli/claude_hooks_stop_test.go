@@ -487,6 +487,37 @@ func TestTurnAlreadyPersisted_LargeFileUsesTailCap(t *testing.T) {
 	assert.True(t, turnAlreadyPersisted(transcript))
 }
 
+func TestTurnAlreadyPersisted_FalseWhenOnlySignalIsSidechainToolUse(t *testing.T) {
+	// A sidechain (subagent) tool_use is not a main-context signal — it must
+	// not suppress the main turn's nudge; persisting it is SubagentStop's job.
+	sidechainToolUse := `{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"tool_use","name":"mcp__ouroboros-mcp__kb","input":{}}]}}`
+	transcript := writeTranscript(t, []string{
+		userLine("start turn"),
+		sidechainToolUse,
+	})
+	assert.False(t, turnAlreadyPersisted(transcript))
+}
+
+func TestTurnAlreadyPersisted_FalseWhenOnlySignalIsSidechainKbFence(t *testing.T) {
+	rec := map[string]any{
+		"type":        "assistant",
+		"isSidechain": true,
+		"message": map[string]any{
+			"content": []map[string]any{{
+				"type": "text",
+				"text": "```kb\n{\"type\":\"fact\",\"title\":\"x\",\"content\":\"y\"}\n```",
+			}},
+		},
+	}
+	data, err := json.Marshal(rec)
+	require.NoError(t, err)
+	transcript := writeTranscript(t, []string{
+		userLine("start turn"),
+		string(data),
+	})
+	assert.False(t, turnAlreadyPersisted(transcript))
+}
+
 // --- isGenuineUserTurnBoundary ------------------------------------------
 
 func TestIsGenuineUserTurnBoundary(t *testing.T) {
