@@ -210,6 +210,31 @@ func TestRunHookUserPromptSubmit_ResumeIntent_BypassesCooldown(t *testing.T) {
 	assert.NotEqual(t, hooks.Response{}, second, "resume intent must bypass cooldown")
 }
 
+// --- OU-198: no per-prompt persist-contract reminder ---------------------
+
+// TestRunHookUserPromptSubmit_NoStaticPersistReminder is the OU-198
+// regression: the injected context must be exactly the header line plus one
+// row per matched KB doc — no static "if a decision or fact is worth
+// persisting..." sentence repeated on every qualifying prompt. That contract
+// is now stated once in serverInstructions (internal/app/serverv2.go)
+// instead.
+func TestRunHookUserPromptSubmit_NoStaticPersistReminder(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, _, ouroborosDir := upcWorkspace(t)
+	upcSeedFillerDocs(t, db)
+	seedKbDoc(t, db, "ouroboros", "Use gRPC for internal APIs")
+
+	p := hooks.UserPromptSubmitPayload{
+		Common: hooks.Common{Cwd: ouroborosDir, SessionID: "sess-ou198"},
+		Prompt: "please explain how we use gRPC for internal APIs here",
+	}
+	resp := runHookUserPromptSubmit(p, db)
+	assert.NotContains(t, resp.AdditionalContext, "worth persisting")
+	assert.NotContains(t, resp.AdditionalContext, "call the kb tool")
+	assert.Equal(t, "[ouroboros] ouroboros KB (1):\n  [decision] Use gRPC for internal APIs", resp.AdditionalContext)
+}
+
 // --- empty/no-KB-results --------------------------------------------------
 
 func TestRunHookUserPromptSubmit_NoMatchingKbRows_NoInjection(t *testing.T) {
