@@ -107,15 +107,16 @@ func kbEntryCreateV2(e kbEntryInput) kb.Entry {
 // no deref needed, unlike the create path.
 func kbEntryUpdateV2(id int64, e kbEntryInput) kb.EntryUpdate {
 	return kb.EntryUpdate{
-		ID:       id,
-		Type:     e.Type,
-		Project:  e.Project,
-		Category: e.Category,
-		Title:    e.Title,
-		Content:  e.Content,
-		Notes:    e.Notes,
-		Tags:     e.Tags,
-		Metadata: e.Metadata,
+		ID:          id,
+		Type:        e.Type,
+		Project:     e.Project,
+		Category:    e.Category,
+		Title:       e.Title,
+		Content:     e.Content,
+		Notes:       e.Notes,
+		AppendNotes: e.AppendNotes,
+		Tags:        e.Tags,
+		Metadata:    e.Metadata,
 	}
 }
 

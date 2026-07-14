@@ -137,19 +137,46 @@ func validateUpdates(updates []EntryUpdate) error {
 	return nil
 }
 
+// appendNotesText concatenates addition onto existing, separated by a blank
+// line -- but only when existing is non-empty, so appending onto a
+// never-set/empty notes field doesn't leave a leading separator.
+func appendNotesText(existing, addition string) string {
+	if existing == "" {
+		return addition
+	}
+	return existing + "\n\n" + addition
+}
+
 // updateEntriesTx applies already-validated id-addressed partial updates
 // within an existing transaction. Callers own commit/rollback and FTS
 // rebuild.
 func updateEntriesTx(tx *sql.Tx, updates []EntryUpdate) ([]PutResult, error) {
 	results := make([]PutResult, 0, len(updates))
 	for _, u := range updates {
+		notes := u.Notes
+		if u.AppendNotes {
+			// append_notes only matters when there's actual text to append;
+			// omitted/empty notes leave the field untouched (not cleared).
+			notes = nil
+			if u.Notes != nil && *u.Notes != "" {
+				// Read-modify-write inside the caller's tx (no second tx --
+				// avoids a TOCTOU race with the write below).
+				current, err := store.GetDocumentTx(tx, u.ID)
+				if err != nil {
+					return nil, fmt.Errorf("append_notes fetch failed for id %d: %w", u.ID, err)
+				}
+				appended := appendNotesText(current.Notes, *u.Notes)
+				notes = &appended
+			}
+		}
+
 		fields := store.UpdateDocumentFields{
 			Type:     u.Type,
 			Project:  u.Project,
 			Category: u.Category,
 			Title:    u.Title,
 			Content:  u.Content,
-			Notes:    u.Notes,
+			Notes:    notes,
 			Tags:     u.Tags,
 			Metadata: u.Metadata,
 		}

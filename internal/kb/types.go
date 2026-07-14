@@ -16,16 +16,21 @@ type Entry struct {
 // distinguish "not provided" (nil, leave unchanged) from an explicit value —
 // this is what lets a title-only update retitle a document in place instead
 // of creating a duplicate under the natural-key upsert.
+// AppendNotes, when true, appends Notes to the existing document's notes
+// (\n\n-separated) instead of replacing them; a nil or empty Notes is a
+// no-op in append mode (nothing to append). Ignored unless Notes is
+// non-nil and non-empty; has no effect on any other field.
 type EntryUpdate struct {
-	ID       int64
-	Type     *string
-	Project  *string
-	Category *string
-	Title    *string
-	Content  *string
-	Notes    *string
-	Tags     *[]string
-	Metadata *map[string]string
+	ID          int64
+	Type        *string
+	Project     *string
+	Category    *string
+	Title       *string
+	Content     *string
+	Notes       *string
+	AppendNotes bool
+	Tags        *[]string
+	Metadata    *map[string]string
 }
 
 // PutResult represents the result of a put operation.

@@ -4,7 +4,7 @@
       "annotations": {
         "destructiveHint": true
       },
-      "description": "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. Reads live under get/search domain=backlog.",
+      "description": "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. On update, notes replaces; set append_notes=true to append instead (update-only). Reads live under get/search domain=backlog.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -19,10 +19,14 @@
             ]
           },
           "entries": {
-            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent",
+            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, append_notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent",
             "items": {
               "additionalProperties": false,
               "properties": {
+                "append_notes": {
+                  "description": "Append notes to the existing value instead of replacing (update-only; ignored on create)",
+                  "type": "boolean"
+                },
                 "component": {
                   "description": "Single-valued component tag",
                   "type": [
@@ -236,15 +240,19 @@
       "annotations": {
         "idempotentHint": true
       },
-      "description": "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb.",
+      "description": "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. On update, notes replaces; set append_notes=true to append instead (update-only). Reads live under get/search domain=kb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "entries": {
-            "description": "Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?. content max 500 chars; put narrative in notes",
+            "description": "Documents to create/update: {id?}, type, project, category?, title, content, notes?, append_notes?, tags?, metadata?. content max 500 chars; put narrative in notes",
             "items": {
               "additionalProperties": false,
               "properties": {
+                "append_notes": {
+                  "description": "Append notes to the existing value instead of replacing (update-only; ignored on create)",
+                  "type": "boolean"
+                },
                 "category": {
                   "type": [
                     "null",

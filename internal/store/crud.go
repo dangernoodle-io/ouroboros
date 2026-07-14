@@ -437,6 +437,24 @@ func GetDocumentByKeyTx(tx *sql.Tx, docType, project, category, title string) (*
 	return getDocumentExec(tx, "type = ? AND project = ? AND category = ? AND title = ?", docType, project, category, title)
 }
 
+// GetDocumentTx is GetDocument scoped to an existing transaction, for callers
+// that need a read-modify-write cycle (e.g. append_notes) to participate in
+// the caller-owned tx instead of opening a second one. Unlike
+// GetDocumentByKeyTx (which returns nil, nil on a miss), GetDocumentTx treats
+// a missing id as an error ("document N not found"), since its sole use is a
+// must-exist read-modify-write.
+//
+// getDocumentExec returns (nil, nil) on a missing row; treat that as a
+// not-found error. A real query error flows straight through the final
+// return, so there is no separate error branch to test.
+func GetDocumentTx(tx *sql.Tx, id int64) (*Document, error) {
+	doc, err := getDocumentExec(tx, "id = ?", id)
+	if err == nil && doc == nil {
+		return nil, fmt.Errorf("document %d not found", id)
+	}
+	return doc, err
+}
+
 // getDocumentExec contains the shared scan logic for GetDocument and
 // GetDocumentByKey(Tx), operating on any sqlExecutor (db or tx).
 func getDocumentExec(q sqlExecutor, whereClause string, args ...interface{}) (*Document, error) {
