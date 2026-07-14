@@ -47,6 +47,18 @@ func parseKbBlockEntries(raw []byte) ([]kb.Entry, string, error) {
 	return []kb.Entry{h.Entry}, h.PersistedBy, nil
 }
 
+// allEntriesHaveOwnProject reports whether every entry carries its own
+// non-empty Project (so kb.WriteBatch's per-entry project wins and the
+// cwd-derived projectFlag is not needed).
+func allEntriesHaveOwnProject(entries []kb.Entry) bool {
+	for _, e := range entries {
+		if e.Project == "" {
+			return false
+		}
+	}
+	return len(entries) > 0
+}
+
 // persistOneKbBlock parses and persists a single fenced ```kb block's raw
 // JSON body (one call per block — a message or turn may contain several).
 // Returns persisted=true if entries were written. Returns a non-empty
@@ -75,8 +87,8 @@ func persistOneKbBlock(body string, db *sql.DB, label, idShort, hookName, sessio
 		return false, ""
 	}
 
-	if project == "" {
-		msg := fmt.Sprintf("%s %s: kb block found but no project (run inside a git repo)", label, idShort)
+	if project == "" && !allEntriesHaveOwnProject(entries) {
+		msg := fmt.Sprintf("%s %s: kb block found but no project — declare `project:` in the kb block or run inside a project repo", label, idShort)
 		fmt.Fprintf(os.Stderr, "[ouroboros] %s\n", msg)
 		return false, msg
 	}

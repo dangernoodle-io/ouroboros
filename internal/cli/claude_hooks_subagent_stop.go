@@ -50,10 +50,7 @@ func hookHandleSubagentStop(_ context.Context, _ io.Reader, p hooks.SubagentStop
 // a malformed/failed kb block, a Response with ONLY SystemMessage set. There
 // is no nudge/Block path at all.
 func runHookSubagentStop(p hooks.SubagentStopPayload, db *sql.DB) hooks.Response {
-	project := ""
-	if p.Cwd != "" {
-		project = projectFromPath(p.Cwd)
-	}
+	project := resolveHookProject(p.ProjectDir, p.Cwd)
 
 	logHookEvent(map[string]any{"hook": "subagent_stop", "kind": "fire", "session_id": p.SessionID, "project": project})
 

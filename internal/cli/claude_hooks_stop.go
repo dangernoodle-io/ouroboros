@@ -64,10 +64,7 @@ func runHookStop(p hooks.StopPayload, db *sql.DB) hooks.Response {
 		return hooks.Response{}
 	}
 
-	project := ""
-	if p.Cwd != "" {
-		project = projectFromPath(p.Cwd)
-	}
+	project := resolveHookProject(p.ProjectDir, p.Cwd)
 
 	logHookEvent(map[string]any{"hook": "stop", "kind": "fire", "session_id": p.SessionID, "project": project})
 
