@@ -89,15 +89,33 @@ function atomicInstallBinary(destPath, content) {
 
 // --- validation ---------------------------------------------------------
 
-// checkBinary reports whether <CLAUDE_PLUGIN_DATA>/bin/ouroboros exists and
-// is executable. install() always installs to this final path regardless
-// of how it sourced the binary (GitHub release, local Homebrew, or
-// OUROBOROS_DEV_BINARY), so this single path check mirrors its outcome.
-function checkBinary(pluginData) {
+// checkBinary reports whether <CLAUDE_PLUGIN_DATA>/bin/ouroboros exists,
+// is executable, AND actually supports every `claude <subcommand>` hooks.json
+// references (see extractRequiredSubcommands/probeBinary below). install()
+// always installs to this final path regardless of how it sourced the
+// binary (GitHub release, local Homebrew, or OUROBOROS_DEV_BINARY), so this
+// check mirrors its outcome — including the case where an old binary is
+// present, executable, and simply lacks a subcommand the current hooks.json
+// invokes (a "stale" binary: upgraded plugin source, un-upgraded binary).
+function checkBinary(pluginData, pluginRoot) {
   if (!pluginData) return { ok: false, reason: 'CLAUDE_PLUGIN_DATA not set' };
   const binary = path.join(pluginData, 'bin', 'ouroboros');
-  if (isExecutable(binary)) return { ok: true, binary };
-  return { ok: false, reason: `binary missing or not executable: ${binary}`, binary };
+  if (!isExecutable(binary)) {
+    return { ok: false, reason: `binary missing or not executable: ${binary}`, binary };
+  }
+  const required = extractRequiredSubcommands(pluginRoot);
+  if (required.length > 0) {
+    const probe = probeBinary(binary, required);
+    if (!probe.ok) {
+      return {
+        ok: false,
+        stale: true,
+        binary,
+        reason: `stale: binary lacks '${probe.missing}' (needs reinstall)`,
+      };
+    }
+  }
+  return { ok: true, binary };
 }
 
 // collectHookCommands walks an arbitrary hooks.json shape and returns every
@@ -133,6 +151,88 @@ function extractPluginPaths(command, pluginRoot) {
     .split('$CLAUDE_PLUGIN_ROOT')
     .join(pluginRoot);
   return resolved.split(/\s+/).filter(tok => tok.startsWith(pluginRoot));
+}
+
+// BINARY_REF_TOKENS are the ways a hooks.json command string can reference
+// the installed ouroboros binary (mirroring plugin.json's mcpServers.command
+// resolution: braced or bare env-var form).
+const BINARY_REF_TOKENS = ['${CLAUDE_PLUGIN_DATA}/bin/ouroboros', '$CLAUDE_PLUGIN_DATA/bin/ouroboros'];
+
+// extractRequiredSubcommands derives the set of `ouroboros <subcommand...>`
+// prefixes hooks.json actually invokes, by scanning every hook command
+// string (via collectHookCommands) for a BINARY_REF_TOKENS reference and
+// taking the following 1-2 non-flag argv tokens (e.g. `claude hooks`). This
+// is deliberately generic — no hardcoded subcommand list — so a future
+// hooks.json addition (e.g. a `claude statusline` command) is picked up
+// automatically without a bootstrap.js change. Returns [] (nothing to
+// require) when pluginRoot is unset, hooks.json is unreadable, or no
+// hook command references the binary.
+function extractRequiredSubcommands(pluginRoot) {
+  if (!pluginRoot) return [];
+  const hooksPath = path.join(pluginRoot, 'hooks', 'hooks.json');
+  let hooksJson;
+  try {
+    hooksJson = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+  } catch (err) {
+    return [];
+  }
+  const prefixes = [];
+  const seen = new Set();
+  for (const cmd of collectHookCommands(hooksJson)) {
+    const tokens = cmd.trim().split(/\s+/);
+    for (let i = 0; i < tokens.length; i++) {
+      // Exact-token match is intentional: if a future hooks.json wraps the binary
+      // ref in quotes or sh -c "...", no probe prefix is derived and staleness-check
+      // is silently skipped — fail-OPEN (safe) vs false-positive.
+      if (!BINARY_REF_TOKENS.includes(tokens[i])) continue;
+      const args = tokens.slice(i + 1).filter(t => !t.startsWith('-'));
+      if (args.length === 0) continue;
+      const prefix = args.slice(0, 2);
+      const key = prefix.join(' ');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      prefixes.push(prefix);
+    }
+  }
+  return prefixes;
+}
+
+// probeBinary runs `<binary> <prefix...> --help` for each distinct
+// subcommand prefix and reports whether every invocation exited 0. A
+// non-zero exit (cobra's "unknown command" path) or a spawn failure means
+// the binary doesn't support that subcommand — stale. Returns the first
+// failing prefix as `missing` for messaging; short-circuits on first
+// failure.
+function probeBinary(binary, requiredSubcommands) {
+  for (const prefix of requiredSubcommands) {
+    let result;
+    try {
+      result = spawnSync(binary, [...prefix, '--help'], { timeout: 5000 });
+    } catch (err) {
+      return { ok: false, missing: prefix.join(' ') };
+    }
+    if (!result || result.error || result.status !== 0) {
+      return { ok: false, missing: prefix.join(' ') };
+    }
+  }
+  return { ok: true };
+}
+
+// probeSourceForRequiredSubcommands probes a candidate SOURCE binary (before
+// it's copied into place by installLocalBinary/installDevBinary) for the
+// subcommands hooks.json references, using CLAUDE_PLUGIN_ROOT from `env`.
+// Skipped (not a failure) when pluginRoot is unset (can't know requirements),
+// there's nothing to require, or the source itself isn't executable yet
+// (existing checks already handle a missing/non-executable source).
+function probeSourceForRequiredSubcommands(sourcePath, env) {
+  const pluginRoot = env && env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot) return { ok: true, skipped: true };
+  const required = extractRequiredSubcommands(pluginRoot);
+  if (required.length === 0) return { ok: true, skipped: true };
+  if (!isExecutable(sourcePath)) return { ok: true, skipped: true };
+  const probe = probeBinary(sourcePath, required);
+  if (!probe.ok) return { ok: false, missing: probe.missing };
+  return { ok: true };
 }
 
 // checkHookScripts verifies every script referenced by hooks/hooks.json
@@ -437,11 +537,19 @@ async function installFromRelease(pluginData, get) {
 }
 
 // install is the single installer: dev binary > local Homebrew binary >
-// GitHub release, in that precedence, matching install.sh's old order.
+// GitHub release, in that precedence, matching install.sh's old order. A
+// SOURCE binary (auto-discovered local or explicit OUROBOROS_DEV_BINARY) is
+// probed against the subcommands hooks.json references before it's copied
+// into place, so a stale local/dev binary can't clobber a working release:
+//   - auto-discovered local: stale source is SKIPPED, falls through to the
+//     release install.
+//   - OUROBOROS_DEV_BINARY: an explicit dev override is respected even if
+//     stale (the developer asked for it), but bootstrap WARNS loudly.
 async function install(env, opts) {
   env = env || process.env;
   opts = opts || {};
   const get = opts.get || httpGet;
+  const findLocal = opts.findLocalBinary || findLocalBinary;
   const pluginData = env.CLAUDE_PLUGIN_DATA;
   if (!pluginData) {
     log('cannot install: CLAUDE_PLUGIN_DATA not set');
@@ -449,13 +557,26 @@ async function install(env, opts) {
   }
   fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
 
+  // Explicitly-chosen OUROBOROS_DEV_BINARY is installed regardless of staleness
+  // (respect the developer's deliberate override), but no cooldown means re-warn
+  // and no-op-reinstall on every SessionStart until the dev rebuilds — a known
+  // dev-only limitation. A plain-missing or auto-discovered-stale local binary
+  // self-heals to the release instead.
   if (env.OUROBOROS_DEV_BINARY) {
+    const probe = probeSourceForRequiredSubcommands(env.OUROBOROS_DEV_BINARY, env);
+    if (!probe.ok) {
+      log(`dev binary ${env.OUROBOROS_DEV_BINARY} lacks '${probe.missing}' — hooks will fail; rebuild it`);
+    }
     return installDevBinary(pluginData, env.OUROBOROS_DEV_BINARY);
   }
 
-  const localBin = findLocalBinary();
+  const localBin = findLocal();
   if (localBin) {
-    return installLocalBinary(pluginData, localBin);
+    const probe = probeSourceForRequiredSubcommands(localBin, env);
+    if (probe.ok) {
+      return installLocalBinary(pluginData, localBin);
+    }
+    log(`local binary at ${localBin} is stale (lacks '${probe.missing}') — installing release instead`);
   }
 
   return installFromRelease(pluginData, get);
@@ -472,13 +593,19 @@ async function bootstrap(env, opts) {
   const pluginRoot = env.CLAUDE_PLUGIN_ROOT;
   const pluginData = env.CLAUDE_PLUGIN_DATA;
 
-  const binary = checkBinary(pluginData);
+  const binary = checkBinary(pluginData, pluginRoot);
   let repaired = false;
   let installResult = null;
   if (!binary.ok) {
     log(binary.reason);
     installResult = await install(env, opts);
     repaired = true;
+    if (binary.stale) {
+      log(
+        'binary was stale and has now been reinstalled — note that /reload-plugins alone does NOT ' +
+          'upgrade the binary; a full restart (new session) is required for a plugin upgrade to take effect.'
+      );
+    }
   }
 
   const scripts = checkHookScripts(pluginRoot);
@@ -524,6 +651,9 @@ module.exports = {
   checkBinary,
   collectHookCommands,
   extractPluginPaths,
+  extractRequiredSubcommands,
+  probeBinary,
+  probeSourceForRequiredSubcommands,
   checkHookScripts,
   checkStatusline,
   isStaleSubagentHook,

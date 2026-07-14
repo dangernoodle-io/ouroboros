@@ -79,6 +79,32 @@ function writeExecutable(p, content = '#!/usr/bin/env bash\nexit 0\n') {
   fs.chmodSync(p, 0o755);
 }
 
+// writeHooksJsonWithBinaryRef lays out <root>/hooks/hooks.json with a single
+// hook command that invokes the ouroboros binary via
+// ${CLAUDE_PLUGIN_DATA}/bin/ouroboros claude hooks <event> — the shape
+// extractRequiredSubcommands/checkBinary's stale-probe needs to derive a
+// non-empty required-subcommand set (`claude hooks`).
+function writeHooksJsonWithBinaryRef(root) {
+  fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, 'hooks', 'hooks.json'),
+    JSON.stringify({
+      hooks: {
+        PostToolUse: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: '${CLAUDE_PLUGIN_DATA}/bin/ouroboros claude hooks post-tool-use',
+              },
+            ],
+          },
+        ],
+      },
+    })
+  );
+}
+
 // buildUstarHeader constructs one valid 512-byte POSIX ustar header for a
 // regular file entry.
 function buildUstarHeader(name, size) {
@@ -396,6 +422,245 @@ test('checkBinary: not ok when CLAUDE_PLUGIN_DATA unset', () => {
   const result = bootstrap.checkBinary(undefined);
   assert.equal(result.ok, false);
   assert.match(result.reason, /CLAUDE_PLUGIN_DATA not set/);
+});
+
+// --- stale-binary detection (OU-312) ----------------------------------------
+
+test('extractRequiredSubcommands: derives `claude hooks` from a hook command referencing the binary', () => {
+  withTmpDir(tmpDir => {
+    writeHooksJsonWithBinaryRef(tmpDir);
+    const required = bootstrap.extractRequiredSubcommands(tmpDir);
+    assert.ok(required.some(p => p.join(' ') === 'claude hooks'));
+  });
+});
+
+test('extractRequiredSubcommands: derives `claude hooks` from the real plugin hooks.json', () => {
+  const pluginRoot = path.resolve(__dirname, '..');
+  const required = bootstrap.extractRequiredSubcommands(pluginRoot);
+  assert.ok(required.some(p => p.join(' ') === 'claude hooks'));
+});
+
+test('extractRequiredSubcommands: empty when no hook command references the binary', () => {
+  withTmpDir(tmpDir => {
+    buildPluginRoot(tmpDir); // SessionStart -> node bootstrap.js only, no binary ref
+    assert.deepEqual(bootstrap.extractRequiredSubcommands(tmpDir), []);
+  });
+});
+
+test('extractRequiredSubcommands: empty when pluginRoot unset or hooks.json unreadable', () => {
+  assert.deepEqual(bootstrap.extractRequiredSubcommands(undefined), []);
+  withTmpDir(tmpDir => {
+    assert.deepEqual(bootstrap.extractRequiredSubcommands(tmpDir), []); // no hooks/hooks.json at all
+  });
+});
+
+test('probeBinary: a stub exiting non-zero on the required subcommand is detected stale', () => {
+  withTmpDir(tmpDir => {
+    const binary = path.join(tmpDir, 'ouroboros');
+    writeExecutable(binary, '#!/usr/bin/env bash\nexit 1\n');
+    const result = bootstrap.probeBinary(binary, [['claude', 'hooks']]);
+    assert.equal(result.ok, false);
+    assert.equal(result.missing, 'claude hooks');
+  });
+});
+
+test('probeBinary: a stub exiting 0 on every required subcommand is current', () => {
+  withTmpDir(tmpDir => {
+    const binary = path.join(tmpDir, 'ouroboros');
+    writeExecutable(binary); // default: exit 0
+    const result = bootstrap.probeBinary(binary, [['claude', 'hooks']]);
+    assert.equal(result.ok, true);
+  });
+});
+
+test('checkBinary: stale when the binary lacks a subcommand hooks.json requires', () => {
+  withTmpDir(tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    writeHooksJsonWithBinaryRef(pluginRoot);
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
+    writeExecutable(path.join(pluginData, 'bin', 'ouroboros'), '#!/usr/bin/env bash\nexit 1\n');
+
+    const result = bootstrap.checkBinary(pluginData, pluginRoot);
+    assert.equal(result.ok, false);
+    assert.equal(result.stale, true);
+    assert.match(result.reason, /stale: binary lacks 'claude hooks'/);
+  });
+});
+
+test('checkBinary: ok when the binary supports every required subcommand', () => {
+  withTmpDir(tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    writeHooksJsonWithBinaryRef(pluginRoot);
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
+    writeExecutable(path.join(pluginData, 'bin', 'ouroboros')); // exit 0
+
+    const result = bootstrap.checkBinary(pluginData, pluginRoot);
+    assert.equal(result.ok, true);
+  });
+});
+
+test('install: stale auto-discovered local binary falls through to the release install', async () => {
+  await withTmpDir(async tmpDir => {
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    fs.mkdirSync(pluginData, { recursive: true });
+    const localBin = path.join(tmpDir, 'local-ouroboros');
+    writeExecutable(localBin, '#!/usr/bin/env bash\nexit 1\n'); // stale
+
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    writeHooksJsonWithBinaryRef(pluginRoot);
+
+    const platform = bootstrap.detectPlatform();
+    assert.ok(platform, 'test host platform must be supported (darwin/linux, amd64/arm64)');
+    const version = '9.9.7';
+    const archiveName = `ouroboros_${version}_${platform.os}_${platform.arch}.${platform.ext}`;
+    const checksumName = `ouroboros_${version}_SHA256SUMS`;
+    const binaryContent = Buffer.from('#!/bin/sh\necho release-fake\n');
+    const archiveBuf = zlib.gzipSync(buildTar('ouroboros', binaryContent));
+    const checksumBuf = Buffer.from(sha256sumsLine(archiveBuf, archiveName));
+    const get = fakeReleaseGet({ tag: `v${version}`, archiveName, archiveBuf, checksumName, checksumBuf });
+
+    const result = await bootstrap.install(
+      { CLAUDE_PLUGIN_DATA: pluginData, CLAUDE_PLUGIN_ROOT: pluginRoot },
+      { get, findLocalBinary: () => localBin }
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.version, version);
+    assert.deepEqual(fs.readFileSync(path.join(pluginData, 'bin', 'ouroboros')), binaryContent);
+  });
+});
+
+test('install: a current auto-discovered local binary is still installed directly (no fall-through)', async () => {
+  await withTmpDir(async tmpDir => {
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    fs.mkdirSync(pluginData, { recursive: true });
+    const localBin = path.join(tmpDir, 'local-ouroboros');
+    writeExecutable(localBin, '#!/usr/bin/env bash\nexit 0\n');
+
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    writeHooksJsonWithBinaryRef(pluginRoot);
+
+    const get = async () => {
+      throw new Error('release should not be fetched when local binary is current');
+    };
+
+    const result = await bootstrap.install(
+      { CLAUDE_PLUGIN_DATA: pluginData, CLAUDE_PLUGIN_ROOT: pluginRoot },
+      { get, findLocalBinary: () => localBin }
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.version, 'local');
+  });
+});
+
+test('install: a stale OUROBOROS_DEV_BINARY still installs, but warns loudly', async () => {
+  await withTmpDir(async tmpDir => {
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    fs.mkdirSync(pluginData, { recursive: true });
+    const devBinary = path.join(tmpDir, 'dev-ouroboros');
+    writeExecutable(devBinary, '#!/usr/bin/env bash\nexit 1\n'); // stale
+
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    writeHooksJsonWithBinaryRef(pluginRoot);
+
+    const originalError = console.error;
+    const logs = [];
+    console.error = (...args) => logs.push(args.join(' '));
+    let result;
+    try {
+      result = await bootstrap.install({
+        CLAUDE_PLUGIN_DATA: pluginData,
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+        OUROBOROS_DEV_BINARY: devBinary,
+      });
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(result.ok, true);
+    assert.equal(fs.readFileSync(path.join(pluginData, '.version'), 'utf8'), 'dev');
+    assert.ok(logs.some(l => /lacks 'claude hooks'/.test(l)));
+  });
+});
+
+test('bootstrap: a stale-but-executable binary triggers install() and is repaired', async () => {
+  await withTmpDir(async tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    writeHooksJsonWithBinaryRef(pluginRoot);
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
+    writeExecutable(path.join(pluginData, 'bin', 'ouroboros'), '#!/usr/bin/env bash\nexit 1\n');
+    const devBinary = path.join(tmpDir, 'dev-ouroboros');
+    writeExecutable(devBinary, 'dev-bytes');
+    const configDir = path.join(tmpDir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+
+    const result = await bootstrap.bootstrap({
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
+      CLAUDE_PLUGIN_DATA: pluginData,
+      CLAUDE_CONFIG_DIR: configDir,
+      OUROBOROS_DEV_BINARY: devBinary,
+    });
+    assert.equal(result.binary.ok, false);
+    assert.equal(result.binary.stale, true);
+    assert.equal(result.repaired, true);
+    assert.equal(result.installResult.ok, true);
+    assert.equal(fs.readFileSync(path.join(pluginData, '.version'), 'utf8'), 'dev');
+  });
+});
+
+test('CLI: logs the actionable stale-repair message (restart, not /reload-plugins) when the binary was stale', () => {
+  withTmpDir(tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    writeHooksJsonWithBinaryRef(pluginRoot);
+    const pluginData = path.join(tmpDir, 'plugin-data');
+    fs.mkdirSync(path.join(pluginData, 'bin'), { recursive: true });
+    writeExecutable(path.join(pluginData, 'bin', 'ouroboros'), '#!/usr/bin/env bash\nexit 1\n');
+    const devBinary = path.join(tmpDir, 'dev-ouroboros');
+    writeExecutable(devBinary, 'dev-bytes');
+    const configDir = path.join(tmpDir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+
+    const result = spawnSync('node', [scriptPath], {
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+        CLAUDE_PLUGIN_DATA: pluginData,
+        CLAUDE_CONFIG_DIR: configDir,
+        OUROBOROS_DEV_BINARY: devBinary,
+      },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stderr, /stale: binary lacks 'claude hooks'/);
+    assert.match(result.stderr, /full restart/i);
+    assert.match(result.stderr, /\/reload-plugins/);
+  });
+});
+
+test('bootstrap: a plain missing binary (not stale) does not log the stale-repair message', () => {
+  withTmpDir(tmpDir => {
+    const pluginRoot = path.join(tmpDir, 'plugin-root');
+    writeHooksJsonWithBinaryRef(pluginRoot);
+    const pluginData = path.join(tmpDir, 'plugin-data'); // bin/ouroboros absent entirely
+    const devBinary = path.join(tmpDir, 'dev-ouroboros');
+    writeExecutable(devBinary, 'dev-bytes');
+    const configDir = path.join(tmpDir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+
+    const result = spawnSync('node', [scriptPath], {
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+        CLAUDE_PLUGIN_DATA: pluginData,
+        CLAUDE_CONFIG_DIR: configDir,
+        OUROBOROS_DEV_BINARY: devBinary,
+      },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.stderr, /full restart/i);
+  });
 });
 
 test('checkHookScripts: ok when every referenced script exists', () => {

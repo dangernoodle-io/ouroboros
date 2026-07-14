@@ -24,6 +24,10 @@ Project knowledge base and backlog management for Claude Code. Persist decisions
 - **PostToolUse Edit/Write** — flag related KB entries for review
 - **Stop** — final auto-persist or nudge on turn end
 
+## Upgrading
+
+After the marketplace bumps its `ouroboros-mcp` ref (or you pull a new plugin version), do a **full restart** (new Claude Code session) — SessionStart runs `bootstrap.js`, which installs the matching binary. `/reload-plugins` alone reloads `hooks.json` but does **not** upgrade the binary, and can transiently break hooks (`unknown command "claude"`) until you restart. Startup/resume self-heals: `bootstrap.js` detects a stale binary (one missing a subcommand `hooks.json` references) and reinstalls automatically.
+
 ## Configuration
 
 - `OUROBOROS_DEV_BINARY` — path to local dev binary (bypasses GitHub download)
