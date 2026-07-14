@@ -198,7 +198,10 @@ func runHookUserPromptSubmit(p hooks.UserPromptSubmitPayload, db *sql.DB) hooks.
 	for _, r := range rows {
 		lines = append(lines, "  ["+r.Type+"] "+r.Title)
 	}
-	lines = append(lines, "if a decision or fact is worth persisting, call the kb tool for project "+project+" (then search to confirm it landed); otherwise say nothing")
+	// OU-198: the per-prompt persist-contract reminder was removed here —
+	// serverInstructions (internal/app/serverv2.go) already states the
+	// contract once, at session init, rather than repeating it on every
+	// qualifying prompt.
 
 	if intent == "resume" {
 		if backlogLines := upcBacklogLines(db, project); len(backlogLines) > 0 {
