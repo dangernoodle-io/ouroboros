@@ -4,7 +4,7 @@
       "annotations": {
         "destructiveHint": true
       },
-      "description": "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. On update, notes replaces; set append_notes=true to append instead (update-only). Reads live under get/search domain=backlog.",
+      "description": "Create/update/delete backlog items via entries[] (id = update, else create) or delete_ids[]. Read via get/search domain=backlog.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -19,7 +19,7 @@
             ]
           },
           "entries": {
-            "description": "Items to create/update: {id?}, project, priority, title, description?, notes?, append_notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent",
+            "description": "Backlog items to create (id absent) or update in place (id present).",
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -123,12 +123,12 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Fetch entries by ID or filters (required domain: kb|backlog|roadmap). ids[] returns exact matches; omit ids for a filtered list.",
+      "description": "Fetch entries by id or filters (required domain: kb|backlog|roadmap). ids[] = exact matches; omit for a filtered list.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "by": {
-            "description": "Grouping axis: \"component\" (default) or \"epic\"; the other axis renders as an inline chip (roadmap get format=md|html only)",
+            "description": "Grouping axis: component (default) or epic (roadmap md/html only); other axis shown inline",
             "type": "string"
           },
           "categories": {
@@ -142,7 +142,7 @@
             ]
           },
           "component": {
-            "description": "Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)",
+            "description": "Component tag filter (backlog subproject/plugin; roadmap grouping axis)",
             "type": "string"
           },
           "domain": {
@@ -150,11 +150,11 @@
             "type": "string"
           },
           "epic": {
-            "description": "Epic backlog item id filter — that epic's children (backlog, roadmap; single-valued — an epic IS a backlog item, see the EPIC: convention)",
+            "description": "Epic item id filter — its children (backlog/roadmap)",
             "type": "string"
           },
           "epics_only": {
-            "description": "List only epic items, EPIC:-titled (backlog only); takes precedence over epic",
+            "description": "List only epics (backlog only); overrides epic",
             "type": "boolean"
           },
           "format": {
@@ -196,7 +196,7 @@
             "type": "string"
           },
           "since": {
-            "description": "Created-time window for backlog items: a duration (24h, 7d), a date (2006-01-02), or an RFC3339 timestamp (backlog only)",
+            "description": "Created-at cutoff (backlog only): duration (24h, 7d), date (2006-01-02), or RFC3339",
             "type": "string"
           },
           "sort": {
@@ -228,7 +228,7 @@
             ]
           },
           "verbose": {
-            "description": "Include notes on ids[] fetch only, default false; filter/list results are always compact regardless",
+            "description": "Include notes (ids[] fetch only), default false",
             "type": "boolean"
           }
         },
@@ -240,12 +240,12 @@
       "annotations": {
         "idempotentHint": true
       },
-      "description": "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. On update, notes replaces; set append_notes=true to append instead (update-only). Reads live under get/search domain=kb.",
+      "description": "Create/update knowledge entries via entries[]: with id updates that doc in place (partial), else upserts by type+project+category+title. content [[Title]] autolinks create explains edges. Read via get/search domain=kb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "entries": {
-            "description": "Documents to create/update: {id?}, type, project, category?, title, content, notes?, append_notes?, tags?, metadata?. content max 500 chars; put narrative in notes",
+            "description": "KB docs to create (id absent) or update in place (id present). content max 500 chars; put narrative in notes",
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -327,7 +327,7 @@
       "annotations": {
         "destructiveHint": true
       },
-      "description": "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done sections) via op=add|update|move|reorder|done|remove. Items carry two single-valued grouping axes: component (structural) and epic (optional; an epic IS a backlog item). Reads live under get/search domain=roadmap.",
+      "description": "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done) via op=add|update|move|reorder|done|remove. Items group by component and epic (both single-valued). Read via get/search domain=roadmap.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -457,7 +457,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes).",
+      "description": "Full-text search (required domain: kb|backlog|roadmap). kb takes query or batched queries[]; backlog/roadmap take one query.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -472,7 +472,7 @@
             ]
           },
           "component": {
-            "description": "Component tag filter (backlog: subproject/plugin; roadmap: structural grouping axis, single-valued)",
+            "description": "Component tag filter (backlog subproject/plugin; roadmap grouping axis)",
             "type": "string"
           },
           "domain": {
@@ -480,11 +480,11 @@
             "type": "string"
           },
           "epic": {
-            "description": "Epic backlog item id filter — that epic's children (backlog, roadmap; single-valued — an epic IS a backlog item, see the EPIC: convention)",
+            "description": "Epic item id filter — its children (backlog/roadmap)",
             "type": "string"
           },
           "epics_only": {
-            "description": "List only epic items, EPIC:-titled (backlog only); takes precedence over epic",
+            "description": "List only epics (backlog only); overrides epic",
             "type": "boolean"
           },
           "limit": {
@@ -524,7 +524,7 @@
             "type": "string"
           },
           "since": {
-            "description": "Created-time window for backlog items: a duration (24h, 7d), a date (2006-01-02), or an RFC3339 timestamp (backlog only)",
+            "description": "Created-at cutoff (backlog only): duration (24h, 7d), date (2006-01-02), or RFC3339",
             "type": "string"
           },
           "sort": {
