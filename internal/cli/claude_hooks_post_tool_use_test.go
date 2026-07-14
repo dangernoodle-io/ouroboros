@@ -336,6 +336,29 @@ func TestRunPostEditCheck_MalformedToolInput_Silent(t *testing.T) {
 	assert.Empty(t, out)
 }
 
+// --- NotebookEdit: notebook_path fallback (OU-306) --------------------------
+
+func TestRunPostEditCheck_NotebookEdit_UsesNotebookPath(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	filePath := postEditGitRepo(t, "analysis.ipynb")
+	seedKbDoc(t, db, "ouroboros", "analysis notebook needs a data refresh")
+
+	data, err := json.Marshal(map[string]string{"notebook_path": filePath})
+	require.NoError(t, err)
+
+	p := hooks.PostToolUsePayload{
+		Common:    hooks.Common{SessionID: "sess_notebook"},
+		ToolName:  "NotebookEdit",
+		ToolInput: data,
+	}
+
+	out := captureStderr(t, func() { runPostEditCheck(p, db) })
+	assert.Contains(t, out, "[ouroboros] KB refs analysis.ipynb:")
+	assert.Contains(t, out, "analysis notebook needs a data refresh")
+	assert.Contains(t, out, "check staleness")
+}
+
 func TestPostEditCheckFileHash_DifferentPaths_DifferentHashes(t *testing.T) {
 	h1 := postEditCheckFileHash("/a/b/crud.go")
 	h2 := postEditCheckFileHash("/a/b/store.go")
