@@ -561,6 +561,43 @@ func TestUpdateDocument_NonexistentID_NoFields_Errors(t *testing.T) {
 	assert.Nil(t, doc)
 }
 
+// TestGetDocumentTx_Found verifies GetDocumentTx reads an existing document
+// within a caller-owned transaction (the read-modify-write seam used by
+// append_notes).
+func TestGetDocumentTx_Found(t *testing.T) {
+	db := testDB(t)
+
+	result, err := store.UpsertDocument(db, store.Document{
+		Type: "note", Project: "acme-corp", Title: "tx-get", Content: "hello",
+	})
+	require.NoError(t, err)
+	id := result.ID
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	doc, err := store.GetDocumentTx(tx, id)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	assert.Equal(t, "tx-get", doc.Title)
+	assert.Equal(t, "hello", doc.Content)
+	require.NoError(t, tx.Commit())
+}
+
+// TestGetDocumentTx_NotFound verifies GetDocumentTx errors on a nonexistent
+// id (must-exist read-modify-write contract), unlike GetDocument/
+// GetDocumentByKeyTx's "miss is silent" (nil, nil) convention.
+func TestGetDocumentTx_NotFound(t *testing.T) {
+	db := testDB(t)
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	doc, err := store.GetDocumentTx(tx, 999999)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "document 999999 not found")
+	assert.Nil(t, doc)
+	require.NoError(t, tx.Commit())
+}
+
 func TestUpdateDocumentTx_CommitsWithCaller(t *testing.T) {
 	db := testDB(t)
 

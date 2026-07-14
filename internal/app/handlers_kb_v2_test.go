@@ -161,6 +161,23 @@ func TestHandleKBV2UpdateByID_NonexistentID_Errors(t *testing.T) {
 	assert.True(t, res.IsError)
 }
 
+// TestHandleKBV2UpdateByID_NonexistentID_AppendNotesErrors is a regression
+// test for a nil-deref panic: append_notes against a nonexistent id must
+// return a clean error result, not panic, and must not write anything.
+func TestHandleKBV2UpdateByID_NonexistentID_AppendNotesErrors(t *testing.T) {
+	resetDB(t)
+
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{ID: float64(999999), Notes: strPtrV2("acme-corp addendum"), AppendNotes: true},
+	}})
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+
+	docs, err := store.QueryDocuments(db, nil, []string{"acme-corp"}, nil, "", nil, 50)
+	require.NoError(t, err)
+	assert.Empty(t, docs)
+}
+
 // TestHandleKBV2UpdateByID_MixedBatch mirrors TestHandleKBUpdateByID_MixedBatch:
 // a single entries[] call mixes a create and an update.
 func TestHandleKBV2UpdateByID_MixedBatch(t *testing.T) {
@@ -431,4 +448,138 @@ func TestHandleKBV2UpdateByID_EmptyContentRejected(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	assert.True(t, res.IsError)
+}
+
+// TestHandleKBV2UpdateAppendNotes verifies append_notes concatenates onto
+// existing non-empty notes, \n\n-separated (OU-299), on an id-addressed
+// update.
+func TestHandleKBV2UpdateAppendNotes(t *testing.T) {
+	resetDB(t)
+
+	createRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("t"), Content: strPtrV2("v1"), Notes: strPtrV2("existing note")},
+	}})
+	require.NoError(t, err)
+	var createResp []kb.PutResult
+	require.NoError(t, jsonUnmarshalText(createRes, &createResp))
+	id := createResp[0].ID
+
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{ID: float64(id), Notes: strPtrV2("new note"), AppendNotes: true},
+	}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	docs, err := store.GetDocuments(db, []int64{id})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, "existing note\n\nnew note", docs[0].Notes)
+}
+
+// TestHandleKBV2UpdateAppendNotes_OmittedOrEmpty_Unchanged verifies
+// append_notes with no notes text (omitted or "") is a no-op.
+func TestHandleKBV2UpdateAppendNotes_OmittedOrEmpty_Unchanged(t *testing.T) {
+	resetDB(t)
+
+	createRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("t"), Content: strPtrV2("v1"), Notes: strPtrV2("keep me")},
+	}})
+	require.NoError(t, err)
+	var createResp []kb.PutResult
+	require.NoError(t, jsonUnmarshalText(createRes, &createResp))
+	id := createResp[0].ID
+
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{ID: float64(id), AppendNotes: true, Title: strPtrV2("touch other field")},
+	}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	docs, err := store.GetDocuments(db, []int64{id})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, "keep me", docs[0].Notes, "append_notes with omitted notes must preserve")
+
+	res, _, err = handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{ID: float64(id), Notes: strPtrV2(""), AppendNotes: true},
+	}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	docs, err = store.GetDocuments(db, []int64{id})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, "keep me", docs[0].Notes, "append_notes with empty notes must preserve, not append-of-empty")
+}
+
+// TestHandleKBV2UpdateNotesDefaultReplace verifies the default
+// (append_notes absent) behavior is unchanged: notes replaces in place.
+func TestHandleKBV2UpdateNotesDefaultReplace(t *testing.T) {
+	resetDB(t)
+
+	createRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("t"), Content: strPtrV2("v1"), Notes: strPtrV2("old note")},
+	}})
+	require.NoError(t, err)
+	var createResp []kb.PutResult
+	require.NoError(t, jsonUnmarshalText(createRes, &createResp))
+	id := createResp[0].ID
+
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{ID: float64(id), Notes: strPtrV2("replaced note")},
+	}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	docs, err := store.GetDocuments(db, []int64{id})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, "replaced note", docs[0].Notes)
+}
+
+// TestHandleKBV2UpdateClearNotes_Regression is the OU-299 regression test:
+// kb's pointer-nil clear semantics for notes must still work after the
+// append_notes addition (empty string clears, omitted preserves).
+func TestHandleKBV2UpdateClearNotes_Regression(t *testing.T) {
+	resetDB(t)
+
+	createRes, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("t"), Content: strPtrV2("v1"), Notes: strPtrV2("some notes")},
+	}})
+	require.NoError(t, err)
+	var createResp []kb.PutResult
+	require.NoError(t, jsonUnmarshalText(createRes, &createResp))
+	id := createResp[0].ID
+
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{ID: float64(id), Notes: strPtrV2("")},
+	}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	docs, err := store.GetDocuments(db, []int64{id})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Empty(t, docs[0].Notes, "empty notes must still clear")
+}
+
+// TestHandleKBV2Create_AppendNotesIgnored verifies append_notes has no
+// effect on the create/natural-key-upsert path: notes is set as provided,
+// with no crash and no attempted fetch of a nonexistent row.
+func TestHandleKBV2Create_AppendNotesIgnored(t *testing.T) {
+	resetDB(t)
+
+	res, _, err := handleKBV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, kbInput{Entries: []kbEntryInput{
+		{Type: strPtrV2("fact"), Project: strPtrV2("acme-corp"), Title: strPtrV2("t"), Content: strPtrV2("v1"), Notes: strPtrV2("fresh note"), AppendNotes: true},
+	}})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	var resp []kb.PutResult
+	require.NoError(t, jsonUnmarshalText(res, &resp))
+	require.Len(t, resp, 1)
+	assert.Equal(t, "created", resp[0].Action)
+
+	docs, err := store.GetDocuments(db, []int64{resp[0].ID})
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	assert.Equal(t, "fresh note", docs[0].Notes)
 }

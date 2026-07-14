@@ -66,6 +66,21 @@ func buildEdgeSpecsV2(in []edgeInput) ([]edgeSpec, error) {
 	return specs, nil
 }
 
+// appendBacklogNotes fetches the item's current notes within tx (the
+// caller's shared transaction -- no second tx, avoiding a TOCTOU race with
+// the field update that follows) and returns them with addition appended,
+// \n\n-separated (no leading separator when existing notes are empty).
+func appendBacklogNotes(tx *sql.Tx, id, addition string) (string, error) {
+	current, err := backlog.GetItem(tx, id)
+	if err != nil {
+		return "", err
+	}
+	if current.Notes == "" {
+		return addition, nil
+	}
+	return current.Notes + "\n\n" + addition, nil
+}
+
 // handleBacklogEntriesV2 is handleBacklogEntries' typed-input counterpart:
 // processes entries[] (mixed create/update) inside ONE shared transaction,
 // reproducing handleBacklogEntries' behavior exactly (see its comment for
@@ -102,15 +117,40 @@ func handleBacklogEntriesV2(db *sql.DB, entries []backlogEntryInput) (*mcpx.Call
 
 			fields := make(map[string]string)
 			for key, v := range map[string]*string{
-				"priority":    e.Priority,
-				"title":       e.Title,
-				"description": e.Description,
-				"notes":       e.Notes,
-				"status":      e.Status,
+				"priority": e.Priority,
+				"title":    e.Title,
+				"status":   e.Status,
 			} {
 				if v != nil && *v != "" {
 					fields[key] = *v
 				}
+			}
+			// description is clear-aware (nil=preserve, ""=clear, text=replace)
+			// -- unlike priority/title/status above, an explicit empty string
+			// is a real value here, not "not provided" (fixes the
+			// can't-clear-description quirk).
+			if e.Description != nil {
+				fields["description"] = *e.Description
+			}
+			// notes is clear-aware like description, EXCEPT when append_notes
+			// is set: then notes text (if any) is appended to the existing
+			// value inside this same tx (read-modify-write, no second tx) via
+			// appendBacklogNotes, rather than replacing it. append_notes with
+			// omitted/empty notes is a no-op (nothing to append) -- it must
+			// NOT clear, unlike the default (non-append) empty-string case.
+			switch {
+			case e.Notes == nil:
+				// omitted -> preserve, nothing to do.
+			case e.AppendNotes:
+				if *e.Notes != "" {
+					appended, err := appendBacklogNotes(tx, entryID, *e.Notes)
+					if err != nil {
+						return mcpx.ErrorResult(err.Error()), nil, nil
+					}
+					fields["notes"] = appended
+				}
+			default:
+				fields["notes"] = *e.Notes
 			}
 			// component/epic are single-valued -- an absent/empty *string
 			// means "no change" (matches the old handler's scalarStringArg

@@ -48,7 +48,7 @@ type kbInput struct {
 	// schema validation before handleKBV2 ever runs, with a generic
 	// schema-validation error instead of that message. The handler performs
 	// its own explicit len(in.Entries)==0 check instead.
-	Entries []kbEntryInput `json:"entries,omitempty" jsonschema:"Documents to create/update: {id?}, type, project, category?, title, content, notes?, tags?, metadata?. content max 500 chars; put narrative in notes"`
+	Entries []kbEntryInput `json:"entries,omitempty" jsonschema:"Documents to create/update: {id?}, type, project, category?, title, content, notes?, append_notes?, tags?, metadata?. content max 500 chars; put narrative in notes"`
 }
 
 // kbEntryInput uses POINTER fields (except ID, see below) for presence: a
@@ -97,15 +97,16 @@ type kbInput struct {
 // schema inference the same way the deleted struct-based kbID probe did,
 // see ID's comment above) -- tracked for the OU-5 cutover decision.
 type kbEntryInput struct {
-	ID       any                `json:"id,omitempty" jsonschema:"Document id (integer or numeric string) to update in place; omit to create/upsert by type+project+category+title"`
-	Type     *string            `json:"type,omitempty"`
-	Project  *string            `json:"project,omitempty"`
-	Category *string            `json:"category,omitempty"`
-	Title    *string            `json:"title,omitempty"`
-	Content  *string            `json:"content,omitempty"`
-	Notes    *string            `json:"notes,omitempty"`
-	Tags     *[]string          `json:"tags,omitempty"`
-	Metadata *map[string]string `json:"metadata,omitempty"`
+	ID          any                `json:"id,omitempty" jsonschema:"Document id (integer or numeric string) to update in place; omit to create/upsert by type+project+category+title"`
+	Type        *string            `json:"type,omitempty"`
+	Project     *string            `json:"project,omitempty"`
+	Category    *string            `json:"category,omitempty"`
+	Title       *string            `json:"title,omitempty"`
+	Content     *string            `json:"content,omitempty"`
+	Notes       *string            `json:"notes,omitempty"`
+	AppendNotes bool               `json:"append_notes,omitempty" jsonschema:"Append notes to the existing value instead of replacing (update-only; ignored on create)"`
+	Tags        *[]string          `json:"tags,omitempty"`
+	Metadata    *map[string]string `json:"metadata,omitempty"`
 }
 
 // backlogInput is the mcpkit-typed input for the backlog write tool (OU-3):
@@ -121,7 +122,7 @@ type backlogInput struct {
 	// schema-validated entries as required, an omitted key would fail
 	// schema validation before handleBacklogV2 ever runs. The handler
 	// performs its own explicit "neither present" check instead.
-	Entries   []backlogEntryInput `json:"entries,omitempty" jsonschema:"Items to create/update: {id?}, project, priority, title, description?, notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent"`
+	Entries   []backlogEntryInput `json:"entries,omitempty" jsonschema:"Items to create/update: {id?}, project, priority, title, description?, notes?, append_notes?, component?, epic?, status?, edges?[{label,target}] (label: blocks|relates|explains, target: item id). description max 500 chars; put narrative in notes. epic may be \"$N\": the item created/updated by entries[N] earlier in this same write, so a child can reference its not-yet-created epic parent"`
 	DeleteIDs []string            `json:"delete_ids,omitempty" jsonschema:"Item IDs to delete"`
 }
 
@@ -165,6 +166,7 @@ type backlogEntryInput struct {
 	Title       *string     `json:"title,omitempty"`
 	Description *string     `json:"description,omitempty" jsonschema:"Max 500 chars; put narrative in notes"`
 	Notes       *string     `json:"notes,omitempty"`
+	AppendNotes bool        `json:"append_notes,omitempty" jsonschema:"Append notes to the existing value instead of replacing (update-only; ignored on create)"`
 	Component   *string     `json:"component,omitempty" jsonschema:"Single-valued component tag"`
 	Epic        *string     `json:"epic,omitempty" jsonschema:"Epic backlog item id, single-valued; may be \"$N\", a back-reference to entries[N] earlier in this same write"`
 	Status      *string     `json:"status,omitempty"`

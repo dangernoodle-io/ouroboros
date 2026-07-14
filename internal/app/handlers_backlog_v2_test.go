@@ -902,3 +902,189 @@ func TestHandleBacklogV2NoEntriesOrDeleteIDs_Errors(t *testing.T) {
 	assert.True(t, res.IsError)
 	assert.Equal(t, errBacklogEntriesOrDeleteIDsRequired, mcpx.ResultText(res))
 }
+
+// TestHandleBacklogV2UpdateAppendNotes verifies append_notes concatenates
+// onto existing non-empty notes, \n\n-separated (OU-299).
+func TestHandleBacklogV2UpdateAppendNotes(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "existing note", "", "")
+	require.NoError(t, err)
+
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item.ID), Notes: strPtrV2("new note"), AppendNotes: true},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "existing note\n\nnew note", updated.Notes)
+}
+
+// TestHandleBacklogV2UpdateAppendNotes_NonexistentID_Errors verifies
+// append_notes against a nonexistent backlog id returns a clean error
+// result (via appendBacklogNotes' GetItem error) and rolls back the batch,
+// not a nil-deref.
+func TestHandleBacklogV2UpdateAppendNotes_NonexistentID_Errors(t *testing.T) {
+	resetAllDB(t)
+
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2("999999"), Notes: strPtrV2("orphan note"), AppendNotes: true},
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, res.IsError)
+
+	_, err = backlog.GetItem(db, "999999")
+	assert.Error(t, err)
+}
+
+// TestHandleBacklogV2UpdateAppendNotes_OntoEmpty verifies appending onto an
+// item with no prior notes leaves no leading separator.
+func TestHandleBacklogV2UpdateAppendNotes_OntoEmpty(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "", "", "")
+	require.NoError(t, err)
+
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item.ID), Notes: strPtrV2("first note"), AppendNotes: true},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "first note", updated.Notes)
+}
+
+// TestHandleBacklogV2UpdateAppendNotes_OmittedOrEmpty_Unchanged verifies
+// append_notes with no notes text (omitted or "") is a no-op, not a clear.
+func TestHandleBacklogV2UpdateAppendNotes_OmittedOrEmpty_Unchanged(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task 1", "", "keep me", "", "")
+	require.NoError(t, err)
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item.ID), AppendNotes: true, Title: strPtrV2("touch other field")},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "keep me", updated.Notes, "append_notes with omitted notes must preserve")
+
+	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task 2", "", "keep me too", "", "")
+	require.NoError(t, err)
+	res, _, err = handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item2.ID), Notes: strPtrV2(""), AppendNotes: true},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	updated2, err := backlog.GetItem(db, item2.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "keep me too", updated2.Notes, "append_notes with empty notes must preserve, not append-of-empty")
+}
+
+// TestHandleBacklogV2UpdateNotesDefaultReplace verifies the default
+// (append_notes absent) behavior is unchanged: notes replaces in place.
+func TestHandleBacklogV2UpdateNotesDefaultReplace(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "", "old note", "", "")
+	require.NoError(t, err)
+
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item.ID), Notes: strPtrV2("replaced note")},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "replaced note", updated.Notes)
+}
+
+// TestHandleBacklogV2UpdateClearNotesAndDescription is the OU-299 regression
+// test for the can't-clear quirk: an explicit empty string for notes or
+// description must clear the field, not be silently dropped; omitted fields
+// still preserve, and priority (a non-clearable field) still no-ops on "".
+func TestHandleBacklogV2UpdateClearNotesAndDescription(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "Task", "some description", "some notes", "", "")
+	require.NoError(t, err)
+
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item.ID), Notes: strPtrV2(""), Description: strPtrV2(""), Priority: strPtrV2("")},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Empty(t, updated.Notes, "empty notes must clear")
+	assert.Empty(t, updated.Description, "empty description must clear")
+	assert.Equal(t, "P1", updated.Priority, "empty priority is a no-op, not a clear")
+
+	// Omitted notes/description on a subsequent update must preserve, not
+	// re-clear (they're already empty here, but this exercises the nil
+	// branch explicitly).
+	res, _, err = handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item.ID), Title: strPtrV2("touch unrelated field")},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	final, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Empty(t, final.Notes)
+	assert.Empty(t, final.Description)
+}
+
+// TestHandleBacklogV2Create_AppendNotesIgnored verifies append_notes has no
+// effect on the create path (no id): notes is set as provided, no crash.
+func TestHandleBacklogV2Create_AppendNotesIgnored(t *testing.T) {
+	resetAllDB(t)
+
+	_, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{Project: strPtrV2("acme-corp"), Priority: strPtrV2("P1"), Title: strPtrV2("new item"), Notes: strPtrV2("fresh note"), AppendNotes: true},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	item, err := backlog.GetItem(db, "AC-1")
+	require.NoError(t, err)
+	assert.Equal(t, "fresh note", item.Notes)
+}

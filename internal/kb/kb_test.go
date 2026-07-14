@@ -832,6 +832,65 @@ func TestUpdateBatch_Empty_NoResults(t *testing.T) {
 	assert.Empty(t, results)
 }
 
+// TestUpdateBatch_AppendNotes_OntoExisting verifies AppendNotes joins new
+// text onto an existing document's notes with a blank-line separator,
+// through the full UpdateBatch path (updateEntriesTx's append branch).
+func TestUpdateBatch_AppendNotes_OntoExisting(t *testing.T) {
+	db := testDB(t)
+
+	created, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "note", Project: "acme-corp", Title: "append-onto-existing", Content: "c", Notes: "first note"},
+	}, "")
+	require.NoError(t, err)
+	id := created[0].ID
+
+	results, err := kb.UpdateBatch(db, []kb.EntryUpdate{
+		{ID: id, Notes: strPtr("second note"), AppendNotes: true},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	full, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "first note\n\nsecond note", full.Notes)
+}
+
+// TestUpdateBatch_AppendNotes_OntoEmpty verifies AppendNotes onto a document
+// with no prior notes leaves no leading separator.
+func TestUpdateBatch_AppendNotes_OntoEmpty(t *testing.T) {
+	db := testDB(t)
+
+	created, err := kb.WriteBatch(db, []kb.Entry{
+		{Type: "note", Project: "acme-corp", Title: "append-onto-empty", Content: "c"},
+	}, "")
+	require.NoError(t, err)
+	id := created[0].ID
+
+	results, err := kb.UpdateBatch(db, []kb.EntryUpdate{
+		{ID: id, Notes: strPtr("only note"), AppendNotes: true},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	full, err := store.GetDocument(db, id)
+	require.NoError(t, err)
+	assert.Equal(t, "only note", full.Notes)
+}
+
+// TestUpdateBatch_AppendNotes_NonexistentID_Errors exercises
+// updateEntriesTx's nil-guard: an append_notes fetch against a nonexistent
+// id must fail with the "document %d not found" error, not a nil-deref.
+func TestUpdateBatch_AppendNotes_NonexistentID_Errors(t *testing.T) {
+	db := testDB(t)
+
+	results, err := kb.UpdateBatch(db, []kb.EntryUpdate{
+		{ID: 999999, Notes: strPtr("orphan note"), AppendNotes: true},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "document 999999 not found")
+	assert.Nil(t, results)
+}
+
 // TestWriteAndUpdateBatch_MixedHappyPath verifies a single call can mix a
 // create (id absent) and an update (id present), both committing together.
 func TestWriteAndUpdateBatch_MixedHappyPath(t *testing.T) {

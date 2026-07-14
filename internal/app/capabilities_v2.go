@@ -11,8 +11,8 @@ import (
 const (
 	descGetToolV2     = "Fetch entries by ID or filters (required domain: kb|backlog|roadmap). ids[] returns exact matches; omit ids for a filtered list."
 	descSearchToolV2  = "Full-text search over entries (required domain: kb|backlog|roadmap). domain=kb supports query or a batched queries[]; domain=backlog/roadmap take a single query (backlog: title/description/notes)."
-	descKBToolV2      = "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. Reads live under get/search domain=kb."
-	descBacklogToolV2 = "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. Reads live under get/search domain=backlog."
+	descKBToolV2      = "Create or update knowledge entries via entries[]: id present = update that doc in place (partial, e.g. retitle without creating a duplicate), else upsert by type+project+category+title. content supports [[Title]] autolinks (an item id or a same-project KB title) creating explains edges. On update, notes replaces; set append_notes=true to append instead (update-only). Reads live under get/search domain=kb."
+	descBacklogToolV2 = "Create, update, or delete backlog items: entries[] (id present = update, else create) or delete_ids[]. On update, notes replaces; set append_notes=true to append instead (update-only). Reads live under get/search domain=backlog."
 	descRoadmapToolV2 = "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done sections) via op=add|update|move|reorder|done|remove. Items carry two single-valued grouping axes: component (structural) and epic (optional; an epic IS a backlog item). Reads live under get/search domain=roadmap."
 )
 
