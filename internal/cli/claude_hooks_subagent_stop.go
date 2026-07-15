@@ -90,7 +90,7 @@ func runHookSubagentStop(p hooks.SubagentStopPayload, db *sql.DB) hooks.Response
 	_, warnings, foundAnyBlock := persistAllKbBlocksInMessage(message, db, "subagent", agentIDShort, "subagent_stop", p.SessionID, project, extraMeta)
 	if foundAnyBlock {
 		if len(warnings) > 0 {
-			return hooks.Response{SystemMessage: "[ouroboros] " + strings.Join(warnings, "; ") + " — persist reliably by calling the kb tool, then search to confirm."}
+			return hooks.Response{SystemMessage: "[ouroboros] " + strings.Join(warnings, "; ") + " — persist reliably by calling the kb tool, then query to confirm."}
 		}
 		return hooks.Response{}
 	}

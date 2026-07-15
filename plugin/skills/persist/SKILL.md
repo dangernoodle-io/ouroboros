@@ -20,7 +20,7 @@ description: Scan conversation for decisions, facts, notes, and plans worth pers
      ```
    - `plan` — implementation plans discussed or deferred; terse step list in `content`, narrative in `notes`
 
-3. **Search before kb.** Collect all candidate titles, then call `search` once with `queries: [title1, title2, ...]` and `projects: ["<project>"]`. The response is positional — `results[i]` corresponds to `queries[i]`. If a matching entry exists for the same project, reuse its title verbatim — the server upserts on `type+project+category+title`. Only skip if existing content is already identical.
+3. **Search before kb.** Collect all candidate titles, then call `query` once with `queries: [title1, title2, ...]` and `projects: ["<project>"]`. The response is positional — `results[i]` corresponds to `queries[i]`. If a matching entry exists for the same project, reuse its title verbatim — the server upserts on `type+project+category+title`. Only skip if existing content is already identical.
 
 4. **Store via `kb`** with these fields:
    - `type`, `project`, `title` (concise, searchable — used as the upsert key). If step 3 found a near-match needing a retitle or correction (e.g. fixing an earlier duplicate) rather than a fresh entry, pass that entry's `id` to update it in place instead of creating another one.
