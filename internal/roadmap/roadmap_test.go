@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 	"dangernoodle.io/ouroboros/internal/store"
 )
@@ -482,12 +483,18 @@ func TestSaveTruncatesOversizedContent(t *testing.T) {
 
 	rm := &roadmap.Roadmap{}
 	const itemCount = 800
+	// Built directly (bypassing AddItem) since itemCount exceeds OU-221's
+	// maxRoadmapItems cap (500) -- this test exercises the separate,
+	// unrelated content-column truncation path (renderContent/
+	// store.MaxDocContentBytes), which the metadata column (and hence the
+	// item-count cap) never enforces against.
 	for i := 0; i < itemCount; i++ {
-		_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{
+		rm.NextID++
+		rm.Sections.Now = append(rm.Sections.Now, roadmap.Item{
+			ID:    rm.NextID,
 			Title: fmt.Sprintf("item %d", i),
 			Body:  "a reasonably long body to help blow past the 32KB content cap for this test",
 		})
-		require.NoError(t, err)
 	}
 
 	require.NoError(t, roadmap.Save(db, "big-project", rm))
@@ -1155,4 +1162,105 @@ func TestEpicIDsDistinctFirstAppearanceOrder(t *testing.T) {
 
 func TestEpicIDsEmptyRoadmap(t *testing.T) {
 	assert.Empty(t, roadmap.EpicIDs(&roadmap.Roadmap{}))
+}
+
+// ── OU-221: item-count cap with archive-done guidance ───────────────────────
+
+// roadmapItemCap mirrors the unexported maxRoadmapItems (500) for
+// black-box tests -- kept as a local literal rather than reaching into the
+// package so this file stays in package roadmap_test.
+const roadmapItemCap = 500
+
+// fillDoneItems appends roadmapItemCap bare items directly to rm's Done
+// section (bypassing AddItem, which enforces the cap these tests exercise)
+// so tests can cheaply put a roadmap AT the cap without paying for hundreds
+// of real AddItem calls.
+func fillDoneItems(rm *roadmap.Roadmap) {
+	for i := 0; i < roadmapItemCap; i++ {
+		rm.NextID++
+		rm.Sections.Done = append(rm.Sections.Done, roadmap.Item{ID: rm.NextID, Title: fmt.Sprintf("done %d", rm.NextID)})
+	}
+}
+
+func TestAddItemRejectsAtCap(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	fillDoneItems(rm)
+
+	_, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "one too many"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), fmt.Sprintf("%d-item cap", roadmapItemCap))
+	assert.Contains(t, err.Error(), "archive or remove done items")
+	assert.Contains(t, err.Error(), "op=remove")
+	assert.Len(t, rm.Sections.Now, 0, "the rejected item is never added")
+}
+
+func TestAddItemAfterArchivingDoneItemSucceeds(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	fillDoneItems(rm)
+
+	// Archive (remove) one done item to free a slot -- the remediation the
+	// cap error instructs.
+	freedID := rm.Sections.Done[0].ID
+	require.NoError(t, roadmap.RemoveItem(rm, freedID))
+
+	id, err := roadmap.AddItem(rm, roadmap.SectionNow, roadmap.Item{Title: "fits now"})
+	require.NoError(t, err)
+	require.Len(t, rm.Sections.Now, 1)
+	assert.Equal(t, id, rm.Sections.Now[0].ID)
+}
+
+func TestSeedRejectsAtCap(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	fillDoneItems(rm)
+
+	_, err := roadmap.Seed(rm, []backlog.Item{{ID: "tk-test-001", Title: "new", Priority: "P0"}}, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), fmt.Sprintf("%d-item cap", roadmapItemCap))
+}
+
+// TestNonGrowingOpsUnaffectedAtCap verifies update/reorder/remove/done-move
+// all still work at (or over) the cap -- only item-count-GROWING operations
+// (AddItem, and transitively Seed) are gated.
+func TestNonGrowingOpsUnaffectedAtCap(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	fillDoneItems(rm)
+	id := rm.Sections.Done[0].ID
+
+	// update
+	newTitle := "renamed while at cap"
+	require.NoError(t, roadmap.UpdateItem(rm, id, roadmap.Patch{Title: &newTitle}))
+	assert.Equal(t, newTitle, rm.Sections.Done[0].Title)
+
+	// reorder (within the same section, no count change)
+	require.NoError(t, roadmap.ReorderItem(rm, id, 1))
+
+	// move (done -> parked -> done; total count never changes)
+	require.NoError(t, roadmap.MoveItem(rm, id, roadmap.SectionParked))
+	require.NoError(t, roadmap.MarkDone(rm, id))
+	require.Len(t, rm.Sections.Done, roadmapItemCap)
+
+	// remove (shrinks, always allowed)
+	require.NoError(t, roadmap.RemoveItem(rm, id))
+	require.Len(t, rm.Sections.Done, roadmapItemCap-1)
+}
+
+// TestAddItemNormalSizeRoadmapUnaffected verifies a handful of items per
+// section -- ordinary usage -- is nowhere near the cap and every op
+// (add/move/reorder/update) behaves exactly as before this change.
+func TestAddItemNormalSizeRoadmapUnaffected(t *testing.T) {
+	rm := &roadmap.Roadmap{}
+	for _, s := range []roadmap.Section{roadmap.SectionNow, roadmap.SectionNext, roadmap.SectionDeferred, roadmap.SectionParked, roadmap.SectionDropped, roadmap.SectionDone} {
+		for i := 0; i < 5; i++ {
+			_, err := roadmap.AddItem(rm, s, roadmap.Item{Title: fmt.Sprintf("%s item %d", s, i)})
+			require.NoError(t, err)
+		}
+	}
+	require.Len(t, rm.Sections.Now, 5)
+	require.Len(t, rm.Sections.Done, 5)
+
+	id := rm.Sections.Now[0].ID
+	require.NoError(t, roadmap.MoveItem(rm, id, roadmap.SectionParked))
+	require.NoError(t, roadmap.ReorderItem(rm, rm.Sections.Parked[0].ID, 0))
+	title := "still fine"
+	require.NoError(t, roadmap.UpdateItem(rm, rm.Sections.Parked[0].ID, roadmap.Patch{Title: &title}))
 }

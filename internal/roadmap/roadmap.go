@@ -38,6 +38,47 @@ const (
 	schemaVersion = 2
 )
 
+// OU-221: the roadmap's canonical structure lives in the metadata JSON
+// column (buildDoc), which -- unlike content (store.MaxDocContentBytes) and
+// notes (store.MaxDocNotesBytes) -- is NOT independently truncatable: it's
+// the only copy of the data, so truncating it to fit a byte cap would lose
+// items outright. Left unbounded, a project that never archives its "done"
+// items eventually produces a metadata blob large enough to threaten this
+// store's practical size ceiling. Rather than truncate (data loss) or cap
+// metadata bytes directly (a write could fail mid-item with no clean
+// recovery), we cap the ITEM COUNT, which is cheap to check before mutating
+// and gives a precise, actionable failure.
+//
+// Derivation: roadmapItemWorstCaseBytes is a generous per-item JSON size
+// estimate -- a fully-populated Item (long title/body/why/resume_trigger,
+// 5 kb refs, 3 tickets, 2 blockers, full timestamps) marshals to ~970 bytes
+// (measured); rounded up to 1024 for margin. roadmapItemBudgetBytes is a
+// deliberately generous but finite ceiling for the whole metadata blob --
+// far below SQLite's own TEXT column limit (~1GB) but far above anything a
+// healthy, regularly-pruned roadmap ever approaches, keeping this store's
+// documents in a sane size class without constraining normal use, and set
+// to divide evenly by roadmapItemWorstCaseBytes so maxRoadmapItems (500)
+// needs no further rounding; the JSON envelope (schema_version/next_id/
+// artifact_url/section-key/bracket bytes -- a few hundred bytes at most)
+// and real items running a bit larger than the worst-case estimate are the
+// headroom this leaves.
+const (
+	roadmapItemWorstCaseBytes = 1024
+	roadmapItemBudgetBytes    = 500 * 1024
+
+	// maxRoadmapItems caps the TOTAL item count across every section (now/
+	// next/deferred/parked/dropped/done -- done counts too: archiving done
+	// items via op=remove is exactly the release valve this cap exists to
+	// force). Enforced only on operations that grow the total count
+	// (AddItem, and transitively Seed, which adds through it); update/
+	// reorder/remove/done (a move, not a growth) are unaffected.
+	maxRoadmapItems = roadmapItemBudgetBytes / roadmapItemWorstCaseBytes
+
+	// errRoadmapItemCap is the actionable error AddItem returns once
+	// totalItemCount(rm) has reached maxRoadmapItems.
+	errRoadmapItemCap = "roadmap is at the %d-item cap (%d items); archive or remove done items (op=remove) before adding more"
+)
+
 // ValidSection reports whether s is a known roadmap section.
 func ValidSection(s Section) bool {
 	switch s {
@@ -257,9 +298,7 @@ func renderContent(rm *Roadmap) string {
 		return md
 	}
 
-	count := len(rm.Sections.Now) + len(rm.Sections.Next) + len(rm.Sections.Deferred) +
-		len(rm.Sections.Parked) + len(rm.Sections.Dropped) + len(rm.Sections.Done)
-	marker := fmt.Sprintf("\n... (truncated; %d items — see structured data)\n", count)
+	marker := fmt.Sprintf("\n... (truncated; %d items — see structured data)\n", totalItemCount(rm))
 
 	maxBody := store.MaxDocContentBytes - len(marker)
 	if maxBody < 0 {
@@ -370,6 +409,13 @@ func sectionSlice(rm *Roadmap, section Section) *[]Item {
 	}
 }
 
+// totalItemCount sums item counts across every section (see OU-221's
+// maxRoadmapItems comment above).
+func totalItemCount(rm *Roadmap) int {
+	return len(rm.Sections.Now) + len(rm.Sections.Next) + len(rm.Sections.Deferred) +
+		len(rm.Sections.Parked) + len(rm.Sections.Dropped) + len(rm.Sections.Done)
+}
+
 // allSections lists every roadmap section, in render order.
 var allSections = []Section{SectionNow, SectionNext, SectionDeferred, SectionParked, SectionDropped, SectionDone}
 
@@ -401,6 +447,10 @@ func findItem(rm *Roadmap, id int) (Section, int, bool) {
 func AddItem(rm *Roadmap, section Section, item Item, position ...int) (int, error) {
 	if !ValidSection(section) {
 		return 0, fmt.Errorf("invalid section %q", section)
+	}
+
+	if n := totalItemCount(rm); n >= maxRoadmapItems {
+		return 0, fmt.Errorf(errRoadmapItemCap, maxRoadmapItems, n)
 	}
 
 	rm.NextID++
