@@ -10,7 +10,7 @@ Project knowledge base and backlog management for Claude Code. Persist decisions
 
 ## What it does
 
-- **MCP server with 10 tools** for knowledge base and backlog management. See the [server wiki](https://github.com/dangernoodle-io/ouroboros/wiki) for full tool reference.
+- **MCP server** for knowledge base and backlog management. See the [server wiki](https://github.com/dangernoodle-io/ouroboros/wiki) for the full tool reference.
 - **6 hooks auto-inject context** into prompts and persist kb blocks on turn end. SessionStart installs the binary; UserPromptSubmit and SubagentStart inject KB context; SubagentStop and Stop auto-persist or nudge.
 - **3 skills** for common tasks: `/persist` (save a decision/fact), `/recall` (query KB), `/triage` (manage backlog).
 
