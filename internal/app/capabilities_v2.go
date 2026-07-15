@@ -5,38 +5,27 @@ import (
 	"github.com/dangernoodle-io/mcpkit/mcpx"
 )
 
-// Tool-level descriptions for the five MCP tools (kept tight per the
+// Tool-level descriptions for the four MCP tools (kept tight per the
 // token-conservation principle in CLAUDE.md).
 const (
-	descGetToolV2     = "Fetch entries by id or filters (required domain: kb|backlog|roadmap). ids[] = exact matches; omit for a filtered list."
-	descSearchToolV2  = "Full-text search (required domain: kb|backlog|roadmap). kb takes query or batched queries[]; backlog/roadmap take one query."
-	descKBToolV2      = "Create/update knowledge entries via entries[]: with id updates that doc in place (partial), else upserts by type+project+category+title. content [[Title]] autolinks create explains edges. Read via get/search domain=kb."
-	descBacklogToolV2 = "Create/update/delete backlog items via entries[] (id = update, else create) or delete_ids[]. Read via get/search domain=backlog."
-	descRoadmapToolV2 = "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done) via op=add|update|move|reorder|done|remove. Items group by component and epic (both single-valued). Read via get/search domain=roadmap."
+	descQueryToolV2   = "Read entries (required domain: kb|backlog|roadmap). ids[] = exact fetch; query or queries[] (kb batch) = full-text search; else a filtered list. verbose=true adds notes/edges (ids[] only). roadmap: format=md|html&by=component|epic."
+	descKBToolV2      = "Create/update knowledge entries via entries[]: with id updates that doc in place (partial), else upserts by type+project+category+title. content [[Title]] autolinks create explains edges. Read via query domain=kb."
+	descBacklogToolV2 = "Create/update/delete backlog items via entries[] (id = update, else create) or delete_ids[]. Read via query domain=backlog."
+	descRoadmapToolV2 = "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done) via op=add|update|move|reorder|done|remove. Items group by component and epic (both single-valued). Read via query domain=roadmap."
 )
 
-// getCapability and searchCapability are mcpkit Capabilities for the get and
-// search read tools (OU-1). Both carry ReadOnlyHint, matching buildServer's
-// toolAnnotation(mcp.ToBoolPtr(true), nil, nil) mapping (server.go).
-type getCapability struct{ st *serverState }
+// queryCapability is the mcpkit Capability for the single query read tool
+// (OU-323, collapsing OU-1's get+search). Carries ReadOnlyHint, matching
+// buildServer's toolAnnotation(mcp.ToBoolPtr(true), nil, nil) mapping
+// (server.go).
+type queryCapability struct{ st *serverState }
 
-func (c getCapability) Attach(r *mcpkit.Registrar) error {
+func (c queryCapability) Attach(r *mcpkit.Registrar) error {
 	mcpkit.AddTool(r, &mcpx.Tool{
-		Name:        "get",
-		Description: descGetToolV2,
+		Name:        "query",
+		Description: descQueryToolV2,
 		Annotations: &mcpx.ToolAnnotations{ReadOnlyHint: true},
-	}, mcpkit.ReadOnly, handleGetV2(c.st))
-	return nil
-}
-
-type searchCapability struct{ st *serverState }
-
-func (c searchCapability) Attach(r *mcpkit.Registrar) error {
-	mcpkit.AddTool(r, &mcpx.Tool{
-		Name:        "search",
-		Description: descSearchToolV2,
-		Annotations: &mcpx.ToolAnnotations{ReadOnlyHint: true},
-	}, mcpkit.ReadOnly, handleSearchV2(c.st))
+	}, mcpkit.ReadOnly, handleQueryV2(c.st))
 	return nil
 }
 

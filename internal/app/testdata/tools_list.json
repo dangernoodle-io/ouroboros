@@ -4,7 +4,7 @@
       "annotations": {
         "destructiveHint": true
       },
-      "description": "Create/update/delete backlog items via entries[] (id = update, else create) or delete_ids[]. Read via get/search domain=backlog.",
+      "description": "Create/update/delete backlog items via entries[] (id = update, else create) or delete_ids[]. Read via query domain=backlog.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -121,126 +121,9 @@
     },
     {
       "annotations": {
-        "readOnlyHint": true
-      },
-      "description": "Fetch entries by id or filters (required domain: kb|backlog|roadmap). ids[] = exact matches; omit for a filtered list.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "by": {
-            "description": "Grouping axis: component (default) or epic (roadmap md/html only); other axis shown inline",
-            "type": "string"
-          },
-          "categories": {
-            "description": "Filter by categories (kb only)",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "component": {
-            "description": "Component tag filter (backlog subproject/plugin; roadmap grouping axis)",
-            "type": "string"
-          },
-          "domain": {
-            "description": "Required: \"kb\", \"backlog\", or \"roadmap\"",
-            "type": "string"
-          },
-          "epic": {
-            "description": "Epic item id filter — its children (backlog/roadmap)",
-            "type": "string"
-          },
-          "epics_only": {
-            "description": "List only epics (backlog only); overrides epic",
-            "type": "boolean"
-          },
-          "format": {
-            "description": "structured, md, or html, default structured (roadmap only)",
-            "type": "string"
-          },
-          "ids": {
-            "description": "IDs to fetch (kb: document IDs, backlog: item IDs)",
-            "items": true,
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "limit": {
-            "description": "Limit, default 10, max 500",
-            "type": "integer"
-          },
-          "priority_max": {
-            "description": "Max priority P0-P6 (backlog only)",
-            "type": "string"
-          },
-          "priority_min": {
-            "description": "Min priority P0-P6 (backlog only)",
-            "type": "string"
-          },
-          "projects": {
-            "description": "Filter by project names",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "query": {
-            "description": "Full-text search (kb only)",
-            "type": "string"
-          },
-          "since": {
-            "description": "Created-at cutoff (backlog only): duration (24h, 7d), date (2006-01-02), or RFC3339",
-            "type": "string"
-          },
-          "sort": {
-            "description": "\"created\" sorts backlog items newest-first (backlog only)",
-            "type": "string"
-          },
-          "status": {
-            "description": "open or done (backlog only)",
-            "type": "string"
-          },
-          "tags": {
-            "description": "Filter by tags, all match (kb only)",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "types": {
-            "description": "Filter by types (kb only)",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "verbose": {
-            "description": "Include notes (ids[] fetch only), default false",
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "name": "get"
-    },
-    {
-      "annotations": {
         "idempotentHint": true
       },
-      "description": "Create/update knowledge entries via entries[]: with id updates that doc in place (partial), else upserts by type+project+category+title. content [[Title]] autolinks create explains edges. Read via get/search domain=kb.",
+      "description": "Create/update knowledge entries via entries[]: with id updates that doc in place (partial), else upserts by type+project+category+title. content [[Title]] autolinks create explains edges. Read via query domain=kb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -325,9 +208,136 @@
     },
     {
       "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Read entries (required domain: kb|backlog|roadmap). ids[] = exact fetch; query or queries[] (kb batch) = full-text search; else a filtered list. verbose=true adds notes/edges (ids[] only). roadmap: format=md|html\u0026by=component|epic.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "description": "Grouping axis: component (default) or epic (roadmap md/html only); other axis shown inline",
+            "type": "string"
+          },
+          "categories": {
+            "description": "Filter by categories (kb only)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "component": {
+            "description": "Component tag filter (backlog subproject/plugin; roadmap grouping axis)",
+            "type": "string"
+          },
+          "domain": {
+            "description": "Required: \"kb\", \"backlog\", or \"roadmap\"",
+            "type": "string"
+          },
+          "epic": {
+            "description": "Epic item id filter — its children (backlog/roadmap)",
+            "type": "string"
+          },
+          "epics_only": {
+            "description": "List only epics (backlog only); overrides epic",
+            "type": "boolean"
+          },
+          "format": {
+            "description": "structured, md, or html, default structured (roadmap only)",
+            "type": "string"
+          },
+          "ids": {
+            "description": "IDs to fetch (kb: document IDs, backlog: item IDs); exact match, skips search/filter mode",
+            "items": true,
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "limit": {
+            "description": "Limit, default 10, max 500",
+            "type": "integer"
+          },
+          "priority_max": {
+            "description": "Max priority P0-P6 (backlog only)",
+            "type": "string"
+          },
+          "priority_min": {
+            "description": "Min priority P0-P6 (backlog only)",
+            "type": "string"
+          },
+          "projects": {
+            "description": "Filter by project names",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "queries": {
+            "description": "Batch full-text search sharing filters, kb only; response is positional [[...], [...]]",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "query": {
+            "description": "Full-text search; present -\u003e search mode (kb/backlog/roadmap)",
+            "type": "string"
+          },
+          "since": {
+            "description": "Created-at cutoff (backlog only): duration (24h, 7d), date (2006-01-02), or RFC3339",
+            "type": "string"
+          },
+          "sort": {
+            "description": "\"created\" sorts backlog items newest-first (backlog only)",
+            "type": "string"
+          },
+          "status": {
+            "description": "open or done (backlog only)",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Filter by tags, all match (kb only, filter/list mode)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "types": {
+            "description": "Filter by types (kb only)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "verbose": {
+            "description": "Include notes (ids[] fetch only), default false",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "query"
+    },
+    {
+      "annotations": {
         "destructiveHint": true
       },
-      "description": "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done) via op=add|update|move|reorder|done|remove. Items group by component and epic (both single-valued). Read via get/search domain=roadmap.",
+      "description": "Mutate the per-project roadmap singleton (now/next/deferred/parked/dropped/done) via op=add|update|move|reorder|done|remove. Items group by component and epic (both single-valued). Read via query domain=roadmap.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -452,103 +462,6 @@
         "type": "object"
       },
       "name": "roadmap"
-    },
-    {
-      "annotations": {
-        "readOnlyHint": true
-      },
-      "description": "Full-text search (required domain: kb|backlog|roadmap). kb takes query or batched queries[]; backlog/roadmap take one query.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "categories": {
-            "description": "Filter by categories (kb only)",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "component": {
-            "description": "Component tag filter (backlog subproject/plugin; roadmap grouping axis)",
-            "type": "string"
-          },
-          "domain": {
-            "description": "Required: \"kb\", \"backlog\", or \"roadmap\"",
-            "type": "string"
-          },
-          "epic": {
-            "description": "Epic item id filter — its children (backlog/roadmap)",
-            "type": "string"
-          },
-          "epics_only": {
-            "description": "List only epics (backlog only); overrides epic",
-            "type": "boolean"
-          },
-          "limit": {
-            "description": "Limit, default 10, max 500",
-            "type": "integer"
-          },
-          "priority_max": {
-            "description": "Max priority P0-P6 (backlog only)",
-            "type": "string"
-          },
-          "priority_min": {
-            "description": "Min priority P0-P6 (backlog only)",
-            "type": "string"
-          },
-          "projects": {
-            "description": "Filter by project names",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "queries": {
-            "description": "Batch queries sharing filters, kb only; response is positional [[...], [...]]",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          },
-          "query": {
-            "description": "Single query",
-            "type": "string"
-          },
-          "since": {
-            "description": "Created-at cutoff (backlog only): duration (24h, 7d), date (2006-01-02), or RFC3339",
-            "type": "string"
-          },
-          "sort": {
-            "description": "\"created\" sorts backlog items newest-first (backlog only)",
-            "type": "string"
-          },
-          "status": {
-            "description": "open or done (backlog only)",
-            "type": "string"
-          },
-          "types": {
-            "description": "Filter by types (kb only)",
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "null",
-              "array"
-            ]
-          }
-        },
-        "type": "object"
-      },
-      "name": "search"
     }
   ]
 }
