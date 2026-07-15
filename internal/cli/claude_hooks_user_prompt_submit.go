@@ -165,10 +165,22 @@ func runHookUserPromptSubmit(p hooks.UserPromptSubmitPayload, db *sql.DB) hooks.
 		return hooks.Response{}
 	}
 
+	// OU-259: a "resume" prompt ("let's pick up X", "continue working on Y")
+	// often still carries usable search terms — prefer bm25-relevance-ranked
+	// results (store.KeywordSearch) over an arbitrary recency dump whenever
+	// the prompt tokenizes to at least one non-stopword term. Only when the
+	// prompt has no usable FTS terms (or the relevance search comes back
+	// empty) do we fall back to QueryDocuments' recency-ordered listing.
 	var rows []store.DocumentSummary
 	var err error
 	if intent == "resume" {
-		rows, err = store.QueryDocuments(db, nil, []string{project}, nil, "", nil, upcMaxEntries)
+		if len(store.TokenizeQuery(p.Prompt)) > 0 {
+			search := truncateRunes(strings.ReplaceAll(p.Prompt, "'", ""), 200)
+			rows, err = store.KeywordSearch(db, search, []string{project}, upcMaxEntries)
+		}
+		if err == nil && len(rows) == 0 {
+			rows, err = store.QueryDocuments(db, nil, []string{project}, nil, "", nil, upcMaxEntries)
+		}
 	} else {
 		search := truncateRunes(strings.ReplaceAll(p.Prompt, "'", ""), 200)
 		rows, err = store.KeywordSearch(db, search, []string{project}, upcMaxSearch)
@@ -177,8 +189,11 @@ func runHookUserPromptSubmit(p hooks.UserPromptSubmitPayload, db *sql.DB) hooks.
 		return hooks.Response{}
 	}
 
-	// Filter weak FTS matches (specific intent only; resume fetches by list,
-	// no meaningful score field).
+	// Apply the upcBM25Threshold weak-match floor on the specific-intent path
+	// only. The resume path now relevance-ranks via KeywordSearch too (a
+	// Score-bearing bm25 result), but intentionally does not apply this
+	// threshold: per-path floor tuning is corpus-dependent and deferred to a
+	// follow-up ticket (OU-340).
 	if intent == "specific" {
 		filtered := rows[:0:0] //nolint:gocritic // fresh backing array, rows is not reused after this point
 		for _, r := range rows {

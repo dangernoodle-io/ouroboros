@@ -94,7 +94,21 @@ func KeywordSearch(db *sql.DB, query string, projects []string, limit int) ([]Do
 
 	limit = ClampLimit(limit, 10, 500)
 
-	sqlQuery := `SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at, bm25(documents_fts) AS score
+	// OU-259: documents_fts column order is (title, content, tags) — per the
+	// schema migration (store.go: `fts5(title, content, tags, ...)`). Weight
+	// title matches highest (a term in the title is the strongest relevance
+	// signal), tags moderately (curated, deliberately short — still a
+	// stronger signal than free-form body text), content at the bm25()
+	// baseline. There is no indexed "category" column in documents_fts (only
+	// documents itself carries category, used purely as a filter, not
+	// ranked) — weights below cover every column that IS indexed.
+	const (
+		bm25WeightTitle   = 3.0
+		bm25WeightContent = 1.0
+		bm25WeightTags    = 2.0
+	)
+	sqlQuery := `SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at, bm25(documents_fts, ` +
+		fmt.Sprintf("%g, %g, %g", bm25WeightTitle, bm25WeightContent, bm25WeightTags) + `) AS score
 		FROM documents d
 		JOIN documents_fts fts ON d.id = fts.rowid
 		WHERE fts.documents_fts MATCH ?`
@@ -102,7 +116,7 @@ func KeywordSearch(db *sql.DB, query string, projects []string, limit int) ([]Do
 
 	sqlQuery += projectFilter("d.", projects, &args)
 
-	sqlQuery += " ORDER BY bm25(documents_fts) LIMIT ?"
+	sqlQuery += " ORDER BY score LIMIT ?"
 	args = append(args, limit)
 
 	rows, err := db.Query(sqlQuery, args...)
@@ -634,7 +648,11 @@ func QueryDocuments(db *sql.DB, types []string, projects []string, categories []
 			query += " WHERE " + whereClause
 		}
 
-		query += " LIMIT ?"
+		// OU-259: no FTS query means we can't rank by bm25() relevance, so
+		// fall back to recency — most-recently-updated entries surface
+		// first. id DESC breaks ties deterministically (rowid order, newest
+		// insert wins) when updated_at collides (e.g. same-second writes).
+		query += " ORDER BY updated_at DESC, id DESC LIMIT ?"
 		args = append(args, limit)
 	}
 

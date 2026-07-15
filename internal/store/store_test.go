@@ -2286,3 +2286,91 @@ func TestUpsertDocument_NoConflictSameContent(t *testing.T) {
 	assert.False(t, second.Conflict)
 	assert.Empty(t, second.PreviousContent)
 }
+
+// --- OU-259: fallback/relevance ranking -----------------------------------
+
+// TestQueryDocuments_NoFTSQuery_OrderedByUpdatedAtDesc is the OU-259
+// regression for the non-FTS listing branch of QueryDocuments (taken when
+// ftsQuery is empty, e.g. the UserPromptSubmit hook's resume/recency
+// fallback): with no FTS query there is no bm25() score to rank by, so rows
+// must come back most-recently-updated first, not arbitrary rowid/insertion
+// order. Rows are inserted oldest-first (so insertion order is the opposite
+// of the expected result) with explicit, distinct updated_at values via raw
+// SQL to avoid relying on wall-clock timing between UpsertDocument calls.
+func TestQueryDocuments_NoFTSQuery_OrderedByUpdatedAtDesc(t *testing.T) {
+	db := testDB(t)
+
+	insertDoc := func(title, updatedAt string) {
+		_, err := db.Exec(`INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+			VALUES ('note', 'acme-corp', '', ?, 'content', '', '{}', '[]', ?, ?)`, title, updatedAt, updatedAt)
+		require.NoError(t, err)
+	}
+	insertDoc("oldest-doc", "2024-01-01T00:00:00Z")
+	insertDoc("newest-doc", "2024-03-01T00:00:00Z")
+	insertDoc("middle-doc", "2024-02-01T00:00:00Z")
+
+	summaries, err := store.QueryDocuments(db, []string{"note"}, nil, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 3)
+
+	var titles []string
+	for _, s := range summaries {
+		titles = append(titles, s.Title)
+	}
+	assert.Equal(t, []string{"newest-doc", "middle-doc", "oldest-doc"}, titles)
+}
+
+// TestQueryDocuments_NoFTSQuery_TieBreaksOnIDDesc verifies the id DESC
+// tie-break: two rows sharing the same updated_at (a same-second write
+// collision) still come back deterministically, newest-inserted (higher
+// rowid) first.
+func TestQueryDocuments_NoFTSQuery_TieBreaksOnIDDesc(t *testing.T) {
+	db := testDB(t)
+
+	sameTimestamp := "2024-05-01T00:00:00Z"
+	_, err := db.Exec(`INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+		VALUES ('note', 'acme-corp', '', 'first-inserted', 'content', '', '{}', '[]', ?, ?)`, sameTimestamp, sameTimestamp)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+		VALUES ('note', 'acme-corp', '', 'second-inserted', 'content', '', '{}', '[]', ?, ?)`, sameTimestamp, sameTimestamp)
+	require.NoError(t, err)
+
+	summaries, err := store.QueryDocuments(db, []string{"note"}, nil, nil, "", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 2)
+	assert.Equal(t, "second-inserted", summaries[0].Title)
+	assert.Equal(t, "first-inserted", summaries[1].Title)
+}
+
+// TestKeywordSearch_TitleMatchOutranksBodyMatch is the OU-259 regression for
+// per-column bm25() weighting in KeywordSearch: a document whose ONLY match
+// is in its title must rank ahead of a document whose match is buried in
+// body content, because title carries a higher weight (bm25WeightTitle=3.0)
+// than content (bm25WeightContent=1.0). Both docs otherwise share a filler
+// vocabulary so idf isn't skewed by corpus size.
+func TestKeywordSearch_TitleMatchOutranksBodyMatch(t *testing.T) {
+	db := testDB(t)
+
+	titleMatchDoc := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Zephyrwing Migration Plan",
+		Content: "unrelated filler prose about office logistics and scheduling",
+	}
+	bodyMatchDoc := store.Document{
+		Type:    "decision",
+		Project: "acme-corp",
+		Title:   "Quarterly Planning Notes",
+		Content: "detailed notes mentioning the zephyrwing migration plan in passing",
+	}
+	_, err := store.UpsertDocument(db, titleMatchDoc)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, bodyMatchDoc)
+	require.NoError(t, err)
+
+	summaries, err := store.KeywordSearch(db, "zephyrwing", nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 2)
+	assert.Equal(t, "Zephyrwing Migration Plan", summaries[0].Title, "title match must outrank body-only match under title-weighted bm25")
+	assert.Less(t, summaries[0].Score, summaries[1].Score, "title-match score must be more negative (stronger) than body-match score")
+}

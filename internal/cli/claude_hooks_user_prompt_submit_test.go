@@ -173,6 +173,72 @@ func TestRunHookUserPromptSubmit_ResumeIntent_InjectsKbAndBacklog(t *testing.T) 
 	assert.Contains(t, resp.AdditionalContext, "Port the next hook")
 }
 
+// --- OU-259: resume relevance-ranking vs recency fallback -----------------
+
+// TestRunHookUserPromptSubmit_ResumeIntent_UsableTermsRankByRelevance is the
+// OU-259 regression proving a resume prompt with usable FTS terms is
+// answered via bm25-relevance-ranked KeywordSearch, not the recency-ordered
+// list: the prompt's substantive vocabulary matches only one of two seeded
+// docs; the unrelated doc (despite being MORE recently updated) must not
+// crowd it out or appear at all under a relevance-ranked search.
+func TestRunHookUserPromptSubmit_ResumeIntent_UsableTermsRankByRelevance(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, _, ouroborosDir := upcWorkspace(t)
+
+	// Older doc actually matches the prompt's vocabulary.
+	_, err := store.UpsertDocument(db, store.Document{
+		Type: "decision", Project: "ouroboros", Title: "Zephyrwing Rollout Plan",
+		Content: "phased zephyrwing rollout across regions",
+	})
+	require.NoError(t, err)
+	// Newer doc is unrelated filler that would win a pure recency ordering.
+	_, err = store.UpsertDocument(db, store.Document{
+		Type: "decision", Project: "ouroboros", Title: "Office Snack Rotation",
+		Content: "weekly snack restock schedule for the break room",
+	})
+	require.NoError(t, err)
+
+	p := hooks.UserPromptSubmitPayload{
+		Common: hooks.Common{Cwd: ouroborosDir, SessionID: "sess-ou259-relevance"},
+		Prompt: "let's continue with the zephyrwing rollout plan",
+	}
+	resp := runHookUserPromptSubmit(p, db)
+	assert.Contains(t, resp.AdditionalContext, "Zephyrwing Rollout Plan")
+	assert.NotContains(t, resp.AdditionalContext, "Office Snack Rotation")
+}
+
+// TestRunHookUserPromptSubmit_ResumeIntent_NoUsableTerms_FallsBackToRecency
+// is the OU-259 regression for the other half of the split: a resume prompt
+// that tokenizes to ZERO usable (non-stopword) terms must skip KeywordSearch
+// entirely and fall back to QueryDocuments' recency-ordered listing — the
+// most-recently-updated doc must lead, even though it shares no vocabulary
+// with the prompt at all.
+func TestRunHookUserPromptSubmit_ResumeIntent_NoUsableTerms_FallsBackToRecency(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, _, ouroborosDir := upcWorkspace(t)
+
+	_, err := db.Exec(`INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+		VALUES ('decision', 'ouroboros', '', 'older-doc', 'content', '', '{}', '[]', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO documents (type, project, category, title, content, notes, metadata, tags, created_at, updated_at)
+		VALUES ('decision', 'ouroboros', '', 'newer-doc', 'content', '', '{}', '[]', '2024-06-01T00:00:00Z', '2024-06-01T00:00:00Z')`)
+	require.NoError(t, err)
+
+	p := hooks.UserPromptSubmitPayload{
+		// Every word here ("what", "is", "the", "status") is a stopword —
+		// classifyPrompt still routes this to "resume" (matches
+		// upcResumePatterns' "what's the status" pattern), but TokenizeQuery
+		// yields zero usable terms.
+		Common: hooks.Common{Cwd: ouroborosDir, SessionID: "sess-ou259-recency"},
+		Prompt: "what's the status",
+	}
+	resp := runHookUserPromptSubmit(p, db)
+	require.NotEqual(t, hooks.Response{}, resp)
+	assert.Regexp(t, `(?s)newer-doc.*older-doc`, resp.AdditionalContext, "recency fallback must list newest-updated doc first")
+}
+
 // --- cooldown -------------------------------------------------------------
 
 func TestRunHookUserPromptSubmit_SpecificIntent_CooldownSuppressesRepeat(t *testing.T) {
