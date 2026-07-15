@@ -8,7 +8,6 @@ import (
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/edges"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 // This file holds the type-neutral consts/helpers/types the old mcp-go-based
@@ -20,20 +19,6 @@ import (
 
 // validSectionsMsg lists the valid section names for error messages.
 const validSectionsMsg = "now, next, deferred, parked, dropped, or done"
-
-// docWithEdges wraps a KB document with its edges sidecar, only populated
-// on verbose=true reads (see getDocumentsV2).
-type docWithEdges struct {
-	*store.Document
-	Edges []edges.Edge `json:"edges,omitempty"`
-}
-
-// itemWithEdges wraps a backlog item with its edges sidecar, only populated
-// on verbose=true reads (see getBacklogItemsV2).
-type itemWithEdges struct {
-	*backlog.Item
-	Edges []edges.Edge `json:"edges,omitempty"`
-}
 
 // edgeSpec is one {label,target} element of a backlog entry's edges[]: an
 // item->item edge, source = the item being written.
@@ -60,18 +45,6 @@ func parsePriority(s string) (int, error) {
 // while a tx holds the only connection would deadlock.
 func resolveProject(d backlog.Executor, name string) (*backlog.Project, error) {
 	return backlog.GetProjectByName(d, name)
-}
-
-func resolveProjects(d *sql.DB, names []string) ([]int64, error) {
-	ids := make([]int64, 0, len(names))
-	for _, name := range names {
-		proj, err := resolveProject(d, name)
-		if err != nil {
-			return nil, err
-		}
-		ids = append(ids, proj.ID)
-	}
-	return ids, nil
 }
 
 // validateEpicTx confirms a non-empty epic value resolves to an existing
