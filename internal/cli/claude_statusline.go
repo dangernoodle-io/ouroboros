@@ -21,7 +21,8 @@ import (
 // Code statusLine payload's cwd (falling back to os.Getwd when the
 // payload carries none — e.g. a direct CLI invocation outside the plugin),
 // then renders the same KB/backlog line the old ANSI/plain formatters
-// produced, as Segments Render colors via termenv instead of raw ANSI.
+// produced, as Segments Render colors via shesha's style seam instead of
+// raw ANSI (termenv is confined behind that seam).
 // Returning (nil, nil) when both totals are zero matches the old
 // print-nothing behavior; sessionID is unused today (ouroboros scopes by
 // project, not session).
@@ -155,8 +156,8 @@ func sumBacklogCounts(counts []backlog.PriorityCount) int {
 // buildStatuslineSegments renders the same visible text the old
 // formatStatuslineANSI/formatStatuslinePlain produced — "ouroboros:
 // [project] KB <total> (<counts>) | BL <total> open (<counts>)" — as
-// Segments; Render (termenv) owns the color-profile degradation the old
-// code hand-rolled via raw ANSI escapes.
+// Segments; Render (via shesha's style seam) owns the color-level
+// degradation the old code hand-rolled via raw ANSI escapes.
 func buildStatuslineSegments(
 	project string, kbTotal int, kbCounts []store.TypeCount,
 	blTotal int, backlogCounts []backlog.PriorityCount,

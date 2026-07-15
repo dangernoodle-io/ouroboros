@@ -1,8 +1,8 @@
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
-github.com/dangernoodle-io/shesha v0.0.0-20260715001725-9338db33d709 h1:RYDOO74NbRnLgVBIwglgTID0fD/D2dZ9IxZWfiJMa+I=
-github.com/dangernoodle-io/shesha v0.0.0-20260715001725-9338db33d709/go.mod h1:cvoMqGBjJJ6R2jFZLi00lV9alKzwZehEBT9ZWGhRbO0=
+github.com/dangernoodle-io/shesha v0.0.0-20260715190415-e2f743f18687 h1:93RSu2l7u3ZTgaNqcH/VkKa5/ZMvEogEqxr/7F9kV1U=
+github.com/dangernoodle-io/shesha v0.0.0-20260715190415-e2f743f18687/go.mod h1:cvoMqGBjJJ6R2jFZLi00lV9alKzwZehEBT9ZWGhRbO0=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=

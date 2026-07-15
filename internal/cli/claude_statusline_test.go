@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/dangernoodle-io/shesha/host/claudecode/statusline"
+	"github.com/dangernoodle-io/shesha/style"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,6 +20,10 @@ import (
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/store"
 )
+
+// plainRenderer is a style.Renderer forced to LevelNone (no ANSI escapes),
+// the test-side equivalent of the old statusline.RenderOptions{Plain: true}.
+var plainRenderer = style.New(io.Discard, style.WithLevel(style.LevelNone))
 
 // isolateStatuslineDB points PROJECT_KB_PATH at a fresh temp SQLite file
 // and HOME at a fresh temp dir (so a real developer bootstrap.json never
@@ -90,7 +96,7 @@ func TestOuroborosStatuslineProvider_KBOnly(t *testing.T) {
 	segs, err := ouroborosStatuslineProvider().Statusline(context.Background(), statusline.Payload{Cwd: dir}, "")
 	require.NoError(t, err)
 
-	line := statusline.Render(segs, statusline.RenderOptions{Plain: true})
+	line := statusline.Render(segs, plainRenderer)
 	assert.Contains(t, line, "[ouroboros]")
 	assert.Contains(t, line, "KB 3")
 	assert.Contains(t, line, "2D")
@@ -115,7 +121,7 @@ func TestOuroborosStatuslineProvider_BacklogOnly(t *testing.T) {
 	segs, err := ouroborosStatuslineProvider().Statusline(context.Background(), statusline.Payload{Cwd: dir}, "")
 	require.NoError(t, err)
 
-	line := statusline.Render(segs, statusline.RenderOptions{Plain: true})
+	line := statusline.Render(segs, plainRenderer)
 	assert.Contains(t, line, "BL 2 open")
 	assert.Contains(t, line, "1×P0")
 	assert.Contains(t, line, "1×P1")
@@ -139,7 +145,7 @@ func TestOuroborosStatuslineProvider_Full(t *testing.T) {
 	segs, err := ouroborosStatuslineProvider().Statusline(context.Background(), statusline.Payload{Cwd: dir}, "")
 	require.NoError(t, err)
 
-	line := statusline.Render(segs, statusline.RenderOptions{Plain: true})
+	line := statusline.Render(segs, plainRenderer)
 	assert.Equal(t, "ouroboros: [ouroboros] KB 1 (1D) | BL 1 open (1×P2)", line)
 }
 
@@ -163,7 +169,7 @@ func TestOuroborosStatuslineProvider_NoCwdAggregates(t *testing.T) {
 	segs, err := ouroborosStatuslineProvider().Statusline(context.Background(), statusline.Payload{}, "")
 	require.NoError(t, err)
 
-	line := statusline.Render(segs, statusline.RenderOptions{Plain: true})
+	line := statusline.Render(segs, plainRenderer)
 	assert.NotContains(t, line, "[", "empty cwd must aggregate, never label a project")
 	assert.Contains(t, line, "KB 1")
 	assert.Contains(t, line, "BL 1 open")
@@ -347,7 +353,7 @@ func TestBuildStatuslineSegments_ProjectBeforeKB(t *testing.T) {
 		1, []backlog.PriorityCount{{Priority: "P1", Count: 1}},
 	)
 
-	line := statusline.Render(segs, statusline.RenderOptions{Plain: true})
+	line := statusline.Render(segs, plainRenderer)
 	assert.True(t, strings.Index(line, "[project-a]") < strings.Index(line, "KB"), "project should appear before KB")
 }
 
@@ -357,7 +363,7 @@ func TestBuildStatuslineSegments_NoProjectBracketWhenEmpty(t *testing.T) {
 		1, []backlog.PriorityCount{{Priority: "P1", Count: 1}},
 	)
 
-	line := statusline.Render(segs, statusline.RenderOptions{Plain: true})
+	line := statusline.Render(segs, plainRenderer)
 	assert.True(t, strings.HasPrefix(line, "ouroboros: KB"), "without project, should have 'ouroboros: KB' prefix")
 	assert.NotContains(t, line, "[")
 }
@@ -394,10 +400,10 @@ func TestClaudeStatusline_WireDecodesStdinAndRenders(t *testing.T) {
 	require.NoError(t, statuslineCmd.RunE(statuslineCmd, nil))
 	assert.Contains(t, out.String(), "KB 1")
 	assert.Contains(t, out.String(), "[ouroboros]")
-	// OU-314: the wired command must force the ANSI profile so priority
-	// color escapes survive non-TTY (pipe) stdout — the default termenv
-	// resolution would strip these to plain text (Ascii profile).
-	assert.Contains(t, out.String(), "\x1b[", "wired statusline must emit ANSI escapes (WithForceProfile)")
+	// OU-314: the wired command must force the ANSI (Basic) color level so
+	// priority color escapes survive non-TTY (pipe) stdout — the default
+	// resolution would strip these to plain text (no-color level).
+	assert.Contains(t, out.String(), "\x1b[", "wired statusline must emit ANSI escapes (WithForceLevel)")
 	assert.Contains(t, out.String(), "\x1b[36m", "P2 priority segment must render cyan (color \"6\")")
 }
 
