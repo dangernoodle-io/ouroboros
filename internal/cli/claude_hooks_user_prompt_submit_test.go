@@ -180,11 +180,16 @@ func TestRunHookUserPromptSubmit_ResumeIntent_InjectsKbAndBacklog(t *testing.T) 
 // answered via bm25-relevance-ranked KeywordSearch, not the recency-ordered
 // list: the prompt's substantive vocabulary matches only one of two seeded
 // docs; the unrelated doc (despite being MORE recently updated) must not
-// crowd it out or appear at all under a relevance-ranked search.
+// crowd it out or appear at all under a relevance-ranked search. Seeds
+// upcSeedFillerDocs (OU-340) so bm25's idf stats are realistic — a
+// single-doc-corpus collapses every score to ~0, which the OU-340
+// weak-match floor would (correctly) filter out, masking this test's actual
+// relevance-ranking assertion behind a recency-fallback path instead.
 func TestRunHookUserPromptSubmit_ResumeIntent_UsableTermsRankByRelevance(t *testing.T) {
 	isolateHookLog(t)
 	db := newTestDB(t)
 	_, _, ouroborosDir := upcWorkspace(t)
+	upcSeedFillerDocs(t, db)
 
 	// Older doc actually matches the prompt's vocabulary.
 	_, err := store.UpsertDocument(db, store.Document{
@@ -433,6 +438,86 @@ func TestRunHookUserPromptSubmit_SpecificIntent_MultiDocCorpus_WeakOnlyMatches_N
 	}
 	assert.Equal(t, hooks.Response{}, runHookUserPromptSubmit(p, db),
 		"only-weak raw matches must all be filtered out, yielding no injection")
+}
+
+// --- OU-340: resume path applies the same weak-match floor -----------------
+
+// upcResumeStrongMatchPrompt is a resume-intent analog of
+// upcStrongMatchPrompt (shares the same rare, multi-word vocabulary with the
+// "Widget Frobnicator" doc, plus the incidental "rollback" term), but phrased
+// with a resume trigger ("continue") so classifyPrompt routes it to
+// "resume" rather than "specific".
+const upcResumeStrongMatchPrompt = "let's continue working on the widget frobnicator quantum flux capacitor calibration procedure and verification steps, and also consider a possible rollback path"
+
+// upcResumeWeakOnlyMatchPrompt is a resume-intent analog of
+// upcWeakOnlyMatchPrompt: shares no vocabulary with the "Widget Frobnicator"
+// doc, only the common "rollback"/"strategy"/"pipeline" terms with the two
+// rollback docs, so every raw KeywordSearch match is weak — but phrased with
+// a resume trigger ("continue") so classifyPrompt routes it to "resume".
+const upcResumeWeakOnlyMatchPrompt = "let's continue discussing the rollback strategy for the pipeline going forward"
+
+// TestRunHookUserPromptSubmit_ResumeIntent_MultiDocCorpus_KeepsStrongMatch is
+// the OU-340 regression: the resume path's relevance-ranked KeywordSearch
+// results must be filtered by upcBM25Threshold exactly like the specific
+// path — a strong match survives, weak incidental matches (that would have
+// been injected pre-OU-340, since the resume path applied no floor at all)
+// are dropped.
+func TestRunHookUserPromptSubmit_ResumeIntent_MultiDocCorpus_KeepsStrongMatch(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, _, ouroborosDir := upcWorkspace(t)
+	upcSeedMultiDocCorpus(t, db)
+
+	rawRows, err := store.KeywordSearch(db, upcResumeStrongMatchPrompt, []string{"ouroboros"}, upcMaxEntries)
+	require.NoError(t, err)
+	require.NotEmpty(t, rawRows, "expected at least the strong match to surface pre-filter")
+	for _, r := range rawRows {
+		t.Logf("raw bm25 score (resume strong-match prompt): %q -> %.4f", r.Title, r.Score)
+	}
+
+	p := hooks.UserPromptSubmitPayload{
+		Common: hooks.Common{Cwd: ouroborosDir, SessionID: "sess-resume-strong"},
+		Prompt: upcResumeStrongMatchPrompt,
+	}
+	resp := runHookUserPromptSubmit(p, db)
+	assert.Contains(t, resp.AdditionalContext, "Widget Frobnicator Quantum Flux Capacitor Calibration Procedure",
+		"the strong match must survive the weak-match filter on the resume path too")
+	assert.NotContains(t, resp.AdditionalContext, "PostgreSQL storage schema migrations guide",
+		"a weak incidental match must be filtered out on the resume path too")
+	assert.NotContains(t, resp.AdditionalContext, "Kubernetes deployment pipeline rollback",
+		"a weak incidental match must be filtered out on the resume path too")
+}
+
+// TestRunHookUserPromptSubmit_ResumeIntent_MultiDocCorpus_WeakOnlyMatches_FallsBackToRecency
+// is the other half of the OU-340 regression: when every raw KeywordSearch
+// hit on the resume path is weaker than upcBM25Threshold, the filtered
+// result is empty, and the resume path must fall back to QueryDocuments'
+// recency-ordered listing (extending the existing "zero raw hits" fallback
+// to also cover "zero hits after the threshold") rather than injecting
+// nothing or injecting the weak matches unfiltered.
+func TestRunHookUserPromptSubmit_ResumeIntent_MultiDocCorpus_WeakOnlyMatches_FallsBackToRecency(t *testing.T) {
+	isolateHookLog(t)
+	db := newTestDB(t)
+	_, _, ouroborosDir := upcWorkspace(t)
+	upcSeedMultiDocCorpus(t, db)
+
+	rawRows, err := store.KeywordSearch(db, upcResumeWeakOnlyMatchPrompt, []string{"ouroboros"}, upcMaxEntries)
+	require.NoError(t, err)
+	for _, r := range rawRows {
+		t.Logf("raw bm25 score (resume weak-only prompt): %q -> %.4f", r.Title, r.Score)
+	}
+
+	p := hooks.UserPromptSubmitPayload{
+		Common: hooks.Common{Cwd: ouroborosDir, SessionID: "sess-resume-weak-fallback"},
+		Prompt: upcResumeWeakOnlyMatchPrompt,
+	}
+	resp := runHookUserPromptSubmit(p, db)
+	require.NotEqual(t, hooks.Response{}, resp,
+		"an all-weak-match resume prompt must still fall back to recency, not surface nothing")
+	// upcSeedMultiDocCorpus seeds the "Kubernetes..." doc last, so it's the
+	// most recently updated and must lead the recency fallback's listing.
+	assert.Regexp(t, `(?s)Kubernetes deployment pipeline rollback.*Widget Frobnicator`, resp.AdditionalContext,
+		"recency fallback must list newest-updated doc first")
 }
 
 func TestHookHandleUserPromptSubmit_DBOpenFailure_SilentAllow(t *testing.T) {
