@@ -1,6 +1,6 @@
 // Package integration drives the ouroboros MCP server as a real subprocess
 // over its stdio wire protocol (initialize -> tools/list -> tools/call),
-// exercising the full 5-tool surface (get, search, kb, backlog, roadmap)
+// exercising the full 4-tool surface (query, kb, backlog, roadmap)
 // end-to-end against a hermetic per-test SQLite DB. Opt-in via
 // ACC_OUROBOROS=1 (see internal/testutil.SkipUnlessAcc) so the default
 // `go test ./...` stays fast and never spawns a subprocess.
@@ -221,10 +221,9 @@ func TestMCPWireAcceptance(t *testing.T) {
 		}
 
 		// Exact-set assertion: fail on any add/remove/rename (schema-drift
-		// guard) — the MCP wire surface is intentionally frozen at 5 tools.
+		// guard) — the MCP wire surface is intentionally frozen at 4 tools.
 		assert.Equal(t, map[string]bool{
-			"get":     true,
-			"search":  true,
+			"query":   true,
 			"kb":      true,
 			"backlog": true,
 			"roadmap": true,
@@ -264,7 +263,7 @@ func TestMCPWireAcceptance(t *testing.T) {
 		seededDocID = created[0].ID
 
 		// Round-trip via get domain=kb ids=[id].
-		getRes, err := h.callTool(ctx, "get", map[string]any{
+		getRes, err := h.callTool(ctx, "query", map[string]any{
 			"domain": "kb",
 			"ids":    []any{seededDocID},
 		})
@@ -293,7 +292,7 @@ func TestMCPWireAcceptance(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		res, err := h.callTool(ctx, "search", map[string]any{
+		res, err := h.callTool(ctx, "query", map[string]any{
 			"domain": "kb",
 			"query":  distinctiveTerm,
 		})
@@ -345,7 +344,7 @@ func TestMCPWireAcceptance(t *testing.T) {
 		backlogItemID = created[0].ID
 
 		// List/get by id (verbose to inspect full fields).
-		getRes, err := h.callTool(ctx, "get", map[string]any{
+		getRes, err := h.callTool(ctx, "query", map[string]any{
 			"domain":  "backlog",
 			"ids":     []any{backlogItemID},
 			"verbose": true,
@@ -394,7 +393,7 @@ func TestMCPWireAcceptance(t *testing.T) {
 		require.False(t, doneRes.IsError, "backlog mark done returned error: %s", resultText(doneRes))
 
 		// Confirm the round trip: title update and status=done both stuck.
-		finalRes, err := h.callTool(ctx, "get", map[string]any{
+		finalRes, err := h.callTool(ctx, "query", map[string]any{
 			"domain": "backlog",
 			"ids":    []any{backlogItemID},
 		})
@@ -466,7 +465,7 @@ func TestMCPWireAcceptance(t *testing.T) {
 
 		// Verify the title update stuck and the item landed in done, via a
 		// structured get before removing it.
-		getRes, err := h.callTool(ctx, "get", map[string]any{
+		getRes, err := h.callTool(ctx, "query", map[string]any{
 			"domain":   "roadmap",
 			"projects": []any{roadmapProject},
 		})

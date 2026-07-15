@@ -17,39 +17,40 @@ import (
 	"dangernoodle.io/ouroboros/internal/roadmap"
 )
 
-// TestWireGetV2_OmittedDomain_ReturnsVerbatimMessage is the regression guard
-// a direct handler call can't provide: it drives buildServerV2's "get" tool
-// over an in-process mcpkit/testkit client (mcpx.InMemoryPair under the
-// hood — the same in-process wiring mcpkit's own tests use), omitting the
-// "domain" key from the call args entirely. If Domain were schema-required
-// (a bare `json:"domain"` field, no omitempty), go-sdk would reject this
-// call before handleGetV2 ever runs, with a generic schema-validation
-// error — not the verbatim domain-required message. This proves the
-// omitempty tag + explicit handler check (see getInput.Domain's comment)
-// preserve wire parity for the omitted-key case.
-func TestWireGetV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
+// TestWireQueryV2_OmittedDomain_ReturnsVerbatimMessage is the regression
+// guard a direct handler call can't provide: it drives buildServerV2's
+// "query" tool over an in-process mcpkit/testkit client (mcpx.InMemoryPair
+// under the hood — the same in-process wiring mcpkit's own tests use),
+// omitting the "domain" key from the call args entirely (fetch/filter
+// mode). If Domain were schema-required (a bare `json:"domain"` field, no
+// omitempty), go-sdk would reject this call before handleQueryV2 ever runs,
+// with a generic schema-validation error — not the verbatim
+// domain-required message. This proves the omitempty tag + explicit
+// handler check (see queryInputV2.Domain's comment) preserve wire parity
+// for the omitted-key case.
+func TestWireQueryV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
 	resetDB(t)
 
 	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
-	res, err := h.CallTool(context.Background(), "get", map[string]any{})
+	res, err := h.CallTool(context.Background(), "query", map[string]any{})
 	require.NoError(t, err, "an omitted domain key must not fail schema validation")
 	require.True(t, res.IsError)
 	assert.Equal(t, query.ErrDomainRequired, mcpx.ResultText(res))
 }
 
-// TestWireSearchV2_OmittedDomain_ReturnsVerbatimMessage is search's
-// counterpart to TestWireGetV2_OmittedDomain_ReturnsVerbatimMessage.
-func TestWireSearchV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
+// TestWireQueryV2_OmittedDomain_SearchMode_ReturnsVerbatimMessage is the
+// same omitted-domain guard for search mode (query present).
+func TestWireQueryV2_OmittedDomain_SearchMode_ReturnsVerbatimMessage(t *testing.T) {
 	resetDB(t)
 
 	app, err := buildServerV2(&serverState{db: db}, "test")
 	require.NoError(t, err)
 
 	h := testkit.New(t, app)
-	res, err := h.CallTool(context.Background(), "search", map[string]any{})
+	res, err := h.CallTool(context.Background(), "query", map[string]any{"query": "widget"})
 	require.NoError(t, err, "an omitted domain key must not fail schema validation")
 	require.True(t, res.IsError)
 	assert.Equal(t, query.ErrDomainRequired, mcpx.ResultText(res))
@@ -581,7 +582,7 @@ func TestWireV2_ServerInstructions_AdvertisedAtInitialize(t *testing.T) {
 
 // TestWireV2_ToolAnnotations_MatchOldServerMapping proves tools/list carries
 // the exact annotation mapping buildServer's toolAnnotation(...) calls set
-// (server.go): get/search ReadOnlyHint, kb IdempotentHint,
+// (server.go): query ReadOnlyHint, kb IdempotentHint,
 // backlog/roadmap DestructiveHint.
 func TestWireV2_ToolAnnotations_MatchOldServerMapping(t *testing.T) {
 	resetDB(t)
@@ -598,7 +599,7 @@ func TestWireV2_ToolAnnotations_MatchOldServerMapping(t *testing.T) {
 		byName[tool.Name] = tool
 	}
 
-	for _, name := range []string{"get", "search"} {
+	for _, name := range []string{"query"} {
 		require.NotNil(t, byName[name].Annotations, "%s tool missing annotations", name)
 		assert.True(t, byName[name].Annotations.ReadOnlyHint, "%s tool should carry ReadOnlyHint", name)
 	}

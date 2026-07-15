@@ -219,25 +219,25 @@ func TestResponseShapesFootprint(t *testing.T) {
 		tool string
 		args map[string]any
 	}{
-		{"get kb filter: 5 decisions", "get", map[string]any{
+		{"get kb filter: 5 decisions", "query", map[string]any{
 			"domain": "kb", "projects": []any{"acme-corp"}, "types": []any{"decision"},
 		}},
-		{"get kb filter: all 10 acme docs", "get", map[string]any{
+		{"get kb filter: all 10 acme docs", "query", map[string]any{
 			"domain": "kb", "projects": []any{"acme-corp"},
 		}},
-		{"get kb ids=[1] single", "get", map[string]any{
+		{"get kb ids=[1] single", "query", map[string]any{
 			"domain": "kb", "ids": []any{kbIDs[0]},
 		}},
-		{"search kb: 6 hits", "search", map[string]any{
+		{"search kb: 6 hits", "query", map[string]any{
 			"domain": "kb", "query": "Acme", "limit": 6,
 		}},
-		{"get backlog filter: 8 items", "get", map[string]any{
+		{"get backlog filter: 8 items", "query", map[string]any{
 			"domain": "backlog", "projects": []any{"acme-corp"}, "limit": 8,
 		}},
-		{"get backlog filter v=true: 8 items", "get", map[string]any{
+		{"get backlog filter v=true: 8 items", "query", map[string]any{
 			"domain": "backlog", "projects": []any{"acme-corp"}, "limit": 8, "verbose": true,
 		}},
-		{"get backlog ids=[5]", "get", map[string]any{
+		{"get backlog ids=[5]", "query", map[string]any{
 			"domain": "backlog", "ids": toAnyString(acmeIDs[:5]),
 		}},
 		{"kb write entries=[10 new docs]", "kb", map[string]any{
@@ -246,19 +246,19 @@ func TestResponseShapesFootprint(t *testing.T) {
 		{"backlog write entries=[10 updates]", "backlog", map[string]any{
 			"entries": backlogUpdateEntries,
 		}},
-		{"stress: get kb ids=[1..15] v=false", "get", map[string]any{
+		{"stress: get kb ids=[1..15] v=false", "query", map[string]any{
 			"domain": "kb", "ids": toAnyInt64(kbIDs),
 		}},
-		{"stress: get kb ids=[1..15] v=true", "get", map[string]any{
+		{"stress: get kb ids=[1..15] v=true", "query", map[string]any{
 			"domain": "kb", "ids": toAnyInt64(kbIDs), "verbose": true,
 		}},
-		{"stress: get backlog ids=[1..15]", "get", map[string]any{
+		{"stress: get backlog ids=[1..15]", "query", map[string]any{
 			"domain": "backlog", "ids": toAnyString(append(append([]string{}, acmeIDs...), umbrellaIDs...)),
 		}},
-		{"get roadmap format=md", "get", map[string]any{
+		{"get roadmap format=md", "query", map[string]any{
 			"domain": "roadmap", "projects": []any{"acme-corp"}, "format": "md",
 		}},
-		{"get roadmap format=html", "get", map[string]any{
+		{"get roadmap format=html", "query", map[string]any{
 			"domain": "roadmap", "projects": []any{"acme-corp"}, "format": "html",
 		}},
 	}

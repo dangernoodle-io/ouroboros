@@ -93,7 +93,7 @@ func TestToolsListFootprintV2(t *testing.T) {
 
 	// Per-tool: validate annotation structure (mirrors the old server's
 	// OU-75 check, restored on V2 at OU-5a).
-	expectedReadOnly := map[string]bool{"get": true, "search": true}
+	expectedReadOnly := map[string]bool{"query": true}
 	expectedIdempotent := map[string]bool{"kb": true}
 	expectedDestructive := map[string]bool{"backlog": true, "roadmap": true}
 	for _, tool := range tools {
@@ -116,10 +116,11 @@ func TestToolsListFootprintV2(t *testing.T) {
 	t.Logf("session constant cost: tokens=%d (instructions=%d + tools/list=%d)", totalTokens, instrTokens, listTokens)
 
 	require.Less(t, instrTokens, 4000, "serverInstructions exceeds 4000 tokens")
-	// Tightened at OU-298 from the old loose 4000 ceiling to a conscious
-	// budget ~10% above the trimmed measured cost (~1996 tokens): a
-	// deliberate increase must consciously raise this budget.
-	require.Less(t, listTokens, 2200, "tools/list exceeds 2200 tokens — a deliberate increase must consciously raise this budget")
+	// Tightened at OU-323 (get+search collapsed into one query tool) from the
+	// OU-298 budget (2200 tokens, ~1996 measured with 5 tools) to a
+	// conscious budget just above the new measured cost (~1717 tokens with
+	// 4 tools): a deliberate increase must consciously raise this budget.
+	require.Less(t, listTokens, 1800, "tools/list exceeds 1800 tokens — a deliberate increase must consciously raise this budget")
 
 	// Ensure testdata directory exists for snapshot files
 	require.NoError(t, os.MkdirAll("testdata", 0o755))
@@ -136,7 +137,7 @@ func TestToolsListFootprintV2(t *testing.T) {
 	assertSnapshot(t, "testdata/tools_list.json", toolsJSON)
 }
 
-// TestAllToolsRegisteredAtStartupV2 verifies all 5 tools are available
+// TestAllToolsRegisteredAtStartupV2 verifies all 4 tools are available
 // immediately after buildServerV2 composes, without requiring any prior
 // tool invocations -- V2's counterpart to the old buildServer's
 // TestAllToolsRegisteredAtStartup (deleted at the OU-5 cutover).
@@ -148,14 +149,14 @@ func TestAllToolsRegisteredAtStartupV2(t *testing.T) {
 	res, err := h.ListTools(context.Background())
 	require.NoError(t, err)
 
-	t.Logf("startup: %d total tools (expected 5)", len(res.Tools))
-	require.Len(t, res.Tools, 5, "should have exactly 5 tools at startup")
+	t.Logf("startup: %d total tools (expected 4)", len(res.Tools))
+	require.Len(t, res.Tools, 4, "should have exactly 4 tools at startup")
 
 	byName := make(map[string]bool, len(res.Tools))
 	for _, tool := range res.Tools {
 		byName[tool.Name] = true
 	}
-	for _, name := range []string{"get", "search", "kb", "backlog", "roadmap"} {
+	for _, name := range []string{"query", "kb", "backlog", "roadmap"} {
 		require.True(t, byName[name], "tool %s should be present", name)
 	}
 }
