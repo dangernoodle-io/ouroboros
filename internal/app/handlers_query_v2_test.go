@@ -219,7 +219,7 @@ func TestHandleQueryV2_DomainRoadmap_Markdown(t *testing.T) {
 // TestHandleQueryV2_DomainRoadmap_ByEpicResolvesLabel mirrors
 // TestHandleGet_DomainRoadmap_ByEpicResolvesLabel.
 func TestHandleQueryV2_DomainRoadmap_ByEpicResolvesLabel(t *testing.T) {
-	resetDB(t)
+	resetAllDB(t)
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
 	epicItem, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: WiFi map", "", "", "", "")
