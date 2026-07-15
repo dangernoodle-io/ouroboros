@@ -7,19 +7,24 @@ import (
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-// DocWithEdges wraps a KB document with its edges sidecar, populated only on
-// a verbose=true IDs fetch (see getDocuments). Moved here verbatim from
-// internal/app's former docWithEdges (OU-322) — the core, not the MCP
-// handler, now produces the edges-augmented shape.
-type DocWithEdges struct {
+// DocResult is the typed carrier for a single KB document IDs-fetch result
+// (see getDocuments): it always embeds the document, with Edges populated
+// only on a verbose=true fetch (nil/empty otherwise, dropped from the wire
+// by the omitempty tag) — replaces the former []any Docs union (OU-328) with
+// one shape covering both the plain and edges-augmented cases, byte-identical
+// on the wire in both.
+type DocResult struct {
 	*store.Document
 	Edges []edges.Edge `json:"edges,omitempty"`
 }
 
-// ItemWithEdges wraps a backlog item with its edges sidecar, populated only
-// on a verbose=true IDs fetch (see getBacklogItems). Moved here verbatim
-// from internal/app's former itemWithEdges (OU-322).
-type ItemWithEdges struct {
+// ItemResult is the typed carrier for a single backlog item IDs-fetch result
+// (see getBacklogItems): it always embeds the item, with Edges populated
+// only on a verbose=true fetch (nil/empty otherwise, dropped from the wire
+// by the omitempty tag) — replaces the former []any ItemsJSON union
+// (OU-328) with one shape covering both the plain and edges-augmented
+// cases, byte-identical on the wire in both.
+type ItemResult struct {
 	*backlog.Item
 	Edges []edges.Edge `json:"edges,omitempty"`
 }
@@ -33,12 +38,12 @@ type ItemWithEdges struct {
 // (see roadmap.RenderMarkdown/RenderHTML).
 type Result struct {
 	// kb
-	Docs           []any                     // IDs fetch: each *store.Document or DocWithEdges
+	Docs           []DocResult               // IDs fetch, one entry per found id
 	DocSummaries   []store.DocumentSummary   // filter-list (Get) or single-query (Search)
 	DocSummarySets [][]store.DocumentSummary // Search's queries[] batch (kb only)
 
 	// backlog
-	ItemsJSON []any          // IDs fetch: each *backlog.Item or ItemWithEdges
+	ItemsJSON []ItemResult   // IDs fetch, one entry per found id
 	Items     []backlog.Item // filter-list (Get) or query match (Search); caller renders
 
 	// roadmap

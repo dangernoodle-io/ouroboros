@@ -67,7 +67,7 @@ func runBacklogGet(out io.Writer, db *sql.DB, idStrs []string, verbose, asJSON b
 		validIDs = append(validIDs, id)
 	}
 
-	result := query.Result{ItemsJSON: []any{}}
+	result := query.Result{ItemsJSON: []query.ItemResult{}}
 	if len(validIDs) > 0 {
 		ids := make([]any, 0, len(validIDs))
 		for _, id := range validIDs {
@@ -89,13 +89,8 @@ func runBacklogGet(out io.Writer, db *sql.DB, idStrs []string, verbose, asJSON b
 			if i > 0 {
 				fmt.Fprintln(out)
 			}
-			switch v := it.(type) {
-			case *backlog.Item:
-				formatItemDetail(out, v, resolveProjectName(db, v.ID))
-			case query.ItemWithEdges:
-				formatItemDetail(out, v.Item, resolveProjectName(db, v.ID))
-				writeEdges(out, v.Edges)
-			}
+			formatItemDetail(out, it.Item, resolveProjectName(db, it.ID))
+			writeEdges(out, it.Edges)
 		}
 	}
 
