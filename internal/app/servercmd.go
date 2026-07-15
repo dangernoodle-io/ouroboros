@@ -27,17 +27,18 @@ type serverState struct {
 }
 
 // NewServerCommand builds the "server" cobra command that runs the
-// mcpkit-composed buildServerV2 server over stdio. buildServerV2 itself is
-// pure composition (no I/O), so it is safe to call here, at command-tree
-// construction time, with an as-yet-empty *serverState — no handler runs
-// until mcpkit.App.Run does, which cli.ServerCmd only calls after OnStart
-// has populated st.db.
+// mcpkit-composed buildServerV2 server over stdio by default, or HTTP when
+// --http is given (both transports are cli.ServerCmd's own, not hand-rolled
+// here). buildServerV2 itself is pure composition (no I/O), so it is safe to
+// call here, at command-tree construction time, with an as-yet-empty
+// *serverState — no handler runs until mcpkit.App.Run does, which
+// cli.ServerCmd only calls after OnStart has populated st.db.
 //
 // OnStart reuses the exact config.Load() -> store.InitDB(cfg.DBPath) chain
 // the old app.Serve used. OnShutdown closes the DB. Signal handling
-// (SIGTERM/SIGINT) and graceful shutdown are built into cli.ServerCmd — not
-// hand-rolled here (the old app.Serve's manual signal.Notify goroutine is
-// gone).
+// (SIGTERM/SIGINT), graceful shutdown, --read-only gating, and HTTP/stdio
+// transport selection are all built into cli.ServerCmd — not hand-rolled
+// here (the old app.Serve's manual signal.Notify goroutine is gone).
 func NewServerCommand(version string) *cobra.Command {
 	st := &serverState{}
 
@@ -50,7 +51,7 @@ func NewServerCommand(version string) *cobra.Command {
 		// every subcommand, not just "server").
 		return &cobra.Command{
 			Use:   "server",
-			Short: "run the ouroboros MCP server over stdio",
+			Short: "run the ouroboros MCP server",
 			RunE: func(*cobra.Command, []string) error {
 				return err
 			},
@@ -60,9 +61,15 @@ func NewServerCommand(version string) *cobra.Command {
 	return cli.ServerCmd(cli.Server{
 		App:        application,
 		Use:        "server",
-		Short:      "run the ouroboros MCP server over stdio",
+		Short:      "run the ouroboros MCP server",
 		OnStart:    serverOnStart(st),
 		OnShutdown: serverOnShutdown(st),
+		// HTTP opts into cli.ServerCmd's built-in --http/--stateless flags
+		// (mcpkit's own HTTP transport, App.HTTPHandler mounted on an httpx
+		// mux) -- no new transport infra here, just enabling what ServerCmd
+		// already provides. stdio remains the default; --http <addr> is
+		// opt-in per invocation.
+		HTTP: &cli.ServerHTTP{},
 	})
 }
 

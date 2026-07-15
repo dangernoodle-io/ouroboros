@@ -68,9 +68,10 @@ type harness struct {
 	dbPath string
 }
 
-// newHarness builds/resolves the ouroboros binary, spawns it as an MCP
-// stdio server (no args — stdio is the default RunE) against a
-// hermetic per-test SQLite DB, and completes the initialize handshake.
+// newHarness builds/resolves the ouroboros binary, spawns it via the
+// explicit "server" subcommand as an MCP stdio server (bare invocation is
+// help-only, see internal/cli/root.go) against a hermetic per-test SQLite
+// DB, and completes the initialize handshake.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 
@@ -93,7 +94,7 @@ func newHarness(t *testing.T) *harness {
 		"PATH=" + os.Getenv("PATH"),
 	}
 
-	c, err := client.NewStdioMCPClientWithOptions(bin, env, nil)
+	c, err := client.NewStdioMCPClientWithOptions(bin, env, []string{"server"})
 	require.NoError(t, err, "spawn ouroboros server")
 
 	// Drain stderr on a goroutine so a full pipe can never deadlock the

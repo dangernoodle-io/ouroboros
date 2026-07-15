@@ -18,33 +18,23 @@ var rootCmd = &cobra.Command{
 	SilenceUsage: true,
 }
 
-var versionFlag bool
-
 func init() {
-	rootCmd.Flags().BoolVarP(&versionFlag, "version", "v", false, "Print version and exit")
+	// rootCmd carries no Run/RunE: bare `ouroboros` (no subcommand) is a
+	// pure help dispatcher (cobra's default for a childless invocation),
+	// not a default action. The MCP server only runs via the explicit
+	// "server" subcommand (app.NewServerCommand, mcpkit's cli.ServerCmd) —
+	// the Claude Code plugin invokes `ouroboros server` explicitly
+	// (plugin/.claude-plugin/plugin.json).
+	rootCmd.AddCommand(app.NewServerCommand(Version))
 
-	// serverCmd is the mcpkit-composed MCP server ("ouroboros server"). A
-	// bare invocation (no subcommand, no --version) also runs it — the
-	// Claude Code plugin launches the bare binary — so
-	// mcpkitcli.UseAsDefault wires serverCmd.RunE onto rootCmd, then the
-	// wrapper below layers the pre-existing --version short-circuit back on
-	// top (UseAsDefault would otherwise overwrite it wholesale).
-	serverCmd := app.NewServerCommand(Version)
-	rootCmd.AddCommand(serverCmd)
-	mcpkitcli.UseAsDefault(rootCmd, serverCmd)
-
-	serveRunE := rootCmd.RunE
-	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if versionFlag {
-			if Version != "" {
-				fmt.Println(Version)
-			} else {
-				fmt.Println("(development build)")
-			}
-			return nil
-		}
-		// No subcommand and no --version: run the MCP server (default action).
-		return serveRunE(cmd, args)
+	// rootCmd.Version wires cobra's own --version/-v flag (idiomatic:
+	// InitDefaultVersionFlag adds it automatically whenever Version is
+	// non-empty). A dev build (no ldflags -X) still gets a working
+	// --version rather than silently losing the flag.
+	if Version != "" {
+		rootCmd.Version = Version
+	} else {
+		rootCmd.Version = "(development build)"
 	}
 
 	rootCmd.AddCommand(queryCmd)
