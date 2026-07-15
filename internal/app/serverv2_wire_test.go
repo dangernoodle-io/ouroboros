@@ -13,6 +13,7 @@ import (
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/kb"
+	"dangernoodle.io/ouroboros/internal/query"
 	"dangernoodle.io/ouroboros/internal/roadmap"
 )
 
@@ -36,7 +37,7 @@ func TestWireGetV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
 	res, err := h.CallTool(context.Background(), "get", map[string]any{})
 	require.NoError(t, err, "an omitted domain key must not fail schema validation")
 	require.True(t, res.IsError)
-	assert.Equal(t, errDomainRequired, mcpx.ResultText(res))
+	assert.Equal(t, query.ErrDomainRequired, mcpx.ResultText(res))
 }
 
 // TestWireSearchV2_OmittedDomain_ReturnsVerbatimMessage is search's
@@ -51,7 +52,7 @@ func TestWireSearchV2_OmittedDomain_ReturnsVerbatimMessage(t *testing.T) {
 	res, err := h.CallTool(context.Background(), "search", map[string]any{})
 	require.NoError(t, err, "an omitted domain key must not fail schema validation")
 	require.True(t, res.IsError)
-	assert.Equal(t, errDomainRequired, mcpx.ResultText(res))
+	assert.Equal(t, query.ErrDomainRequired, mcpx.ResultText(res))
 }
 
 // TestWireKBV2_OmittedEntries_ReturnsVerbatimMessage is kb's counterpart to
