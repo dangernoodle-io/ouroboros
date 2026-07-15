@@ -336,16 +336,18 @@ func TestHandleBacklogV2UpdateEpicNotFound_Errors(t *testing.T) {
 	assert.Empty(t, unchanged.Epic)
 }
 
-// TestHandleBacklogV2UpdateEpicClear mirrors TestHandleBacklogUpdateEpicClear:
-// passing an empty epic on update is allowed (no validation on empty --
-// clearing stays a no-op given epic is only set when non-empty, matching the
-// component field's convention).
+// TestHandleBacklogV2UpdateEpicClear (OU-338) is epic's clear-aware
+// counterpart to TestHandleBacklogV2UpdateClearNotesAndDescription: an
+// explicit empty epic on an item that HAS one clears it (previously a
+// no-op, since the handler only wrote epic into fields when non-empty).
 func TestHandleBacklogV2UpdateEpicClear(t *testing.T) {
 	resetAllDB(t)
 
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
 	require.NoError(t, err)
-	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", "")
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "", epic.ID)
 	require.NoError(t, err)
 
 	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
@@ -360,6 +362,59 @@ func TestHandleBacklogV2UpdateEpicClear(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "P2", updated.Priority)
 	assert.Empty(t, updated.Epic)
+}
+
+// TestHandleBacklogV2UpdateComponentClear (OU-338) is component's
+// clear-aware counterpart: an explicit empty component on an item that HAS
+// one clears it (previously a no-op, matching the epic bug above).
+func TestHandleBacklogV2UpdateComponentClear(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "widget", "")
+	require.NoError(t, err)
+
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item.ID), Component: strPtrV2("")},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Empty(t, updated.Component)
+}
+
+// TestHandleBacklogV2UpdateEpicComponentOmitted_Unchanged (OU-338) is the
+// critical regression guard: omitting epic/component (nil, key absent)
+// leaves both UNCHANGED -- proving omit and explicit-empty-clear are
+// distinct, not conflated by the OU-338 fix above.
+func TestHandleBacklogV2UpdateEpicComponentOmitted_Unchanged(t *testing.T) {
+	resetAllDB(t)
+
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: demo", "", "", "", "")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "task", "", "", "widget", epic.ID)
+	require.NoError(t, err)
+
+	res, _, err := handleBacklogV2(&serverState{db: db})(context.Background(), &mcpx.CallToolRequest{}, backlogInput{
+		Entries: []backlogEntryInput{
+			{ID: strPtrV2(item.ID), Priority: strPtrV2("P2")},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+
+	updated, err := backlog.GetItem(db, item.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "P2", updated.Priority)
+	assert.Equal(t, "widget", updated.Component)
+	assert.Equal(t, epic.ID, updated.Epic)
 }
 
 // TestHandleBacklogV2InvalidPriority mirrors TestHandleBacklogInvalidPriority.
