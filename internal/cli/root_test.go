@@ -3,20 +3,20 @@ package cli
 import (
 	"testing"
 
-	mcpkitcli "github.com/dangernoodle-io/mcpkit/cli"
+	sheshacli "github.com/dangernoodle-io/shesha/cli"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// stubProvider is a minimal mcpkitcli.CommandProvider for exercising
+// stubProvider is a minimal sheshacli.CommandProvider for exercising
 // mustMountProviders' error path without depending on claudeProvider()'s
 // real mount shape.
 type stubProvider struct {
-	mounts []mcpkitcli.Mount
+	mounts []sheshacli.Mount
 }
 
-func (s stubProvider) Mounts() []mcpkitcli.Mount { return s.mounts }
+func (s stubProvider) Mounts() []sheshacli.Mount { return s.mounts }
 
 // TestMustMountProviders_Success proves the real claudeProvider() mounts
 // cleanly (no panic) onto a fresh root, mirroring what init() does to
@@ -38,7 +38,7 @@ func TestMustMountProviders_Success(t *testing.T) {
 func TestMustMountProviders_PanicsOnMountError(t *testing.T) {
 	root := &cobra.Command{Use: "root"}
 	bad := stubProvider{
-		mounts: []mcpkitcli.Mount{
+		mounts: []sheshacli.Mount{
 			{Under: []string{"does-not-exist"}, Cmd: &cobra.Command{Use: "x"}},
 		},
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestClaudeHooksStop_WireDecodesStdinAndRuns exercises the full mcpkit
+// TestClaudeHooksStop_WireDecodesStdinAndRuns exercises the full shesha
 // seam end to end: build the provider's command tree, locate `hooks stop`,
 // feed it real stdin JSON, and confirm it decodes and runs to a silent
 // exit-0 (no transcript_path present, so runHookStop short-circuits).

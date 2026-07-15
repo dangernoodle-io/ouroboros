@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dangernoodle-io/mcpkit/host/claudecode/statusline"
+	"github.com/dangernoodle-io/shesha/host/claudecode/statusline"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/store"

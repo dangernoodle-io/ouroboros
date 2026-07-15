@@ -1,6 +1,6 @@
 // Package query is the surface-neutral read core (OU-322): a Get/Search
 // dispatch shared by every read caller. It deliberately does NOT import
-// mcpx/mcpkit/go-sdk, so it is callable from both the MCP handlers
+// mcpx/shesha/go-sdk, so it is callable from both the MCP handlers
 // (internal/app) and, eventually, a CLI query command (OU-324) without
 // pulling the MCP transport along. It only imports the domain packages
 // (store/backlog/roadmap/edges) that already held the read logic before

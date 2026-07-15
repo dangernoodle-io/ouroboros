@@ -27,7 +27,7 @@ make lint     # golangci-lint run
 - `internal/backlog/` — backlog CRUD (projects, items, plans, config)
 - `internal/roadmap/` — roadmap CRUD (per-project singletons, item mutations)
 - `internal/edges/` — polymorphic cross-reference graph (item/kb, blocks\|relates\|explains); `[[Title]]` KB autolinking; cascade cleanup on item/kb delete
-- `internal/config/` — config loading via mcpkit `config.Load` + `xdgpath` (bootstrap.json overlay + `PROJECT_KB_PATH`/`QM_DB_PATH` env alias)
+- `internal/config/` — config loading via shesha `config.Load` + `xdgpath` (bootstrap.json overlay + `PROJECT_KB_PATH`/`QM_DB_PATH` env alias)
 - `internal/kb/` — KB export/import, validation
 - `internal/embed/` — pure-Go, offline static text embeddings (Model2Vec potion-retrieval-32M, int8-quantized, `//go:embed`'d asset); foundation for semantic search — not yet wired into the CLI/MCP surface
 - `internal/dashboard/` — dashboard data-capture (builtin/exec/shell segment producers → NDJSON contract; gated by `dashboard.enabled`); exec/shell run per-segment with a `timeout` (default 5s, clamped [1s,30s]) — sh/jq are NOT required (exec is native argv, shell is opt-in `sh -c`), and producers are operator-configured local commands (trust boundary = a Makefile/git hook), not remote input
@@ -64,7 +64,7 @@ Default DB path: XDG data dir for `ouroboros` (`~/.local/share/ouroboros/kb.db`;
 
 ## Dependencies
 
-- `github.com/dangernoodle-io/mcpkit` (+ `mcpkit/cli`, `mcpkit/mcpx`, `mcpkit/host/generic`) — MCP server framework; the served ouroboros MCP server is the mcpkit-composed `buildServerV2` (`internal/app`), wired into `internal/cli` via `mcpkit/cli.ServerCmd`; bare `ouroboros` shows help, the MCP server runs via `ouroboros server` (stdio by default, `--http <addr>` optional, `--read-only` gate)
+- `github.com/dangernoodle-io/shesha` (+ `shesha/cli`, `shesha/mcpx`, `shesha/host/generic`) — MCP server framework; the served ouroboros MCP server is the shesha-composed `buildServerV2` (`internal/app`), wired into `internal/cli` via `shesha/cli.ServerCmd`; bare `ouroboros` shows help, the MCP server runs via `ouroboros server` (stdio by default, `--http <addr>` optional, `--read-only` gate)
 - `github.com/mark3labs/mcp-go` — test-only, the MCP wire-acceptance client (`integration/mcp_acc_test.go`); not imported by served code
 - `modernc.org/sqlite` — pure Go SQLite driver (CGO_ENABLED=0 safe)
 

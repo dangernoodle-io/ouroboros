@@ -1,6 +1,6 @@
 package app
 
-// queryInputV2 is the mcpkit-typed union of every parameter across the
+// queryInputV2 is the shesha-typed union of every parameter across the
 // former get and search tools (collapsed into the single query tool at
 // OU-323), spanning all three domains (kb|backlog|roadmap). Domain is
 // logically required but deliberately NOT schema-required (see its field
@@ -38,7 +38,7 @@ type queryInputV2 struct {
 	Format      string   `json:"format,omitempty" jsonschema:"structured, md, or html, default structured (roadmap only)"`
 }
 
-// kbInput is the mcpkit-typed input for the kb write tool (OU-2): a batch of
+// kbInput is the shesha-typed input for the kb write tool (OU-2): a batch of
 // entries[], each either a create/natural-key-upsert (id absent) or an
 // id-addressed partial update (id present).
 type kbInput struct {
@@ -111,7 +111,7 @@ type kbEntryInput struct {
 	Metadata    *map[string]string `json:"metadata,omitempty"`
 }
 
-// backlogInput is the mcpkit-typed input for the backlog write tool (OU-3):
+// backlogInput is the shesha-typed input for the backlog write tool (OU-3):
 // entries[] (mixed create/update batch) or delete_ids[] (batch delete).
 // Neither is schema-required (see the comment on Entries below and
 // getInput.Domain's comment for the same missing==empty verbatim-message
@@ -201,7 +201,7 @@ type edgeInput struct {
 	Target string `json:"target,omitempty"`
 }
 
-// roadmapInput is the mcpkit-typed input for the roadmap write tool (OU-4):
+// roadmapInput is the shesha-typed input for the roadmap write tool (OU-4):
 // a single flat arg set (NOT entries[]) dispatched by Op across
 // add|update|move|reorder|done|remove. Every field the old handler
 // validates with a verbatim message (Op, Project, Section, To, per-op

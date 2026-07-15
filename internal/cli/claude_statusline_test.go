@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dangernoodle-io/mcpkit/host/claudecode/statusline"
+	"github.com/dangernoodle-io/shesha/host/claudecode/statusline"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -363,7 +363,7 @@ func TestBuildStatuslineSegments_NoProjectBracketWhenEmpty(t *testing.T) {
 }
 
 // TestClaudeStatusline_WireDecodesStdinAndRenders exercises the full
-// mcpkit seam end to end: build the provider's command tree, locate
+// shesha seam end to end: build the provider's command tree, locate
 // `statusline`, feed it real stdin JSON, and confirm the rendered line.
 func TestClaudeStatusline_WireDecodesStdinAndRenders(t *testing.T) {
 	dbPath := isolateStatuslineDB(t)

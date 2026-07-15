@@ -220,7 +220,7 @@ func TestBareInvocation_ShowsHelp(t *testing.T) {
 }
 
 // TestServerSubcommand_Registered proves "server" (app.NewServerCommand,
-// mcpkit's cli.ServerCmd) is mounted on rootCmd -- the only way the MCP
+// shesha's cli.ServerCmd) is mounted on rootCmd -- the only way the MCP
 // server runs now that bare invocation no longer defaults to it.
 func TestServerSubcommand_Registered(t *testing.T) {
 	cmd, _, err := rootCmd.Find([]string{"server"})

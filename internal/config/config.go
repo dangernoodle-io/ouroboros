@@ -3,8 +3,8 @@ package config
 import (
 	"os"
 
-	mcpkitconfig "github.com/dangernoodle-io/mcpkit/config"
-	"github.com/dangernoodle-io/mcpkit/xdgpath"
+	sheshaconfig "github.com/dangernoodle-io/shesha/config"
+	"github.com/dangernoodle-io/shesha/xdgpath"
 )
 
 type Config struct {
@@ -22,12 +22,12 @@ type Config struct {
 func Load() (*Config, error) {
 	defaults := Config{DBPath: xdgpath.DataFile("ouroboros", "kb.db")}
 
-	cfg, err := mcpkitconfig.Load(defaults, mcpkitconfig.WithXDGFile("ouroboros", "bootstrap.json"))
+	cfg, err := sheshaconfig.Load(defaults, sheshaconfig.WithXDGFile("ouroboros", "bootstrap.json"))
 	if err != nil {
 		return nil, err
 	}
 
-	// PROJECT_KB_PATH takes priority, then QM_DB_PATH as alias. mcpkit's
+	// PROJECT_KB_PATH takes priority, then QM_DB_PATH as alias. shesha's
 	// WithEnv field-maps by struct field name and doesn't know about this
 	// alias, so it's applied by hand.
 	if v := os.Getenv("PROJECT_KB_PATH"); v != "" {
@@ -36,7 +36,7 @@ func Load() (*Config, error) {
 		cfg.DBPath = v
 	}
 
-	cfg.DBPath = mcpkitconfig.ExpandHome(cfg.DBPath)
+	cfg.DBPath = sheshaconfig.ExpandHome(cfg.DBPath)
 
 	return &cfg, nil
 }

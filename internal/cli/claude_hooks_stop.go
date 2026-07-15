@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/dangernoodle-io/mcpkit/host/claudecode/hooks"
+	"github.com/dangernoodle-io/shesha/host/claudecode/hooks"
 )
 
 // hookHandleStop is the Stop-hook persist-nudge, a native port of

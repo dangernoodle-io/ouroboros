@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/dangernoodle-io/mcpkit/mcpx"
-	"github.com/dangernoodle-io/mcpkit/testkit"
+	"github.com/dangernoodle-io/shesha/mcpx"
+	"github.com/dangernoodle-io/shesha/testkit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -19,8 +19,8 @@ import (
 
 // TestWireQueryV2_OmittedDomain_ReturnsVerbatimMessage is the regression
 // guard a direct handler call can't provide: it drives buildServerV2's
-// "query" tool over an in-process mcpkit/testkit client (mcpx.InMemoryPair
-// under the hood — the same in-process wiring mcpkit's own tests use),
+// "query" tool over an in-process shesha/testkit client (mcpx.InMemoryPair
+// under the hood — the same in-process wiring shesha's own tests use),
 // omitting the "domain" key from the call args entirely (fetch/filter
 // mode). If Domain were schema-required (a bare `json:"domain"` field, no
 // omitempty), go-sdk would reject this call before handleQueryV2 ever runs,
@@ -553,8 +553,8 @@ func TestWireRoadmapV2_UpdateNullKB_LeavesUnchanged(t *testing.T) {
 // TestWireV2_ServerInstructions_AdvertisedAtInitialize proves buildServerV2
 // advertises serverInstructions verbatim over the wire. testkit.Harness
 // doesn't expose the underlying ClientSession's InitializeResult, so this
-// connects an in-process client directly against the *mcpkit.App (the same
-// mcpx.InMemoryPair + mcpx.NewClient pattern mcpkit's own mcpx_test.go uses
+// connects an in-process client directly against the *shesha.App (the same
+// mcpx.InMemoryPair + mcpx.NewClient pattern shesha's own mcpx_test.go uses
 // for TestServerInstructions), reading Instructions off
 // ClientSession.InitializeResult() -- the sole wire-level path mcpx exposes.
 func TestWireV2_ServerInstructions_AdvertisedAtInitialize(t *testing.T) {
