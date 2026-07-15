@@ -69,9 +69,10 @@ type backlogCreateRequest struct {
 // runBacklogCreate builds a new backlog item. Status is always "open" (the
 // core hardcodes it — see backlog.addItemExec); there is no --status flag.
 // Priority validation deliberately reuses the existing, already-shared
-// backlog.ParsePriority (case-insensitive) rather than adding a third
-// strict P0-P6 copy alongside it and internal/app's parsePriority — see
-// OU-329's parsePriority-drift debt. The parsed value is then normalized to
+// backlog.ParsePriority (case-insensitive) rather than backlog.
+// ParsePriorityStrict (OU-329's unified strict P0-P6 validator, shared by
+// the MCP write/read paths) — CLI create intentionally accepts the more
+// lenient form. The parsed value is then normalized to
 // uppercase before being persisted, since AddItem stores the raw string
 // verbatim and downstream sorting/filtering (e.g. buildItemFilterWhere's
 // CAST(SUBSTR(priority,2)...)) expects the "P<n>" shape produced here.

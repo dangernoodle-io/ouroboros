@@ -172,7 +172,7 @@ func handleBacklogEntriesV2(db *sql.DB, entries []backlogEntryInput) (*mcpx.Call
 
 			if len(fields) > 0 || len(edgeSpecs) > 0 {
 				if p, ok := fields["priority"]; ok {
-					if _, err := parsePriority(p); err != nil {
+					if _, err := backlog.ParsePriorityStrict(p); err != nil {
 						return mcpx.ErrorResult(err.Error()), nil, nil
 					}
 				}
@@ -224,7 +224,7 @@ func handleBacklogEntriesV2(db *sql.DB, entries []backlogEntryInput) (*mcpx.Call
 			continue
 		}
 
-		if _, err := parsePriority(priority); err != nil {
+		if _, err := backlog.ParsePriorityStrict(priority); err != nil {
 			return mcpx.ErrorResult(err.Error()), nil, nil
 		}
 
