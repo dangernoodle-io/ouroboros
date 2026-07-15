@@ -5,7 +5,7 @@ import (
 	"github.com/dangernoodle-io/shesha/host/claudecode"
 	"github.com/dangernoodle-io/shesha/host/claudecode/hooks"
 	"github.com/dangernoodle-io/shesha/host/claudecode/statusline"
-	"github.com/muesli/termenv"
+	"github.com/dangernoodle-io/shesha/style"
 )
 
 // claudeProvider returns the shesha cli.CommandProvider contributing the
@@ -37,7 +37,7 @@ func claudeProvider() sheshacli.CommandProvider {
 		statusline.Command(
 			ouroborosStatuslineProvider(),
 			statusline.WithAppPrefix("OUROBOROS"),
-			statusline.WithForceProfile(termenv.ANSI),
+			statusline.WithForceLevel(style.LevelBasic),
 		),
 	)
 }
