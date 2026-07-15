@@ -52,4 +52,6 @@ func resetAllDB(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec("DELETE FROM edges")
 	require.NoError(t, err)
+	_, err = db.Exec("DELETE FROM item_id_aliases")
+	require.NoError(t, err)
 }
