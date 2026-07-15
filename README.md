@@ -15,10 +15,10 @@ MCP server for persistent project knowledge base and backlog management. Stores 
 
 | Namespace | Tools | Docs |
 |-----------|-------|------|
-| Read | `get`, `search` (domain: kb\|backlog\|roadmap) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog), [Wiki](../../wiki/Roadmap) |
+| Read | `query` — fetch/search entries (requires domain: kb\|backlog\|roadmap) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog), [Wiki](../../wiki/Roadmap) |
 | Write | `kb` (KB entries), `backlog` (items), `roadmap` (per-project sections, grouped by component/epic) | [Wiki](../../wiki/Knowledge-Base), [Wiki](../../wiki/Backlog), [Wiki](../../wiki/Roadmap) |
 
-Cross-reference edges (`blocks`/`relates`/`explains` between items/KB docs) fold into the existing tools rather than a 6th tool: `backlog` write entries[].edges[], `kb` write `[[Title]]` autolinks, `get` verbose=true edges sidecar. See [Backlog](../../wiki/Backlog).
+Cross-reference edges (`blocks`/`relates`/`explains` between items/KB docs) fold into the existing tools rather than a 6th tool: `backlog` write entries[].edges[], `kb` write `[[Title]]` autolinks, `query` verbose=true edges sidecar. See [Backlog](../../wiki/Backlog).
 
 Operator-style ops (`project`, `plan`, `config`, `kb delete <id>...`, `export`, `import`, `roadmap`, `link`/`unlink`) are CLI-only — see `ouroboros --help`.
 
@@ -63,29 +63,33 @@ Download pre-built binaries from [releases](https://github.com/dangernoodle-io/o
 ### Register manually with Claude Code
 
 ```bash
-claude mcp add --scope user ouroboros /absolute/path/to/ouroboros
+claude mcp add --scope user ouroboros /absolute/path/to/ouroboros -- server
 ```
 
-This gives you the 10 MCP tools but none of the auto-context injection or persistence hooks that the plugin provides.
+The `--` separator passes `server` as an argument to the binary (not to `claude mcp add` itself), matching the plugin's own `plugin.json` (`"args": ["server"]`) — bare `ouroboros` is a help dispatcher, not the MCP server, so omitting `server` here registers a server that never actually starts. This gives you the 4 MCP tools but none of the auto-context injection or persistence hooks that the plugin provides.
 
-## Browse with `ls` and `roadmap show`
+## Browse with the noun-first CLI
 
-When you're not using the MCP server, the `ls` subcommands provide a read-only CLI for browsing. All commands support tabular output and `--json` for scripting. The `roadmap show` command renders a per-project roadmap as Markdown, or as a rich self-contained HTML fragment with `--html`.
+When you're not using the MCP server, the noun-first subcommands provide a read-only CLI for browsing (plus writes: `backlog create/update/delete`, `kb write`, `edges link/unlink`). All commands support tabular output and `--json` for scripting. The `roadmap show` command renders a per-project roadmap as Markdown, or as a rich self-contained HTML fragment with `--html`.
 
 ```bash
-ouroboros ls projects                              # list all projects
-ouroboros ls items --project acme-corp             # list items in a project
-ouroboros ls items AC-1                            # show item detail
-ouroboros ls kb --search caching                   # search knowledge base
-ouroboros ls kb 42 --json                          # fetch document as JSON
-ouroboros ls plans --status active                 # list active plans
+ouroboros project list                              # list all projects
+ouroboros backlog list --project acme-corp          # list items in a project
+ouroboros backlog get AC-1                          # show item detail
+ouroboros kb search caching                         # search knowledge base
+ouroboros kb get 42 --json                          # fetch document as JSON
+ouroboros plan list --status active                 # list active plans
 ouroboros roadmap show acme-corp --by epic          # print roadmap grouped by epic
 ouroboros roadmap show acme-corp --html -o rm.html  # render a standalone HTML file
-ouroboros link item:BB-9 blocks item:TM-40          # create a cross-reference edge
-ouroboros ls edges --label blocks                   # list edges
+ouroboros edges link item:BB-9 blocks item:TM-40    # create a cross-reference edge (top-level `link` alias also works)
+ouroboros edges list --label blocks                 # list edges
 ```
 
-Flags: `ls items`: `--project`, `--status`, `--priority` (P0–P6, exact match), `--component`. `ls kb`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--search`, `--limit`. `ls plans`: `--project`, `--status`. `ls edges`: `--label`, `--type item|kb` + `--id` (together). All subcommands: `--json`. Roadmap: `show` (`--by component|epic`, `--component`, `--epic`, `--html` for a self-contained HTML fragment/standalone doc instead of Markdown, `--output`/`-o <file>` to write it — without `-o` the bare embeddable fragment prints to stdout, with `-o` it's wrapped in a minimal standalone `<!doctype html>` document), `add`, `update`, `move`, `reorder`, `done`, `remove`, `seed` (`--backlog`, `--priority` — max cap, e.g. `P2` includes P0-P2, unlike `ls items --priority`'s exact match — `--component`, `--status`, `--replace` — resyncs only the current fetch's matches, leaving previously-seeded items outside the filter untouched) — see `ouroboros roadmap --help`. Edges: `link <src> <label> <dst>` / `unlink <src> <label> <dst>` where src/dst are `item:<id>` or `kb:<id>`.
+Flags: `backlog list`: `--project`, `--status` (repeatable), `--priority` (P0–P6, exact match), `--component`, `--epic`, `--epics`, `--since`, `--sort created`, `--limit`. `backlog get <id>...`: `--verbose`. `backlog search <text>`: same filters as `list` (single-valued `--status`). `backlog create`: `--project`, `--priority` (required, P0-P6), `--title` (required), `--component`, `--epic`, `--description` (500 char cap), `--notes`. `backlog update <id>`: `--priority`, `--title`, `--status`, `--component`, `--epic`, `--description`, `--notes`, `--append-notes`. `backlog delete <id>...`: all-or-nothing. `kb list`: `--project`, `--type`, `--category`, `--tag` (repeatable), `--limit`. `kb search <text>`: `--project`, `--type`, `--category`, `--limit`. `kb get <id>...`: `--verbose`. `plan list`: `--project`, `--status`. `edges list`: `--label`, `--type item|kb` + `--id` (together). All read subcommands: `--json`. Roadmap: `show` (`--by component|epic`, `--component`, `--epic`, `--html` for a self-contained HTML fragment/standalone doc instead of Markdown, `--output`/`-o <file>` to write it — without `-o` the bare embeddable fragment prints to stdout, with `-o` it's wrapped in a minimal standalone `<!doctype html>` document), `add`, `update`, `move`, `reorder`, `done`, `remove`, `seed` (`--backlog`, `--priority` — max cap, e.g. `P2` includes P0-P2, unlike `backlog list --priority`'s exact match — `--component`, `--status`, `--replace` — resyncs only the current fetch's matches, leaving previously-seeded items outside the filter untouched) — see `ouroboros roadmap --help`. Edges: `edges link <src> <label> <dst>` / `edges unlink <src> <label> <dst>` (also available as top-level `link`/`unlink`) where src/dst are `item:<id>` or `kb:<id>`.
+
+## Server
+
+`ouroboros server [--http <addr>] [--stateless] [--read-only]` runs the MCP server; stdio by default. `--http <addr>` switches to streamable-HTTP on that address; `--stateless` (defaults to true in HTTP mode) drops session state between requests; `--read-only` advertises only read-only tools, gating out destructive ones.
 
 ## Configuration
 

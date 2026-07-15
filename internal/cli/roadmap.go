@@ -578,7 +578,7 @@ func init() {
 	roadmapShowCmd.Flags().StringVarP(&roadmapShowOutput, "output", "o", "", "Write HTML to this file as a standalone document (--html only; default: print the bare fragment to stdout)")
 
 	roadmapSeedCmd.Flags().BoolVar(&roadmapSeedBacklog, "backlog", false, "Seed from backlog items (required)")
-	roadmapSeedCmd.Flags().StringVar(&roadmapSeedPriority, "priority", "", "Max priority to include, e.g. P2 includes P0-P2 (cap, not exact match like ls items --priority; default: no cap)")
+	roadmapSeedCmd.Flags().StringVar(&roadmapSeedPriority, "priority", "", "Max priority to include, e.g. P2 includes P0-P2 (cap, not exact match like backlog list --priority; default: no cap)")
 	roadmapSeedCmd.Flags().StringVar(&roadmapSeedComponent, "component", "", "Filter by component")
 	roadmapSeedCmd.Flags().StringVar(&roadmapSeedStatus, "status", "open", "Backlog status filter: open or done")
 	roadmapSeedCmd.Flags().BoolVar(&roadmapSeedReplace, "replace", false, "Re-sync already-seeded items instead of skipping them")
