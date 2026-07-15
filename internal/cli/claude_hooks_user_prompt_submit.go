@@ -170,13 +170,17 @@ func runHookUserPromptSubmit(p hooks.UserPromptSubmitPayload, db *sql.DB) hooks.
 	// results (store.KeywordSearch) over an arbitrary recency dump whenever
 	// the prompt tokenizes to at least one non-stopword term. Only when the
 	// prompt has no usable FTS terms (or the relevance search comes back
-	// empty) do we fall back to QueryDocuments' recency-ordered listing.
+	// empty, including empty after the weak-match floor below) do we fall
+	// back to QueryDocuments' recency-ordered listing.
 	var rows []store.DocumentSummary
 	var err error
 	if intent == "resume" {
 		if len(store.TokenizeQuery(p.Prompt)) > 0 {
 			search := truncateRunes(strings.ReplaceAll(p.Prompt, "'", ""), 200)
 			rows, err = store.KeywordSearch(db, search, []string{project}, upcMaxEntries)
+			if err == nil {
+				rows = filterByBM25Threshold(rows)
+			}
 		}
 		if err == nil && len(rows) == 0 {
 			rows, err = store.QueryDocuments(db, nil, []string{project}, nil, "", nil, upcMaxEntries)
@@ -189,19 +193,14 @@ func runHookUserPromptSubmit(p hooks.UserPromptSubmitPayload, db *sql.DB) hooks.
 		return hooks.Response{}
 	}
 
-	// Apply the upcBM25Threshold weak-match floor on the specific-intent path
-	// only. The resume path now relevance-ranks via KeywordSearch too (a
-	// Score-bearing bm25 result), but intentionally does not apply this
-	// threshold: per-path floor tuning is corpus-dependent and deferred to a
-	// follow-up ticket (OU-340).
+	// OU-340: the upcBM25Threshold weak-match floor is now applied to BOTH
+	// the resume path (above, immediately after KeywordSearch — with a
+	// recency fallback when nothing clears the floor) and the specific path
+	// (here) — a resume prompt with several usable terms should not inject a
+	// real-but-weak bm25 match as if it were high-confidence, same as
+	// specific.
 	if intent == "specific" {
-		filtered := rows[:0:0] //nolint:gocritic // fresh backing array, rows is not reused after this point
-		for _, r := range rows {
-			if r.Score <= upcBM25Threshold {
-				filtered = append(filtered, r)
-			}
-		}
-		rows = filtered
+		rows = filterByBM25Threshold(rows)
 		if len(rows) == 0 {
 			return hooks.Response{}
 		}
@@ -254,6 +253,20 @@ func upcBacklogLines(db *sql.DB, project string) []string {
 		lines = append(lines, "  ["+item.Priority+"] "+item.ID+": "+item.Title)
 	}
 	return lines
+}
+
+// filterByBM25Threshold drops rows whose bm25 score is weaker (less
+// negative, i.e. a poorer match) than upcBM25Threshold, keeping only
+// strong-enough matches. Shared by both the resume and specific intent
+// paths so the weak-match floor is applied identically.
+func filterByBM25Threshold(rows []store.DocumentSummary) []store.DocumentSummary {
+	filtered := rows[:0:0] //nolint:gocritic // fresh backing array, rows is not reused after this point
+	for _, r := range rows {
+		if r.Score <= upcBM25Threshold {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
 }
 
 // truncateRunes caps s at maxRunes runes (a rune-safe analog of the Node
