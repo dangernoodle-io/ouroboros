@@ -117,21 +117,3 @@ func TestFormatKBDetail(t *testing.T) {
 	assert.Contains(t, output, "Content:")
 	assert.Contains(t, output, "Notes:")
 }
-
-func TestFormatPlanDetail(t *testing.T) {
-	var buf bytes.Buffer
-	plan := &backlog.Plan{
-		ID:      17,
-		Status:  "active",
-		Title:   "Q1 roadmap",
-		Content: "Plan the quarterly work",
-	}
-	formatPlanDetail(&buf, plan, "acme-corp")
-
-	output := buf.String()
-	assert.Contains(t, output, "17")
-	assert.Contains(t, output, "[active]")
-	assert.Contains(t, output, "acme-corp")
-	assert.Contains(t, output, "Q1 roadmap")
-	assert.Contains(t, output, "Content:")
-}

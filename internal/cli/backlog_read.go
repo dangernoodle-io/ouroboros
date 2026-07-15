@@ -15,7 +15,7 @@ import (
 // kb_render.go.
 
 // printBacklogItemTable renders a []backlog.Item as a table (same header/
-// columns as ls_backlog.go's runLSItems and the unlanded OU-324 branch's
+// columns as the retired ls-backlog table and the unlanded OU-324 branch's
 // query_render.go printBacklogItemTable) — shared by `backlog list` and
 // `backlog search`. Items in filter/list or search mode carry a real
 // ProjectID (unlike an --ids fetch's result, which query.Get always zeroes
@@ -153,12 +153,12 @@ func dedupStrings(s []string) []string {
 	return out
 }
 
-// priorityMinMax mirrors ls_backlog.go's runLSItems single --priority flag
+// priorityMinMax mirrors the retired `ls backlog` single --priority flag
 // parsing: a well-formed "P0"-"P6" value sets an exact-match min==max
 // filter (query.Request.PriorityMin/Max are strings, parsed downstream by
 // internal/query's buildItemFilter); anything else (empty, or malformed)
 // leaves both "" — an invalid --priority value is silently ignored rather
-// than erroring, matching the old `ls backlog` behavior being mirrored here.
+// than erroring.
 func priorityMinMax(priority string) (string, string) {
 	if priority == "" {
 		return "", ""

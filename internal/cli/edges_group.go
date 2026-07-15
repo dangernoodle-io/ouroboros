@@ -8,9 +8,8 @@ import (
 
 // edgesCmd is the cobra-idiomatic noun group for edge operations
 // (list/link/unlink). It coexists with the top-level link/unlink
-// commands (kept as back-compat aliases) and with `ls edges` (kept
-// until dissolution) — all three share the same run* helpers so
-// behavior never diverges between surfaces.
+// commands (kept as back-compat aliases) — both share the same run*
+// helpers so behavior never diverges between surfaces.
 var edgesCmd = &cobra.Command{
 	Use:   "edges",
 	Short: "Manage edges (blocks|relates|explains) between items/kb docs",
