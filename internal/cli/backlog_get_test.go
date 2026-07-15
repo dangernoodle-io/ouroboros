@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -172,6 +173,54 @@ func TestRunBacklogGetAllMissingJSON(t *testing.T) {
 	var items []backlog.Item
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &items))
 	assert.Empty(t, items)
+}
+
+// TestRunBacklogGetDedupsIDAndAlias is the OU-337 regression guard: an id
+// followed by one of its own aliases must render the underlying item
+// exactly once, not twice.
+func TestRunBacklogGetDedupsIDAndAlias(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Only once", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("INSERT INTO item_id_aliases (old_id, new_id, renamed_at) VALUES (?, ?, ?)",
+		"AC-OLD", item.ID, "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runBacklogGet(&buf, db, []string{item.ID, "AC-OLD"}, false, false)
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Equal(t, 1, strings.Count(output, "Only once"))
+}
+
+// TestRunBacklogGetDedupsIDAndAliasPreservesOrderJSON confirms the dedup
+// preserves first-seen order across a distinct third id: id, alias-of-id,
+// then a distinct id renders [item, other] — not [item, item, other] and
+// not reordered.
+func TestRunBacklogGetDedupsIDAndAliasPreservesOrderJSON(t *testing.T) {
+	db := newTestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	item1, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "First", "", "", "", "")
+	require.NoError(t, err)
+	item2, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P0", "Second", "", "", "", "")
+	require.NoError(t, err)
+	_, err = db.Exec("INSERT INTO item_id_aliases (old_id, new_id, renamed_at) VALUES (?, ?, ?)",
+		"AC-OLD", item1.ID, "2024-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = runBacklogGet(&buf, db, []string{item1.ID, "AC-OLD", item2.ID}, false, true)
+	require.NoError(t, err)
+
+	var items []backlog.Item
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &items))
+	require.Len(t, items, 2)
+	assert.Equal(t, "First", items[0].Title)
+	assert.Equal(t, "Second", items[1].Title)
 }
 
 func TestResolveProjectNameMissingItem(t *testing.T) {

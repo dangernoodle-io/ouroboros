@@ -44,6 +44,16 @@ func init() {
 // call always miss-free while still routing the actual fetch through the
 // shared core.
 //
+// The same pre-screening pass also dedups by resolved canonical id
+// (OU-337): passing both an id and one of its aliases (e.g. `get AC-1
+// AC-1-old`, where AC-1-old is an item_id_aliases redirect to AC-1) would
+// otherwise put both strings into validIDs, and query.Get's underlying
+// backlog.GetItems resolves each independently — rendering the same
+// underlying item twice. seenCanonical tracks resolved ids already
+// admitted, preserving first-seen order (a duplicate is dropped, not the
+// first occurrence); it does not change alias resolution itself, only
+// which already-resolved duplicates get forwarded to query.Get.
+//
 // Found items are rendered normally to out (JSON array or table — data
 // only, nothing appended); any missing id instead produces a returned "not
 // found" error rather than writing to out — out must stay a clean,
@@ -58,12 +68,18 @@ func init() {
 func runBacklogGet(out io.Writer, db *sql.DB, idStrs []string, verbose, asJSON bool) error {
 	var validIDs []string
 	var missing []string
+	seenCanonical := make(map[string]bool, len(idStrs))
 	for _, s := range idStrs {
 		id := strings.TrimSpace(s)
-		if _, err := backlog.GetItem(db, id); err != nil {
+		item, err := backlog.GetItem(db, id)
+		if err != nil {
 			missing = append(missing, id)
 			continue
 		}
+		if seenCanonical[item.ID] {
+			continue
+		}
+		seenCanonical[item.ID] = true
 		validIDs = append(validIDs, id)
 	}
 
