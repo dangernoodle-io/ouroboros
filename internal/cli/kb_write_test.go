@@ -215,6 +215,72 @@ func TestRunPutStdinMultipleEntries(t *testing.T) {
 	assert.Len(t, summaries, 3)
 }
 
+// TestRunPutDispatchesFlagsMode proves runPut's useStdin=false branch
+// dispatches to runPutFlags -- the same behavior TestRunPutFlagsCreate
+// exercises directly, but through the wrapper cobra's RunE actually calls.
+func TestRunPutDispatchesFlagsMode(t *testing.T) {
+	db := newTestDB(t)
+
+	var buf bytes.Buffer
+	err := runPut(&buf, strings.NewReader(""), db, "acme-corp", "decision", "Use PostgreSQL", "Performance benefits", "", "", nil, false)
+	require.NoError(t, err)
+
+	var result putResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "Use PostgreSQL", result.Title)
+}
+
+// TestRunPutDispatchesStdinMode proves runPut's useStdin=true branch
+// dispatches to runPutStdin.
+func TestRunPutDispatchesStdinMode(t *testing.T) {
+	db := newTestDB(t)
+
+	input := `[{"type":"note","project":"tk-test","title":"Note 1","content":"Content 1"}]`
+	var buf bytes.Buffer
+	err := runPut(&buf, strings.NewReader(input), db, "", "", "", "", "", "", nil, true)
+	require.NoError(t, err)
+
+	var results []putResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &results))
+	require.Len(t, results, 1)
+	assert.Equal(t, "Note 1", results[0].Title)
+}
+
+// TestKBWriteCmdRunEWiring exercises kbWriteCmd's RunE closure directly
+// (flag parsing + withDB wiring), proving the cobra registration works
+// end-to-end -- runPutFlags' own behavior is already covered above.
+func TestKBWriteCmdRunEWiring(t *testing.T) {
+	setupEdgesFileDB(t)
+
+	putProjectFlag = "acme-corp"
+	putTypeFlag = "decision"
+	putTitleFlag = "Wired decision"
+	putContentFlag = "Wired content"
+	putNotesFlag = ""
+	putCategoryFlag = ""
+	putTagsFlag = nil
+	putStdinFlag = false
+	defer func() {
+		putProjectFlag = ""
+		putTypeFlag = ""
+		putTitleFlag = ""
+		putContentFlag = ""
+		putNotesFlag = ""
+		putCategoryFlag = ""
+		putTagsFlag = nil
+		putStdinFlag = false
+	}()
+
+	var buf bytes.Buffer
+	kbWriteCmd.SetOut(&buf)
+	err := kbWriteCmd.RunE(kbWriteCmd, nil)
+	require.NoError(t, err)
+
+	var result putResult
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "Wired decision", result.Title)
+}
+
 func TestRunPutFlagsRequiredFlags(t *testing.T) {
 	db := newTestDB(t)
 
