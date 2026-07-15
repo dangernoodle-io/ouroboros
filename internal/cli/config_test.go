@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 
@@ -184,57 +183,69 @@ func TestRunConfigListMultipleValues(t *testing.T) {
 	}
 }
 
-func TestVersionFlagDevBuild(t *testing.T) {
-	// Ensure Version is empty so the dev-build branch is taken.
-	orig := Version
-	Version = ""
-	defer func() { Version = orig }()
+// TestVersionFlag_DevBuild proves rootCmd's cobra-native --version (wired
+// via rootCmd.Version in root.go's init, not a hand-rolled RunE) prints the
+// dev-build placeholder idiomatically ("<name> version <value>", cobra's
+// defaultVersionTemplate) when built without ldflags.
+func TestVersionFlag_DevBuild(t *testing.T) {
+	origVersion := rootCmd.Version
+	defer func() { rootCmd.Version = origVersion }()
+	rootCmd.Version = "(development build)"
 
-	versionFlag = false
-	rootCmd.SetArgs([]string{"--version"})
+	output := execRootCaptured(t, "--version")
 
-	// Capture stdout since rootCmd.RunE uses fmt.Println.
-	oldStdout, r, w, err := captureStdout()
+	assert.Contains(t, output, "version (development build)")
+}
+
+// TestVersionFlag_WithVersion proves the same idiomatic --version path
+// prints a real ldflags-injected version string.
+func TestVersionFlag_WithVersion(t *testing.T) {
+	origVersion := rootCmd.Version
+	defer func() { rootCmd.Version = origVersion }()
+	rootCmd.Version = "v1.2.3-test"
+
+	output := execRootCaptured(t, "--version")
+
+	assert.Contains(t, output, "version v1.2.3-test")
+}
+
+// TestBareInvocation_ShowsHelp proves bare `ouroboros` (no args, no
+// subcommand) is a pure help dispatcher: exits cleanly (no error) and
+// prints usage, since rootCmd carries no Run/RunE (see root.go).
+func TestBareInvocation_ShowsHelp(t *testing.T) {
+	output := execRootCaptured(t)
+
+	assert.Contains(t, output, "Usage:")
+	assert.Contains(t, output, "ouroboros")
+}
+
+// TestServerSubcommand_Registered proves "server" (app.NewServerCommand,
+// mcpkit's cli.ServerCmd) is mounted on rootCmd -- the only way the MCP
+// server runs now that bare invocation no longer defaults to it.
+func TestServerSubcommand_Registered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"server"})
 	require.NoError(t, err)
-	execErr := rootCmd.Execute()
-	output := restoreStdout(oldStdout, r, w)
-
-	require.NoError(t, execErr)
-	assert.Contains(t, output, "development build")
+	assert.Equal(t, "server", cmd.Name())
 }
 
-func TestVersionFlagWithVersion(t *testing.T) {
-	orig := Version
-	Version = "v1.2.3-test"
-	defer func() { Version = orig }()
+// execRootCaptured runs rootCmd with args, capturing both stdout and
+// stderr into a single buffer via cobra's own SetOut/SetErr (rather than
+// swapping os.Stdout), and restores rootCmd's output/args/flag state
+// afterward so tests stay isolated from each other.
+func execRootCaptured(t *testing.T, args ...string) string {
+	t.Helper()
 
-	versionFlag = false
-	rootCmd.SetArgs([]string{"--version"})
-
-	oldStdout, r, w, err := captureStdout()
-	require.NoError(t, err)
-	execErr := rootCmd.Execute()
-	output := restoreStdout(oldStdout, r, w)
-
-	require.NoError(t, execErr)
-	assert.Contains(t, output, "v1.2.3-test")
-}
-
-func captureStdout() (oldStdout *os.File, r *os.File, w *os.File, err error) {
-	r, w, err = os.Pipe()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	oldStdout = os.Stdout
-	os.Stdout = w
-	return oldStdout, r, w, nil
-}
-
-func restoreStdout(oldStdout *os.File, r *os.File, w *os.File) string {
-	w.Close() //nolint:errcheck
-	os.Stdout = oldStdout
 	var buf bytes.Buffer
-	buf.ReadFrom(r) //nolint:errcheck
-	r.Close()       //nolint:errcheck
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs(args)
+	defer func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SetArgs(nil)
+		_ = rootCmd.Flags().Set("version", "false")
+	}()
+
+	require.NoError(t, rootCmd.Execute())
 	return buf.String()
 }

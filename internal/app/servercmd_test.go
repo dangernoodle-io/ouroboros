@@ -22,6 +22,20 @@ func TestNewServerCommand(t *testing.T) {
 	assert.NotEmpty(t, cmd.Short)
 }
 
+// TestNewServerCommand_Flags proves the mcpkit cli.ServerCmd-provided flags
+// are present on the built command: --read-only is registered
+// unconditionally by ServerCmd, and --http/--stateless appear because
+// NewServerCommand opts into cli.Server.HTTP (mcpkit's own HTTP transport --
+// no new transport infra added here).
+func TestNewServerCommand_Flags(t *testing.T) {
+	cmd := NewServerCommand("v-test")
+	require.NotNil(t, cmd)
+
+	assert.NotNil(t, cmd.Flags().Lookup("read-only"))
+	assert.NotNil(t, cmd.Flags().Lookup("http"))
+	assert.NotNil(t, cmd.Flags().Lookup("stateless"))
+}
+
 // TestServerOnStart_ConfigLoadError proves serverOnStart surfaces a real
 // config.Load failure: OUROBOROS_CONFIG_DIR (xdgpath's app-specific
 // override that internal/config.Load's mcpkitconfig.WithXDGFile resolves

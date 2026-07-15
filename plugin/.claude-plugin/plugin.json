@@ -12,6 +12,7 @@
   "mcpServers": {
     "ouroboros": {
       "command": "${CLAUDE_PLUGIN_DATA}/bin/ouroboros",
+      "args": ["server"],
       "instructions": "Read/write axis: query (the single read tool) requires domain (kb|backlog|roadmap); writes are kb (KB entries) and backlog (items). Project/plan/config/delete/export/import are CLI-only (run `ouroboros <cmd> --help`). query returns summaries by default — pass verbose: true only when full content is needed; ids[] = exact fetch, query/queries[] = full-text search, else filter/list. kb accepts an optional id to update an existing entry in place instead of creating a duplicate."
     }
   }
