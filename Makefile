@@ -14,8 +14,8 @@ acc:
 cover:
 	go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -1
 
-bench: build
-	python3 bench/response-shapes/probe.py
+bench:
+	go test ./internal/app -run TestResponseShapesFootprint -v
 
 lint:
 	golangci-lint run
