@@ -252,10 +252,6 @@ func TestHandleBacklogV2CreateWithAliasResolvedEpic(t *testing.T) {
 	epic, err := backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "EPIC: renamed", "", "", "", "")
 	require.NoError(t, err)
 
-	// old_id must be distinct from handlers_backlog_test.go's
-	// TestHandleBacklogCreateWithAliasResolvedEpic ("OLD-1") -- resetAllDB
-	// does not clear item_id_aliases, and both tests share the same
-	// in-memory db within this package.
 	_, err = db.Exec("INSERT INTO item_id_aliases (old_id, new_id, renamed_at) VALUES (?, ?, ?)",
 		"OLD-V2-1", epic.ID, "2024-01-01T00:00:00Z")
 	require.NoError(t, err)
