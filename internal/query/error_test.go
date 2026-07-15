@@ -112,3 +112,18 @@ func TestSearch_DomainRoadmap_StoreError(t *testing.T) {
 	_, err := Search(db, Request{Domain: "roadmap", Query: "widget"})
 	require.Error(t, err)
 }
+
+// TestSearch_DomainRoadmap_ComponentFilter_LoadError covers the OU-330
+// roadmap.Load error branch: a component/epic filter set on a search hit
+// whose roadmap doc has corrupt metadata must surface the load error.
+func TestSearch_DomainRoadmap_ComponentFilter_LoadError(t *testing.T) {
+	db := testutil.TestDB(t)
+	_, err := store.UpsertDocument(db, store.Document{
+		Type: "roadmap", Project: "acme-corp", Title: "roadmap", Content: "widget",
+		Metadata: map[string]string{"data": "not json"},
+	})
+	require.NoError(t, err)
+
+	_, err = Search(db, Request{Domain: "roadmap", Query: "widget", Component: "core"})
+	require.Error(t, err)
+}

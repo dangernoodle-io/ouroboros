@@ -24,7 +24,7 @@ type queryInputV2 struct {
 	Types       []string `json:"types,omitempty" jsonschema:"Filter by types (kb only)"`
 	Projects    []string `json:"projects,omitempty" jsonschema:"Filter by project names"`
 	Categories  []string `json:"categories,omitempty" jsonschema:"Filter by categories (kb only)"`
-	Tags        []string `json:"tags,omitempty" jsonschema:"Filter by tags, all match (kb only, filter/list mode)"`
+	Tags        []string `json:"tags,omitempty" jsonschema:"Filter by tags, all match (kb only; combines with query)"`
 	Limit       int      `json:"limit,omitempty" jsonschema:"Limit, default 10, max 500"`
 	PriorityMin string   `json:"priority_min,omitempty" jsonschema:"Min priority P0-P6 (backlog only)"`
 	PriorityMax string   `json:"priority_max,omitempty" jsonschema:"Max priority P0-P6 (backlog only)"`

@@ -708,6 +708,91 @@ func TestSearchDocumentsWithProjectFilter(t *testing.T) {
 	assert.Equal(t, "acme-corp", summaries[0].Project)
 }
 
+// TestSearchDocumentsWithTagsFilter is the OU-330 regression: a full-text
+// query combined with a tags filter must only return docs matching BOTH,
+// and populate the bm25 Score (previously dropped in the FTS branch).
+func TestSearchDocumentsWithTagsFilter(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "Widget A", Content: "PostgreSQL notes", Tags: []string{"release"}}
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "Widget B", Content: "PostgreSQL notes", Tags: []string{"ops"}}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", nil, nil, nil, 50, "release")
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Widget A", summaries[0].Title)
+	assert.NotZero(t, summaries[0].Score, "FTS+tags path should populate BM25 score")
+}
+
+// TestSearchDocumentsWithMultipleTagsFilter confirms AND-semantics (mirrors
+// QueryDocuments' tags filter): a doc must carry every listed tag.
+func TestSearchDocumentsWithMultipleTagsFilter(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "Widget A", Content: "PostgreSQL notes", Tags: []string{"release", "ci"}}
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "Widget B", Content: "PostgreSQL notes", Tags: []string{"release"}}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", nil, nil, nil, 50, "release", "ci")
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Widget A", summaries[0].Title)
+}
+
+// TestSearchDocumentsNoTags_RowsPreserved_ScorePopulated pins the empty-filter
+// shape: calling SearchDocuments with no tags returns the exact same rows as
+// before OU-330 (variadic tags is a no-op when omitted), and additionally
+// confirms bm25 Score is now populated on this path (previously always 0).
+func TestSearchDocumentsNoTags_RowsPreserved_ScorePopulated(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "Widget A", Content: "PostgreSQL notes", Tags: []string{"release"}}
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "Widget B", Content: "PostgreSQL notes", Tags: []string{"ops"}}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	summaries, err := store.SearchDocuments(db, "PostgreSQL", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 2)
+	titles := []string{summaries[0].Title, summaries[1].Title}
+	assert.Contains(t, titles, "Widget A")
+	assert.Contains(t, titles, "Widget B")
+	assert.NotZero(t, summaries[0].Score, "FTS no-tags path should populate BM25 score")
+	assert.NotZero(t, summaries[1].Score, "FTS no-tags path should populate BM25 score")
+}
+
+// TestSearchDocumentsWildcardFallback_WithTags covers the punctuation-only
+// fallback-to-list-mode branch (hasSearchableTokens == false), confirming
+// tags now plumb through that path too (previously always nil).
+func TestSearchDocumentsWildcardFallback_WithTags(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "Widget A", Tags: []string{"release"}}
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "Widget B", Tags: []string{"ops"}}
+
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	summaries, err := store.SearchDocuments(db, "*", nil, nil, nil, 50, "release")
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Widget A", summaries[0].Title)
+}
+
 func TestFtsEscape(t *testing.T) {
 	tests := []struct {
 		name     string
