@@ -13,7 +13,7 @@ query is the read tool (required domain: kb|backlog|roadmap); kb/backlog/roadmap
 - Search before writing — avoid duplicates; kb upserts by type+project+category+title when id is absent, or updates in place when id is present (use this to retitle).
 - Default response is summary; verbose=true only when full content/notes are needed.
 - roadmap is a per-project singleton (now/next/deferred/parked/dropped/done sections); items carry two single-valued grouping axes, component and epic (an epic is a backlog item); query format=md|html&by=component|epic renders Markdown/HTML grouped on that axis, filterable by component/epic.
-- Edges (blocks/relates/explains) link items/kb docs: backlog entries[].edges[] creates them inline at write time; kb content [[Title]] autolinks; query verbose=true surfaces an edges sidecar; CLI link/unlink/ls edges for retrofits.
+- Edges (blocks/relates/explains) link items/kb docs: backlog entries[].edges[] creates them inline at write time; kb content [[Title]] autolinks; query verbose=true surfaces an edges sidecar; CLI link/unlink/edges list for retrofits.
 - Checkpoint after multi-step tasks; persist non-obvious decisions, update or delete stale ones.
 - Never run sqlite3/raw SQL against the ouroboros DB file — on a tool failure, stop and report rather than improvising.`
 

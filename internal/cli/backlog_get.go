@@ -39,10 +39,10 @@ func init() {
 // omits a miss), domain=backlog's underlying backlog.GetItems is
 // all-or-nothing: a single missing id fails the WHOLE batched query.Get
 // call, so runBacklogGet pre-screens each requested id via backlog.GetItem
-// (alias-aware, same resolution `ls backlog <id>` uses) to split
-// found/missing BEFORE dispatching query.Get with only the ids known to
-// resolve — that keeps query.Get's call always miss-free while still
-// routing the actual fetch through the shared core.
+// (alias-aware resolution) to split found/missing BEFORE dispatching
+// query.Get with only the ids known to resolve — that keeps query.Get's
+// call always miss-free while still routing the actual fetch through the
+// shared core.
 //
 // Found items are rendered normally to out (JSON array or table — data
 // only, nothing appended); any missing id instead produces a returned "not
@@ -54,8 +54,7 @@ func init() {
 // query.Get's IDs-mode fetch always zeroes item.ProjectID (see
 // internal/query/get.go's getBacklogItems), so table-mode rendering
 // resolves each found item's real project name via a direct
-// backlog.GetItem + backlog.GetProjectByID lookup, matching `ls backlog
-// <id>`'s output.
+// backlog.GetItem + backlog.GetProjectByID lookup.
 func runBacklogGet(out io.Writer, db *sql.DB, idStrs []string, verbose, asJSON bool) error {
 	var validIDs []string
 	var missing []string
@@ -107,7 +106,7 @@ func runBacklogGet(out io.Writer, db *sql.DB, idStrs []string, verbose, asJSON b
 }
 
 // resolveProjectName looks up id's real project name, following the same
-// path ls_backlog.go's runLSItemDetail uses: backlog.GetItem (unlike
+// resolution path the retired `ls backlog` detail view used: backlog.GetItem (unlike
 // query.Get's IDs-mode result, this still carries the real ProjectID) then
 // backlog.GetProjectByID. Errors are swallowed (empty project name) rather
 // than propagated — a lookup failure here would only degrade the detail

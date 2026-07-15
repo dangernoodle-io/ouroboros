@@ -20,8 +20,9 @@ import (
 // directly (flag parsing + withDB wiring), since cobra never dispatches
 // through rootCmd in the test binary. `edges link`/`edges unlink` share
 // the exact linkCmd/unlinkCmd.RunE function value (no duplicated logic),
-// and `edges list` shares runLSEdges with `ls edges` — this file proves
-// the group wiring and the shared behavior, not new business logic.
+// and `edges list` dispatches through runLSEdges (edges_read.go) — this
+// file proves the group wiring and the shared behavior, not new business
+// logic.
 //
 // Because the RunE closures dispatch through withDB (which opens its own
 // *sql.DB against PROJECT_KB_PATH, distinct from testutil.TestDB's

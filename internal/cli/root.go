@@ -37,10 +37,8 @@ func init() {
 		rootCmd.Version = "(development build)"
 	}
 
-	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(importCmd)
-	rootCmd.AddCommand(lsCmd)
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(kbCmd)

@@ -38,7 +38,7 @@ func init() {
 // same core the MCP query tool and `ouroboros query --domain kb --ids ...`
 // consume. query.Get's contract silently omits an id with no matching row
 // (mirrors store.GetDocuments); runKBGet restores fail-on-miss (matching the
-// old `ls kb <id>` behavior) by diffing the requested ids against the
+// fail-on-miss semantics) by diffing the requested ids against the
 // returned docs after fetching: docs that WERE found are still rendered
 // normally to out (JSON array or table — data only, nothing appended), but
 // any missing id produces a returned "not found" error rather than writing

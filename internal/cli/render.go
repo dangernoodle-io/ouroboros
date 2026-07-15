@@ -79,15 +79,3 @@ func formatKBDetail(out io.Writer, doc *store.Document) {
 		fmt.Fprintln(out, doc.Notes)
 	}
 }
-
-func formatPlanDetail(out io.Writer, plan *backlog.Plan, projectName string) {
-	header := fmt.Sprintf("%d  [%s]  %s", plan.ID, plan.Status, projectName)
-	fmt.Fprintln(out, header)
-	fmt.Fprintf(out, "Title: %s\n", plan.Title)
-
-	if plan.Content != "" {
-		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Content:")
-		fmt.Fprintln(out, plan.Content)
-	}
-}
