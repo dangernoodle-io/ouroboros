@@ -769,20 +769,25 @@ func hasSearchableTokens(q string) bool {
 	return false
 }
 
-// SearchDocuments performs a full-text search across all documents.
+// SearchDocuments performs a full-text search across all documents,
+// optionally combined with a tags filter (OU-330): tags is variadic so
+// existing callers (types/projects/categories/limit only) are unaffected —
+// passing no tags is identical to the prior behavior. Tag semantics mirror
+// QueryDocuments' tags filter (AND — every listed tag must be present).
+// Populates the bm25 Score field, consistent with QueryDocuments' FTS path.
 // Returns DocumentSummary (no content, no metadata).
-func SearchDocuments(db *sql.DB, query string, types []string, projects []string, categories []string, limit int) ([]DocumentSummary, error) {
+func SearchDocuments(db *sql.DB, query string, types []string, projects []string, categories []string, limit int, tags ...string) ([]DocumentSummary, error) {
 	limit = ClampLimit(limit, 10, 500)
 
 	// If query has no searchable tokens (only punctuation/wildcards), fall back to list mode
 	if !hasSearchableTokens(query) {
-		return QueryDocuments(db, types, projects, categories, "", nil, limit)
+		return QueryDocuments(db, types, projects, categories, "", tags, limit)
 	}
 
 	escapedQuery := FtsEscape(query)
 
 	ftQuery := `
-		SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at
+		SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at, bm25(documents_fts) AS score
 		FROM documents d
 		JOIN documents_fts fts ON d.id = fts.rowid
 		WHERE fts.documents_fts MATCH ?
@@ -792,6 +797,10 @@ func SearchDocuments(db *sql.DB, query string, types []string, projects []string
 	ftQuery += typeFilter("d.", types, &args)
 	ftQuery += projectFilter("d.", projects, &args)
 	ftQuery += categoryFilter("d.", categories, &args)
+	for _, tag := range tags {
+		ftQuery += " AND EXISTS (SELECT 1 FROM json_each(d.tags) WHERE value = ?)"
+		args = append(args, tag)
+	}
 
 	ftQuery += " LIMIT ?"
 	args = append(args, limit)
@@ -807,7 +816,7 @@ func SearchDocuments(db *sql.DB, query string, types []string, projects []string
 		var summary DocumentSummary
 		var tagsJSON sql.NullString
 
-		if err := rows.Scan(&summary.ID, &summary.Type, &summary.Project, &summary.Category, &summary.Title, &tagsJSON, &summary.UpdatedAt); err != nil {
+		if err := rows.Scan(&summary.ID, &summary.Type, &summary.Project, &summary.Category, &summary.Title, &tagsJSON, &summary.UpdatedAt, &summary.Score); err != nil {
 			return nil, fmt.Errorf("failed to scan search result: %w", err)
 		}
 

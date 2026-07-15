@@ -305,7 +305,7 @@
             "type": "string"
           },
           "tags": {
-            "description": "Filter by tags, all match (kb only, filter/list mode)",
+            "description": "Filter by tags, all match (kb only; combines with query)",
             "items": {
               "type": "string"
             },

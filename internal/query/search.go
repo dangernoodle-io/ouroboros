@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
+	"dangernoodle.io/ouroboros/internal/roadmap"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
@@ -25,11 +26,13 @@ func Search(db *sql.DB, req Request) (Result, error) {
 }
 
 // searchDocuments ports searchDocumentsV2: single query or Queries[] batch.
+// req.Tags (OU-330) combines with the full-text query — previously dropped
+// in search mode, honored only in list/filter mode via query.Get.
 func searchDocuments(db *sql.DB, req Request) (Result, error) {
 	if len(req.Queries) > 0 {
 		resultSets := make([][]store.DocumentSummary, 0, len(req.Queries))
 		for _, q := range req.Queries {
-			rs, err := store.SearchDocuments(db, q, req.Types, req.Projects, req.Categories, req.Limit)
+			rs, err := store.SearchDocuments(db, q, req.Types, req.Projects, req.Categories, req.Limit, req.Tags...)
 			if err != nil {
 				return Result{}, err
 			}
@@ -45,7 +48,7 @@ func searchDocuments(db *sql.DB, req Request) (Result, error) {
 		return Result{}, errors.New("query or queries is required")
 	}
 
-	summaries, err := store.SearchDocuments(db, req.Query, req.Types, req.Projects, req.Categories, req.Limit)
+	summaries, err := store.SearchDocuments(db, req.Query, req.Types, req.Projects, req.Categories, req.Limit, req.Tags...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -73,7 +76,13 @@ func searchBacklogItems(db *sql.DB, req Request) (Result, error) {
 	return Result{Items: items}, nil
 }
 
-// searchRoadmap ports searchRoadmapV2: FTS over documents type=roadmap.
+// searchRoadmap ports searchRoadmapV2: FTS over documents type=roadmap. Each
+// hit is a whole per-project roadmap doc (roadmap is a singleton doc, not
+// one row per item), so req.Component/req.Epic (OU-330) can't filter SQL
+// rows directly — instead, for each FTS hit, load and roadmap.Filter that
+// project's roadmap and keep the hit only if the filtered roadmap still has
+// at least one item, mirroring the component/epic filter query.Get applies
+// via getRoadmap. No filter set: behavior is unchanged (no extra Load call).
 func searchRoadmap(db *sql.DB, req Request) (Result, error) {
 	if req.Query == "" {
 		return Result{}, errors.New("query is required")
@@ -84,5 +93,27 @@ func searchRoadmap(db *sql.DB, req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	return Result{DocSummaries: summaries}, nil
+	if req.Component == "" && req.Epic == "" {
+		return Result{DocSummaries: summaries}, nil
+	}
+
+	filtered := make([]store.DocumentSummary, 0, len(summaries))
+	for _, s := range summaries {
+		rm, err := roadmap.Load(db, s.Project)
+		if err != nil {
+			return Result{}, err
+		}
+		if roadmapHasItems(roadmap.Filter(rm, req.Component, req.Epic)) {
+			filtered = append(filtered, s)
+		}
+	}
+
+	return Result{DocSummaries: filtered}, nil
+}
+
+// roadmapHasItems reports whether rm has at least one item in any section.
+func roadmapHasItems(rm *roadmap.Roadmap) bool {
+	return len(rm.Sections.Now) > 0 || len(rm.Sections.Next) > 0 ||
+		len(rm.Sections.Deferred) > 0 || len(rm.Sections.Parked) > 0 ||
+		len(rm.Sections.Dropped) > 0 || len(rm.Sections.Done) > 0
 }
