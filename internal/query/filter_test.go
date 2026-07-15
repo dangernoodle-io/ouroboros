@@ -10,33 +10,6 @@ import (
 	"dangernoodle.io/ouroboros/internal/testutil"
 )
 
-func TestParsePriority(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    int
-		wantErr bool
-	}{
-		{"P0", "P0", 0, false},
-		{"P6", "P6", 6, false},
-		{"invalid format", "P7", 0, true},
-		{"invalid prefix", "X1", 0, true},
-		{"invalid value", "P-1", 0, true},
-		{"empty", "", 0, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := parsePriority(tt.input)
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestBuildItemFilter_AllFields(t *testing.T) {
 	db := testutil.TestDB(t)
 	proj, err := backlog.CreateProject(db, "acme-corp", "AC")

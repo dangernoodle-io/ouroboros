@@ -3,30 +3,17 @@ package query
 import (
 	"database/sql"
 	"fmt"
-	"strconv"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 )
 
-// parsePriority parses a "P0"-"P6" priority string, verbatim (including
-// error text) from internal/app's former parsePriority. Duplicated rather
-// than shared with internal/app's write-handler copy (handlers_backlog_v2.go
-// also calls it, transactionally) so this extraction touches zero write-path
-// code, per the OU-322 build spec.
-func parsePriority(s string) (int, error) {
-	if len(s) != 2 || s[0] != 'P' {
-		return 0, fmt.Errorf("invalid priority: %s (expected P0-P6)", s)
-	}
-	n, err := strconv.Atoi(string(s[1]))
-	if err != nil || n < 0 || n > 6 {
-		return 0, fmt.Errorf("invalid priority: %s (expected P0-P6)", s)
-	}
-	return n, nil
-}
-
-// resolveProjects resolves each project name to its id, verbatim from
-// internal/app's former resolveProjects (see parsePriority's comment on why
-// this is a duplicate, not a shared call, of the write-path's copy).
+// resolveProjects resolves each project name to its id. Shape-adapts
+// backlog.GetProjectByName for the read path (plural names -> ids, over
+// *sql.DB): the write path's resolveProject (internal/app/shared.go) wraps
+// the same backlog.GetProjectByName but is singular, tx-capable
+// (backlog.Executor), and returns *backlog.Project -- a deliberately
+// different shape (batch-write vs list-filter callers), not duplicated
+// logic (OU-329).
 func resolveProjects(db *sql.DB, names []string) ([]int64, error) {
 	ids := make([]int64, 0, len(names))
 	for _, name := range names {
@@ -66,14 +53,14 @@ func buildItemFilter(db *sql.DB, req Request) (backlog.ItemFilter, error) {
 		f.ProjectIDs = ids
 	}
 	if req.PriorityMin != "" {
-		n, err := parsePriority(req.PriorityMin)
+		n, err := backlog.ParsePriorityStrict(req.PriorityMin)
 		if err != nil {
 			return f, err
 		}
 		f.PriorityMin = &n
 	}
 	if req.PriorityMax != "" {
-		n, err := parsePriority(req.PriorityMax)
+		n, err := backlog.ParsePriorityStrict(req.PriorityMax)
 		if err != nil {
 			return f, err
 		}

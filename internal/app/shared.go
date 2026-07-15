@@ -27,22 +27,15 @@ type edgeSpec struct {
 	Target string
 }
 
-func parsePriority(s string) (int, error) {
-	if len(s) != 2 || s[0] != 'P' {
-		return 0, fmt.Errorf("invalid priority: %s (expected P0-P6)", s)
-	}
-	n, err := strconv.Atoi(string(s[1]))
-	if err != nil || n < 0 || n > 6 {
-		return 0, fmt.Errorf("invalid priority: %s (expected P0-P6)", s)
-	}
-	return n, nil
-}
-
 // resolveProject accepts backlog.Executor (not just *sql.DB) so a caller
 // already inside a shared transaction (e.g. the batch write in
 // handleBacklogEntriesV2) can resolve a project on that same connection —
 // the store enforces SetMaxOpenConns(1), so a second *sql.DB-level query
-// while a tx holds the only connection would deadlock.
+// while a tx holds the only connection would deadlock. Shape-adapts
+// backlog.GetProjectByName for the write path (singular, tx-capable,
+// *backlog.Project); the read path's resolveProjects (internal/query/
+// filter.go) wraps the same call but is plural over *sql.DB and returns ids
+// — a deliberately different shape, not duplicated logic (OU-329).
 func resolveProject(d backlog.Executor, name string) (*backlog.Project, error) {
 	return backlog.GetProjectByName(d, name)
 }
