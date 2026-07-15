@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/query"
-	"dangernoodle.io/ouroboros/internal/store"
 )
 
 var (
@@ -65,14 +64,7 @@ func runKBGet(out io.Writer, db *sql.DB, idStrs []string, verbose, asJSON bool) 
 
 	found := make(map[string]bool, len(result.Docs))
 	for _, d := range result.Docs {
-		switch v := d.(type) {
-		case *store.Document:
-			found[strconv.FormatInt(v.ID, 10)] = true
-		case query.DocWithEdges:
-			found[strconv.FormatInt(v.ID, 10)] = true
-		default:
-			return fmt.Errorf("kb get: unexpected doc type %T", d)
-		}
+		found[strconv.FormatInt(d.ID, 10)] = true
 	}
 
 	if asJSON {
@@ -84,13 +76,8 @@ func runKBGet(out io.Writer, db *sql.DB, idStrs []string, verbose, asJSON bool) 
 			if i > 0 {
 				fmt.Fprintln(out)
 			}
-			switch v := d.(type) {
-			case *store.Document:
-				formatKBDetail(out, v)
-			case query.DocWithEdges:
-				formatKBDetail(out, v.Document)
-				writeEdges(out, v.Edges)
-			}
+			formatKBDetail(out, d.Document)
+			writeEdges(out, d.Edges)
 		}
 	}
 

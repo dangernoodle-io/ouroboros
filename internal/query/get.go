@@ -56,7 +56,7 @@ func getDocuments(db *sql.DB, req Request) (Result, error) {
 			byID[fetched[i].ID] = &fetched[i]
 		}
 
-		docs := make([]any, 0, len(ids))
+		docs := make([]DocResult, 0, len(ids))
 		for _, id := range ids {
 			doc, ok := byID[id]
 			if !ok {
@@ -66,7 +66,7 @@ func getDocuments(db *sql.DB, req Request) (Result, error) {
 			if !req.Verbose {
 				doc.Notes = ""
 				doc.SessionID = ""
-				docs = append(docs, doc)
+				docs = append(docs, DocResult{Document: doc})
 				continue
 			}
 			doc.SessionID = ""
@@ -75,7 +75,7 @@ func getDocuments(db *sql.DB, req Request) (Result, error) {
 			if err != nil {
 				return Result{}, err
 			}
-			docs = append(docs, DocWithEdges{Document: doc, Edges: edgeList})
+			docs = append(docs, DocResult{Document: doc, Edges: edgeList})
 		}
 
 		return Result{Docs: docs}, nil
@@ -106,12 +106,12 @@ func getBacklogItems(db *sql.DB, req Request) (Result, error) {
 			return Result{}, err
 		}
 
-		items := make([]any, 0, len(fetched))
+		items := make([]ItemResult, 0, len(fetched))
 		for _, item := range fetched {
 			if !req.Verbose {
 				item.Notes = ""
 				item.ProjectID = 0
-				items = append(items, item)
+				items = append(items, ItemResult{Item: item})
 				continue
 			}
 			item.ProjectID = 0
@@ -120,7 +120,7 @@ func getBacklogItems(db *sql.DB, req Request) (Result, error) {
 			if err != nil {
 				return Result{}, err
 			}
-			items = append(items, ItemWithEdges{Item: item, Edges: edgeList})
+			items = append(items, ItemResult{Item: item, Edges: edgeList})
 		}
 
 		return Result{ItemsJSON: items}, nil

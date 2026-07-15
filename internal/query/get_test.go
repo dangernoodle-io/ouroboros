@@ -31,16 +31,15 @@ func TestGet_DomainKB_IDsFetch(t *testing.T) {
 	res, err := Get(db, Request{Domain: "kb", IDs: []any{float64(doc.ID)}})
 	require.NoError(t, err)
 	require.Len(t, res.Docs, 1)
-	got, ok := res.Docs[0].(*store.Document)
-	require.True(t, ok)
+	got := res.Docs[0]
 	assert.Equal(t, "Use PostgreSQL", got.Title)
 	assert.Empty(t, got.Notes) // stripped, non-verbose
+	assert.Empty(t, got.Edges)
 
 	res, err = Get(db, Request{Domain: "kb", IDs: []any{float64(doc.ID)}, Verbose: true})
 	require.NoError(t, err)
 	require.Len(t, res.Docs, 1)
-	withEdges, ok := res.Docs[0].(DocWithEdges)
-	require.True(t, ok)
+	withEdges := res.Docs[0]
 	assert.Equal(t, "narrative", withEdges.Notes)
 }
 
@@ -74,16 +73,15 @@ func TestGet_DomainBacklog_IDsFetch(t *testing.T) {
 	res, err := Get(db, Request{Domain: "backlog", IDs: []any{item.ID}})
 	require.NoError(t, err)
 	require.Len(t, res.ItemsJSON, 1)
-	got, ok := res.ItemsJSON[0].(*backlog.Item)
-	require.True(t, ok)
+	got := res.ItemsJSON[0]
 	assert.Equal(t, "fix the bug", got.Title)
 	assert.Empty(t, got.Notes)
+	assert.Empty(t, got.Edges)
 
 	res, err = Get(db, Request{Domain: "backlog", IDs: []any{item.ID}, Verbose: true})
 	require.NoError(t, err)
 	require.Len(t, res.ItemsJSON, 1)
-	withEdges, ok := res.ItemsJSON[0].(ItemWithEdges)
-	require.True(t, ok)
+	withEdges := res.ItemsJSON[0]
 	assert.Equal(t, "narrative", withEdges.Notes)
 }
 
