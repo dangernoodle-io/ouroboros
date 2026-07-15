@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 
-	"github.com/dangernoodle-io/mcpkit/mcpx"
+	"github.com/dangernoodle-io/shesha/mcpx"
 
 	"dangernoodle.io/ouroboros/internal/query"
 )

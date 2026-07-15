@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dangernoodle-io/mcpkit/mcpx"
-	"github.com/dangernoodle-io/mcpkit/testkit"
+	"github.com/dangernoodle-io/shesha/mcpx"
+	"github.com/dangernoodle-io/shesha/testkit"
 	"github.com/pkoukk/tiktoken-go"
 	"github.com/stretchr/testify/require"
 
@@ -178,7 +178,7 @@ func toAnyString(ids []string) []any {
 	return out
 }
 
-// TestResponseShapesFootprint is the Go/mcpkit-testkit replacement for the
+// TestResponseShapesFootprint is the Go/shesha-testkit replacement for the
 // OU-77 python bench (bench/response-shapes/probe.py, removed at OU-211):
 // it drives each representative tool-call shape over the real MCP wire
 // (buildServerV2 + testkit.New, exactly as serverv2_wire_test.go does),

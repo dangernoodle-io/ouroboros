@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/dangernoodle-io/mcpkit/mcpx"
+	"github.com/dangernoodle-io/shesha/mcpx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

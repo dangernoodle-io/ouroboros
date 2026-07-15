@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dangernoodle-io/mcpkit/mcpx"
-	"github.com/dangernoodle-io/mcpkit/testkit"
+	"github.com/dangernoodle-io/shesha/mcpx"
+	"github.com/dangernoodle-io/shesha/testkit"
 	"github.com/pkoukk/tiktoken-go"
 	"github.com/stretchr/testify/require"
 )

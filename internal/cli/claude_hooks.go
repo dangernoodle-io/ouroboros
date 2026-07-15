@@ -1,14 +1,14 @@
 package cli
 
 import (
-	mcpkitcli "github.com/dangernoodle-io/mcpkit/cli"
-	"github.com/dangernoodle-io/mcpkit/host/claudecode"
-	"github.com/dangernoodle-io/mcpkit/host/claudecode/hooks"
-	"github.com/dangernoodle-io/mcpkit/host/claudecode/statusline"
+	sheshacli "github.com/dangernoodle-io/shesha/cli"
+	"github.com/dangernoodle-io/shesha/host/claudecode"
+	"github.com/dangernoodle-io/shesha/host/claudecode/hooks"
+	"github.com/dangernoodle-io/shesha/host/claudecode/statusline"
 	"github.com/muesli/termenv"
 )
 
-// claudeProvider returns the mcpkit cli.CommandProvider contributing the
+// claudeProvider returns the shesha cli.CommandProvider contributing the
 // `claude` host namespace ("everything Claude Code's plugin protocol
 // invokes against this binary"): `claude hooks` (Stop, SubagentStop,
 // UserPromptSubmit, SubagentStart, PostToolUse, and PreCompact are
@@ -25,7 +25,7 @@ import (
 // bootstrap.js stays Node — it's what installs this very binary, so a
 // Go-native SessionStart hook would have nothing to invoke it on a fresh
 // install (the chicken-and-egg installer problem).
-func claudeProvider() mcpkitcli.CommandProvider {
+func claudeProvider() sheshacli.CommandProvider {
 	return claudecode.NewProvider(
 		hooks.NewRegistry().
 			Stop(hookHandleStop).

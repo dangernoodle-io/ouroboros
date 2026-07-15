@@ -22,10 +22,10 @@ func TestNewServerCommand(t *testing.T) {
 	assert.NotEmpty(t, cmd.Short)
 }
 
-// TestNewServerCommand_Flags proves the mcpkit cli.ServerCmd-provided flags
+// TestNewServerCommand_Flags proves the shesha cli.ServerCmd-provided flags
 // are present on the built command: --read-only is registered
 // unconditionally by ServerCmd, and --http/--stateless appear because
-// NewServerCommand opts into cli.Server.HTTP (mcpkit's own HTTP transport --
+// NewServerCommand opts into cli.Server.HTTP (shesha's own HTTP transport --
 // no new transport infra added here).
 func TestNewServerCommand_Flags(t *testing.T) {
 	cmd := NewServerCommand("v-test")
@@ -38,7 +38,7 @@ func TestNewServerCommand_Flags(t *testing.T) {
 
 // TestServerOnStart_ConfigLoadError proves serverOnStart surfaces a real
 // config.Load failure: OUROBOROS_CONFIG_DIR (xdgpath's app-specific
-// override that internal/config.Load's mcpkitconfig.WithXDGFile resolves
+// override that internal/config.Load's sheshaconfig.WithXDGFile resolves
 // through) points at a directory containing a malformed bootstrap.json, so
 // config.Load's loadFile -> json.Unmarshal genuinely fails -- a real
 // misconfigured-bootstrap-file scenario (not a contrived fault hook). st.db
@@ -75,7 +75,7 @@ func TestServerOnStart_InitDBError(t *testing.T) {
 }
 
 // TestServerOnStart_PopulatesDB exercises the real serverOnStart chain
-// (config.Load -> store.InitDB) without touching mcpkit.App.Run or real
+// (config.Load -> store.InitDB) without touching shesha.App.Run or real
 // stdio: PROJECT_KB_PATH (config.Load's primary env var, internal/config's
 // config.go) points at a temp-dir SQLite path, so this opens a real (if
 // throwaway) DB file and confirms st.db is live before handing it back to

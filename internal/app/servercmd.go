@@ -4,14 +4,14 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/dangernoodle-io/mcpkit/cli"
+	"github.com/dangernoodle-io/shesha/cli"
 	"github.com/spf13/cobra"
 
 	"dangernoodle.io/ouroboros/internal/config"
 	"dangernoodle.io/ouroboros/internal/store"
 )
 
-// serverState is a lazy-init holder for the mcpkit-composed server's shared
+// serverState is a lazy-init holder for the shesha-composed server's shared
 // *sql.DB. The 5 capabilities (capabilities_v2.go) each close over
 // *serverState instead of *sql.DB directly, and every V2 handler reads
 // st.db AT CALL TIME rather than at construction time. This matters because
@@ -20,18 +20,18 @@ import (
 // the DB or run schema migrations. Building the command tree (so that
 // `ouroboros --help` or any domain subcommand works) must not have that
 // side effect. st.db stays nil until the "server" command's OnStart hook
-// runs, immediately before mcpkit.App.Run starts serving — by which point
+// runs, immediately before shesha.App.Run starts serving — by which point
 // every handler that dereferences st.db is safe to call.
 type serverState struct {
 	db *sql.DB
 }
 
 // NewServerCommand builds the "server" cobra command that runs the
-// mcpkit-composed buildServerV2 server over stdio by default, or HTTP when
+// shesha-composed buildServerV2 server over stdio by default, or HTTP when
 // --http is given (both transports are cli.ServerCmd's own, not hand-rolled
 // here). buildServerV2 itself is pure composition (no I/O), so it is safe to
 // call here, at command-tree construction time, with an as-yet-empty
-// *serverState — no handler runs until mcpkit.App.Run does, which
+// *serverState — no handler runs until shesha.App.Run does, which
 // cli.ServerCmd only calls after OnStart has populated st.db.
 //
 // OnStart reuses the exact config.Load() -> store.InitDB(cfg.DBPath) chain
@@ -65,7 +65,7 @@ func NewServerCommand(version string) *cobra.Command {
 		OnStart:    serverOnStart(st),
 		OnShutdown: serverOnShutdown(st),
 		// HTTP opts into cli.ServerCmd's built-in --http/--stateless flags
-		// (mcpkit's own HTTP transport, App.HTTPHandler mounted on an httpx
+		// (shesha's own HTTP transport, App.HTTPHandler mounted on an httpx
 		// mux) -- no new transport infra here, just enabling what ServerCmd
 		// already provides. stdio remains the default; --http <addr> is
 		// opt-in per invocation.
@@ -77,7 +77,7 @@ func NewServerCommand(version string) *cobra.Command {
 // store.InitDB(cfg.DBPath) chain the old app.Serve used, populating st.db.
 // Extracted from NewServerCommand as a named, independently testable
 // function -- the real chain can be exercised directly (real config load +
-// real DB open/close) without going through mcpkit.App.Run/real stdio.
+// real DB open/close) without going through shesha.App.Run/real stdio.
 func serverOnStart(st *serverState) func(context.Context) error {
 	return func(context.Context) error {
 		cfg, err := config.Load()

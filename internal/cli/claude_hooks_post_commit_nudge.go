@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/dangernoodle-io/mcpkit/host/claudecode/hooks"
+	"github.com/dangernoodle-io/shesha/host/claudecode/hooks"
 )
 
 // postCommitNudgeCooldownMS is the per-project cooldown window (5 minutes).

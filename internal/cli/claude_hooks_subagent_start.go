@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dangernoodle-io/mcpkit/host/claudecode/hooks"
+	"github.com/dangernoodle-io/shesha/host/claudecode/hooks"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 	"dangernoodle.io/ouroboros/internal/store"

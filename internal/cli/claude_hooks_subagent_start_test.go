@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dangernoodle-io/mcpkit/host/claudecode/hooks"
+	"github.com/dangernoodle-io/shesha/host/claudecode/hooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

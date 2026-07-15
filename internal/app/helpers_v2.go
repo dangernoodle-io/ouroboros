@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dangernoodle-io/mcpkit/mcpx"
+	"github.com/dangernoodle-io/shesha/mcpx"
 
 	"dangernoodle.io/ouroboros/internal/backlog"
 )

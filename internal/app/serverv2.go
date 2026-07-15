@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/dangernoodle-io/mcpkit"
-	"github.com/dangernoodle-io/mcpkit/host/generic"
+	"github.com/dangernoodle-io/shesha"
+	"github.com/dangernoodle-io/shesha/host/generic"
 )
 
 // serverInstructions is the MCP server instructions advertised to clients at
@@ -17,7 +17,7 @@ query is the read tool (required domain: kb|backlog|roadmap); kb/backlog/roadmap
 - Checkpoint after multi-step tasks; persist non-obvious decisions, update or delete stale ones.
 - Never run sqlite3/raw SQL against the ouroboros DB file — on a tool failure, stop and report rather than improvising.`
 
-// buildServerV2 composes the mcpkit-typed ouroboros MCP server: query
+// buildServerV2 composes the shesha-typed ouroboros MCP server: query
 // (OU-1, collapsed from get+search at OU-323), kb write (OU-2), backlog
 // write (OU-3), roadmap write (OU-4). It is pure composition — no I/O — so
 // it is safe to call eagerly, before st.db is populated (see serverState's
@@ -31,8 +31,8 @@ query is the read tool (required domain: kb|backlog|roadmap); kb/backlog/roadmap
 // unused/constant.
 //
 //nolint:unparam // see above
-func buildServerV2(st *serverState, version string) (*mcpkit.App, error) {
-	return mcpkit.New(mcpkit.Info{Name: "ouroboros", Version: version, Instructions: serverInstructions}, generic.New(),
+func buildServerV2(st *serverState, version string) (*shesha.App, error) {
+	return shesha.New(shesha.Info{Name: "ouroboros", Version: version, Instructions: serverInstructions}, generic.New(),
 		queryCapability{st: st},
 		kbCapability{st: st},
 		backlogCapability{st: st},
