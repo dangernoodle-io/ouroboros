@@ -44,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(kbCmd)
+	rootCmd.AddCommand(backlogCmd)
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(roadmapCmd)
 	rootCmd.AddCommand(linkCmd)
