@@ -8,7 +8,7 @@ model: sonnet
 1. **Project.** `git rev-parse --show-toplevel | xargs basename`. If not in a git repo, ask which project to triage.
 
 2. **Load state:**
-   - `get`/`search` with `domain: "backlog"` + `projects: ["<project>"]` + `status: "open"` — open items
+   - `query` with `domain: "backlog"` + `projects: ["<project>"]` + `status: "open"` — open items
 
 3. **Summarize.** Show open items grouped by priority (P0 first) with counts per level. Priority scale: P0 (critical/blocking) through P6 (someday/maybe). When triaging, consider filtering by `component` to scope to a sub-area; items without component are project-level.
 

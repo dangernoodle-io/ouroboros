@@ -127,7 +127,7 @@ func runHookStop(p hooks.StopPayload, db *sql.DB) hooks.Response {
 // Reason, so both surface to the model/user in one hook invocation.
 func withStopWarnings(resp hooks.Response, warnings []string) hooks.Response {
 	if len(warnings) > 0 {
-		resp.SystemMessage = "[ouroboros] " + strings.Join(warnings, "; ") + " — persist reliably by calling the kb tool, then search to confirm."
+		resp.SystemMessage = "[ouroboros] " + strings.Join(warnings, "; ") + " — persist reliably by calling the kb tool, then query to confirm."
 	}
 	return resp
 }

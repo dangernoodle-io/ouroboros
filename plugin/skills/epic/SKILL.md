@@ -6,7 +6,7 @@ description: Decompose an epic into child tickets and file them in one atomic ba
 1. **Project.** `git rev-parse --show-toplevel | xargs basename`; if not a git repo, ask which project.
 
 2. **Resolve the epic** (the scope source):
-   - Arg is an existing backlog id (e.g. `/epic OU-176`): `get` with `domain: "backlog"`, `ids: [that id]`, `verbose: true` — read title + description + notes as scope. If the item is NOT `EPIC:`-titled, say so and ask whether to decompose it anyway or stop.
+   - Arg is an existing backlog id (e.g. `/epic OU-176`): `query` with `domain: "backlog"`, `ids: [that id]`, `verbose: true` — read title + description + notes as scope. If the item is NOT `EPIC:`-titled, say so and ask whether to decompose it anyway or stop.
    - Arg is free text (`/epic "add semantic search ..."`) or no arg: treat as a NEW epic — draft an `EPIC:`-prefixed title + a concise description from the args and/or current conversation. No-arg = infer the epic under discussion; if unclear, ask.
 
 3. **Propose children.** From the scope, draft a table — each child: title, one-line description, priority (P0-P6), optional component. Rules: one unit of work per child; a child that is itself multi-unit is a sub-epic — flag it rather than burying scope. Bias toward FEWER, well-scoped tickets. Show the epic (existing id, or "NEW — will be created") above the table.
