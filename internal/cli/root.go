@@ -48,6 +48,7 @@ func init() {
 	rootCmd.AddCommand(roadmapCmd)
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(unlinkCmd)
+	rootCmd.AddCommand(edgesCmd)
 	rootCmd.AddCommand(dashboardCmd)
 	mustMountProviders(rootCmd, claudeProvider())
 }
