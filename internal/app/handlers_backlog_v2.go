@@ -152,20 +152,24 @@ func handleBacklogEntriesV2(db *sql.DB, entries []backlogEntryInput) (*mcpx.Call
 			default:
 				fields["notes"] = *e.Notes
 			}
-			// component/epic are single-valued -- an absent/empty *string
-			// means "no change" (matches the old handler's scalarStringArg
-			// present-but-empty == not added).
-			if e.Component != nil && *e.Component != "" {
+			// component/epic are clear-aware like description/notes above
+			// (nil=preserve, ""=clear, text=replace) -- an absent *string
+			// means "no change", but an explicit empty string is a real
+			// value (clearing is always allowed for both, per
+			// validateEpicTx's doc comment and the CLI's matching
+			// behavior). A non-empty epic still resolves any "$N"
+			// back-reference before landing in fields.
+			if e.Component != nil {
 				fields["component"] = *e.Component
 			}
 			var epic string
 			if e.Epic != nil {
 				epic = *e.Epic
-			}
-			if epic != "" {
-				epic, err = resolveEpicRef(epic, idx, len(entries), posMap)
-				if err != nil {
-					return mcpx.ErrorResult(err.Error()), nil, nil
+				if epic != "" {
+					epic, err = resolveEpicRef(epic, idx, len(entries), posMap)
+					if err != nil {
+						return mcpx.ErrorResult(err.Error()), nil, nil
+					}
 				}
 				fields["epic"] = epic
 			}
