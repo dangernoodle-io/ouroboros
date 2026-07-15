@@ -285,11 +285,16 @@ function checkStatusline(pluginRoot) {
 // isStaleSubagentHook detects a pre-OU-222 subagent-stop.js: one that still
 // fires a blocking nudge on a subagent's final message. That nudge forces
 // another turn to address it, and the meta-acknowledgement overwrites the
-// real report the caller needs (OU-222/OU-254). The current clean script
-// contains neither signature string; only the stale cached copy does.
+// real report the caller needs (OU-222/OU-254). Detection is structural, not
+// prose-based (OU-258): the load-bearing invariant is that a clean native
+// hook never blocks with process.exit(2). A stale copy pairs that blocking
+// exit with decision-language gating logic; matching on that code shape
+// survives a rewording of the nudge's printed message.
 function isStaleSubagentHook(contents) {
   if (typeof contents !== 'string') return false;
-  return /nudge fired/i.test(contents) || /tier-1/i.test(contents);
+  const hasBlockingExit = /process\.exit\(\s*2\s*\)/.test(contents);
+  const hasDecisionGate = /\b(?:DECISION_PATTERN|decided|rationale|architecture|trade-?off)\b/i.test(contents);
+  return hasBlockingExit && hasDecisionGate;
 }
 
 // checkSubagentHookStale reads <pluginRoot>/scripts/subagent-stop.js and

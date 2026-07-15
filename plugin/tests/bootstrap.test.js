@@ -765,6 +765,13 @@ test('isStaleSubagentHook: true on a stale pre-OU-222 fixture containing "tier-1
   assert.equal(bootstrap.isStaleSubagentHook(stale), true);
 });
 
+test('isStaleSubagentHook: true on a reworded stale fixture with neither "nudge fired" nor "tier-1" (OU-258)', () => {
+  const reworded = fs.readFileSync(path.join(__dirname, 'fixtures', 'stale-subagent-stop-reworded.js'), 'utf8');
+  assert.doesNotMatch(reworded, /nudge fired/i);
+  assert.doesNotMatch(reworded, /tier-1/i);
+  assert.equal(bootstrap.isStaleSubagentHook(reworded), true);
+});
+
 test('isStaleSubagentHook: false on non-string input', () => {
   assert.equal(bootstrap.isStaleSubagentHook(undefined), false);
   assert.equal(bootstrap.isStaleSubagentHook(null), false);
