@@ -66,6 +66,15 @@ func buildItemFilter(db *sql.DB, req Request) (backlog.ItemFilter, error) {
 		}
 		f.PriorityMax = &n
 	}
+	// OU-347: an inverted range (e.g. priority_min=P2, priority_max=P1) is
+	// unsatisfiable -- buildItemFilterWhere emits "priority_int >= min AND
+	// priority_int <= max", which no row can satisfy -- and previously
+	// silently produced zero rows instead of an error. Only checked when
+	// both bounds are supplied; min == max (a single-priority filter) is
+	// valid and left alone.
+	if f.PriorityMin != nil && f.PriorityMax != nil && *f.PriorityMin > *f.PriorityMax {
+		return f, fmt.Errorf("invalid priority range: priority_min %s is lower severity than priority_max %s (P0 highest .. P6 lowest)", req.PriorityMin, req.PriorityMax)
+	}
 	if req.Status != "" {
 		status := req.Status
 		f.Status = &status

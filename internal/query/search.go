@@ -32,7 +32,10 @@ func searchDocuments(db *sql.DB, req Request) (Result, error) {
 	if len(req.Queries) > 0 {
 		resultSets := make([][]store.DocumentSummary, 0, len(req.Queries))
 		for _, q := range req.Queries {
-			rs, err := store.SearchDocuments(db, q, req.Types, req.Projects, req.Categories, req.Limit, req.Tags...)
+			// SearchDocumentsRelaxed (OU-346): each query in the batch
+			// independently gets the AND->OR fallback, surfaced per-row via
+			// DocumentSummary.Relaxed.
+			rs, err := store.SearchDocumentsRelaxed(db, q, req.Types, req.Projects, req.Categories, req.Limit, req.Tags...)
 			if err != nil {
 				return Result{}, err
 			}
@@ -48,7 +51,7 @@ func searchDocuments(db *sql.DB, req Request) (Result, error) {
 		return Result{}, errors.New("query or queries is required")
 	}
 
-	summaries, err := store.SearchDocuments(db, req.Query, req.Types, req.Projects, req.Categories, req.Limit, req.Tags...)
+	summaries, err := store.SearchDocumentsRelaxed(db, req.Query, req.Types, req.Projects, req.Categories, req.Limit, req.Tags...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -68,12 +71,14 @@ func searchBacklogItems(db *sql.DB, req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	items, err := backlog.SearchItems(db, req.Query, f)
+	// SearchItemsRelaxed (OU-346): a zero-row implicit-AND query retries once
+	// OR-joined instead of silently returning no matches.
+	items, relaxed, err := backlog.SearchItemsRelaxed(db, req.Query, f)
 	if err != nil {
 		return Result{}, err
 	}
 
-	return Result{Items: items}, nil
+	return Result{Items: items, Relaxed: relaxed}, nil
 }
 
 // searchRoadmap ports searchRoadmapV2: FTS over documents type=roadmap. Each
@@ -88,7 +93,11 @@ func searchRoadmap(db *sql.DB, req Request) (Result, error) {
 		return Result{}, errors.New("query is required")
 	}
 
-	summaries, err := store.SearchDocuments(db, req.Query, []string{"roadmap"}, req.Projects, nil, req.Limit)
+	// SearchDocumentsRelaxed (OU-346): a zero-row implicit-AND roadmap search
+	// retries once OR-joined instead of silently returning no matches; the
+	// relaxed signal rides the per-row DocumentSummary.Relaxed field, same as
+	// kb search, straight to the wire (jsonResultV2(result.DocSummaries)).
+	summaries, err := store.SearchDocumentsRelaxed(db, req.Query, []string{"roadmap"}, req.Projects, nil, req.Limit)
 	if err != nil {
 		return Result{}, err
 	}

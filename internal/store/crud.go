@@ -784,8 +784,44 @@ func SearchDocuments(db *sql.DB, query string, types []string, projects []string
 		return QueryDocuments(db, types, projects, categories, "", tags, limit)
 	}
 
-	escapedQuery := FtsEscape(query)
+	return runDocumentsFTSQuery(db, FtsEscape(query), types, projects, categories, limit, tags)
+}
 
+// SearchDocumentsRelaxed wraps SearchDocuments with a one-shot AND->OR
+// relaxation (OU-346): when the implicit-AND query legitimately matches zero
+// rows, it retries once with the same terms OR-joined (FtsEscapeOR) so a
+// caller sees partial matches instead of a silent empty result. Every row
+// returned by the OR retry has DocumentSummary.Relaxed set, so a caller can
+// tell an exact match from a widened one. Relaxation is skipped (same as
+// SearchDocuments) when the query only has one searchable token, when the
+// AND query already matched, or when the OR retry also matches nothing.
+func SearchDocumentsRelaxed(db *sql.DB, query string, types []string, projects []string, categories []string, limit int, tags ...string) ([]DocumentSummary, error) {
+	summaries, err := SearchDocuments(db, query, types, projects, categories, limit, tags...)
+	if err != nil || len(summaries) > 0 {
+		return summaries, err
+	}
+
+	orQuery := FtsEscapeOR(query)
+	if orQuery == "" {
+		return summaries, nil
+	}
+
+	relaxed, err := runDocumentsFTSQuery(db, orQuery, types, projects, categories, ClampLimit(limit, 10, 500), tags)
+	if err != nil {
+		return nil, err
+	}
+	for i := range relaxed {
+		relaxed[i].Relaxed = true
+	}
+
+	return relaxed, nil
+}
+
+// runDocumentsFTSQuery executes an FTS documents search for a pre-escaped
+// FTS5 MATCH expression (either FtsEscape's AND join or FtsEscapeOR's OR
+// join), shared by SearchDocuments and SearchDocumentsRelaxed so both build
+// and execute the query identically.
+func runDocumentsFTSQuery(db *sql.DB, escapedQuery string, types []string, projects []string, categories []string, limit int, tags []string) ([]DocumentSummary, error) {
 	ftQuery := `
 		SELECT d.id, d.type, d.project, d.category, d.title, d.tags, d.updated_at, bm25(documents_fts) AS score
 		FROM documents d

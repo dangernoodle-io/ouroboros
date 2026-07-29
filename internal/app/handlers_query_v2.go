@@ -89,7 +89,15 @@ func renderQueryResult(in queryInputV2, result query.Result, isSearch bool) (*mc
 		if !isSearch && len(in.IDs) > 0 {
 			return jsonResultV2(result.ItemsJSON)
 		}
-		return mcpx.TextResult(itemLinesTextV2(result.Items)), nil, nil
+		text := itemLinesTextV2(result.Items)
+		if isSearch && result.Relaxed {
+			// OU-346: the AND query matched nothing and this is the OR
+			// fallback's widened result — say so, so a caller can tell an
+			// exact match from a relaxed one instead of assuming a literal
+			// AND hit.
+			text = "(relaxed: no exact match, widened query terms to OR)\n" + text
+		}
+		return mcpx.TextResult(text), nil, nil
 	case "roadmap":
 		if isSearch {
 			return jsonResultV2(result.DocSummaries)

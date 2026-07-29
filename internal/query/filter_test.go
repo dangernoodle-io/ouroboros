@@ -75,6 +75,43 @@ func TestBuildItemFilter_BadPriorityMax_Errors(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestBuildItemFilter_InvertedPriorityRange_Errors is the OU-347 regression:
+// priority_min lower severity (higher P#) than priority_max is unsatisfiable
+// SQL (priority_int >= min AND priority_int <= max) and previously silently
+// returned zero rows instead of erroring. This is the shared filter builder
+// for both query.Get (list mode) and query.Search's backlog path, so one
+// guard covers both.
+func TestBuildItemFilter_InvertedPriorityRange_Errors(t *testing.T) {
+	db := testutil.TestDB(t)
+
+	_, err := buildItemFilter(db, Request{PriorityMin: "P2", PriorityMax: "P1"})
+	require.EqualError(t, err, "invalid priority range: priority_min P2 is lower severity than priority_max P1 (P0 highest .. P6 lowest)")
+}
+
+// TestBuildItemFilter_PriorityRangeEqual_Valid confirms min == max (a
+// single-priority filter) is not treated as inverted.
+func TestBuildItemFilter_PriorityRangeEqual_Valid(t *testing.T) {
+	db := testutil.TestDB(t)
+
+	f, err := buildItemFilter(db, Request{PriorityMin: "P2", PriorityMax: "P2"})
+	require.NoError(t, err)
+	require.NotNil(t, f.PriorityMin)
+	require.NotNil(t, f.PriorityMax)
+	assert.Equal(t, 2, *f.PriorityMin)
+	assert.Equal(t, 2, *f.PriorityMax)
+}
+
+// TestBuildItemFilter_PriorityRangeOnlyMin_Valid confirms the guard is
+// skipped (no error) when only one bound is supplied.
+func TestBuildItemFilter_PriorityRangeOnlyMin_Valid(t *testing.T) {
+	db := testutil.TestDB(t)
+
+	f, err := buildItemFilter(db, Request{PriorityMin: "P2"})
+	require.NoError(t, err)
+	require.NotNil(t, f.PriorityMin)
+	assert.Nil(t, f.PriorityMax)
+}
+
 func TestBuildItemFilter_BadSince_Errors(t *testing.T) {
 	db := testutil.TestDB(t)
 

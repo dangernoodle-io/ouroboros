@@ -1069,3 +1069,72 @@ func TestSearchItemsEmptyQuery(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, items)
 }
+
+// TestSearchItemsRelaxed_ORFallback_PartialMatch is the OU-346 regression
+// for backlog items: a multi-term query where AND matches nothing but OR
+// matches something must surface the partial match with relaxed=true.
+func TestSearchItemsRelaxed_ORFallback_PartialMatch(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "bb_data egress design", "notes about egress, no bb_event or bb_sink here", "", "", "")
+	require.NoError(t, err)
+
+	andOnly, err := backlog.SearchItems(d, "bb_data bb_event bb_sink egress transport", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, andOnly, 0)
+
+	items, relaxed, err := backlog.SearchItemsRelaxed(d, "bb_data bb_event bb_sink egress transport", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "bb_data egress design", items[0].Title)
+	assert.True(t, relaxed)
+}
+
+// TestSearchItemsRelaxed_ANDMatches_NotRelaxed confirms AND stays primary:
+// when the AND query already matches, the OR fallback never fires.
+func TestSearchItemsRelaxed_ANDMatches_NotRelaxed(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "alpha and beta item", "desc", "", "", "")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(d, p.ID, "AC", "P2", "only alpha item", "desc", "", "", "")
+	require.NoError(t, err)
+
+	items, relaxed, err := backlog.SearchItemsRelaxed(d, "alpha beta", backlog.ItemFilter{})
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "alpha and beta item", items[0].Title)
+	assert.False(t, relaxed)
+}
+
+// TestSearchItemsRelaxed_SingleToken_NoFallback confirms a single-token
+// query behaves exactly as SearchItems — no OR retry is possible.
+func TestSearchItemsRelaxed_SingleToken_NoFallback(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "some title", "", "", "", "")
+	require.NoError(t, err)
+
+	items, relaxed, err := backlog.SearchItemsRelaxed(d, "zzznothingmatchesthis", backlog.ItemFilter{})
+	require.NoError(t, err)
+	assert.Empty(t, items)
+	assert.False(t, relaxed)
+}
+
+// TestSearchItemsRelaxed_ORAlsoEmpty_NotRelaxed confirms relaxed stays false
+// when even the OR retry matches nothing.
+func TestSearchItemsRelaxed_ORAlsoEmpty_NotRelaxed(t *testing.T) {
+	d := testDB(t)
+	p := createTestProject(t, d)
+
+	_, err := backlog.AddItem(d, p.ID, "AC", "P1", "some title", "", "", "", "")
+	require.NoError(t, err)
+
+	items, relaxed, err := backlog.SearchItemsRelaxed(d, "zzznothere zzzalsonothere", backlog.ItemFilter{})
+	require.NoError(t, err)
+	assert.Empty(t, items)
+	assert.False(t, relaxed)
+}
