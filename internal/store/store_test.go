@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -823,6 +825,57 @@ func TestFtsEscape(t *testing.T) {
 	}
 }
 
+// TestFtsEscapeOR mirrors TestFtsEscape's cases for the OR-join variant used
+// by the OU-346 AND->OR relaxation fallback.
+func TestFtsEscapeOR(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"single word: no fallback possible", "foo", ""},
+		{"empty string", "", ""},
+		{"only whitespace", "   ", ""},
+		{"multi word", "database choice", "\"database\" OR \"choice\""},
+		{"three terms", "bb_data bb_event egress", "\"bb\" OR \"data\" OR \"bb\" OR \"event\" OR \"egress\""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := store.FtsEscapeOR(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestFtsEscapeOR_LongQuery confirms FtsEscapeOR builds a valid OR
+// expression for a query with several hundred tokens (no truncation,
+// panic, or malformed FTS5 syntax), and that the resulting expression
+// actually executes against FTS5 without error.
+func TestFtsEscapeOR_LongQuery(t *testing.T) {
+	words := make([]string, 300)
+	for i := range words {
+		words[i] = fmt.Sprintf("term%d", i)
+	}
+	longQuery := strings.Join(words, " ")
+
+	result := store.FtsEscapeOR(longQuery)
+	require.NotEmpty(t, result)
+	assert.Equal(t, 300, strings.Count(result, " OR ")+1, "expected one OR-joined phrase per token")
+	assert.True(t, strings.HasPrefix(result, `"term0" OR`))
+	assert.True(t, strings.HasSuffix(result, `OR "term299"`))
+
+	db := testDB(t)
+	doc := store.Document{Type: "note", Project: "acme-corp", Title: "term0 present", Content: "only term0 appears here"}
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	summaries, err := store.SearchDocumentsRelaxed(db, longQuery, nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.True(t, summaries[0].Relaxed)
+}
+
 func TestClampLimit(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1423,6 +1476,76 @@ func TestSearchDocumentsMultiWordPartialMiss(t *testing.T) {
 
 	// Query for "alpha zzznothere" should return empty (implicit AND)
 	summaries, err := store.SearchDocuments(db, "alpha zzznothere", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 0)
+}
+
+// TestSearchDocumentsRelaxed_ORFallback_PartialMatch is the OU-346
+// regression: a multi-term query where AND matches nothing (no doc has
+// every term) but OR matches something (a doc has some terms) must surface
+// the partial match instead of a silent empty result, with every returned
+// row flagged Relaxed.
+func TestSearchDocumentsRelaxed_ORFallback_PartialMatch(t *testing.T) {
+	db := testDB(t)
+
+	doc := store.Document{
+		Type:    "note",
+		Project: "acme-corp",
+		Title:   "bb_data egress design",
+		Content: "notes about bb_data and egress, no bb_event or bb_sink here",
+	}
+	_, err := store.UpsertDocument(db, doc)
+	require.NoError(t, err)
+
+	// AND over all 5 terms matches nothing (bb_event/bb_sink absent).
+	andOnly, err := store.SearchDocuments(db, "bb_data bb_event bb_sink egress transport", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, andOnly, 0)
+
+	summaries, err := store.SearchDocumentsRelaxed(db, "bb_data bb_event bb_sink egress transport", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "bb_data egress design", summaries[0].Title)
+	assert.True(t, summaries[0].Relaxed)
+}
+
+// TestSearchDocumentsRelaxed_ANDMatches_NotRelaxed confirms AND stays
+// primary: when the AND query already matches, the OR fallback never fires
+// and Relaxed is false.
+func TestSearchDocumentsRelaxed_ANDMatches_NotRelaxed(t *testing.T) {
+	db := testDB(t)
+
+	doc1 := store.Document{Type: "note", Project: "acme-corp", Title: "Alpha and Beta", Content: "mentions both alpha and beta"}
+	doc2 := store.Document{Type: "note", Project: "acme-corp", Title: "Only Alpha", Content: "mentions only alpha"}
+	_, err := store.UpsertDocument(db, doc1)
+	require.NoError(t, err)
+	_, err = store.UpsertDocument(db, doc2)
+	require.NoError(t, err)
+
+	summaries, err := store.SearchDocumentsRelaxed(db, "alpha beta", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "Alpha and Beta", summaries[0].Title)
+	assert.False(t, summaries[0].Relaxed)
+}
+
+// TestSearchDocumentsRelaxed_SingleToken_NoFallback confirms a single-token
+// query behaves exactly as SearchDocuments — no OR retry is possible.
+func TestSearchDocumentsRelaxed_SingleToken_NoFallback(t *testing.T) {
+	db := testDB(t)
+
+	summaries, err := store.SearchDocumentsRelaxed(db, "zzznothingmatchesthis", nil, nil, nil, 50)
+	require.NoError(t, err)
+	require.Len(t, summaries, 0)
+}
+
+// TestSearchDocumentsRelaxed_ORAlsoEmpty_NotRelaxed confirms Relaxed stays
+// false when even the OR retry matches nothing — there's no widened result
+// to distinguish from an exact one.
+func TestSearchDocumentsRelaxed_ORAlsoEmpty_NotRelaxed(t *testing.T) {
+	db := testDB(t)
+
+	summaries, err := store.SearchDocumentsRelaxed(db, "zzznothere zzzalsonothere", nil, nil, nil, 50)
 	require.NoError(t, err)
 	require.Len(t, summaries, 0)
 }

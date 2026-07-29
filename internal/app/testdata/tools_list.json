@@ -289,7 +289,7 @@
             ]
           },
           "query": {
-            "description": "Full-text search; present -\u003e search mode (kb/backlog/roadmap)",
+            "description": "Full-text search (multi-term = AND, falls back to OR once if AND matches nothing); present -\u003e search mode (kb/backlog/roadmap)",
             "type": "string"
           },
           "since": {

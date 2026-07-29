@@ -41,6 +41,12 @@ type DocumentSummary struct {
 	Tags      []string `json:"tags,omitempty"`
 	UpdatedAt string   `json:"updated_at"`
 	Score     float64  `json:"score,omitempty"`
+	// Relaxed is true only on rows returned by SearchDocumentsRelaxed's
+	// one-shot AND->OR fallback (see FtsEscapeOR) — set on every row of a
+	// relaxed result set so a caller can tell an exact AND match from a
+	// widened OR match. Always false/omitted for SearchDocuments and
+	// QueryDocuments (list mode).
+	Relaxed bool `json:"relaxed,omitempty"`
 }
 
 // InitDB initializes the database connection and applies schema. path must
@@ -304,6 +310,35 @@ func RebuildFTS(db *sql.DB) error {
 // as two tokens ("old","title"), so it must be split the same way here —
 // collapsing it into one "oldtitle" phrase would never match anything.
 func FtsEscape(q string) string {
+	tokens := ftsTokens(q)
+	if len(tokens) == 0 {
+		return ""
+	}
+
+	return strings.Join(tokens, " ")
+}
+
+// FtsEscapeOR builds the OR-joined variant of the same quoted tokens
+// FtsEscape space-joins for implicit AND. Used for the one-shot AND->OR
+// relaxation fallback (see SearchDocumentsRelaxed/backlog.SearchItemsRelaxed):
+// when a legitimate multi-term AND query matches zero rows, a caller can
+// retry once with terms OR-joined to surface partial matches instead of a
+// silent empty result. Returns "" for 0 or 1 tokens — OR is meaningless (and
+// identical to AND) for a single term, so no relaxation is possible.
+func FtsEscapeOR(q string) string {
+	tokens := ftsTokens(q)
+	if len(tokens) < 2 {
+		return ""
+	}
+
+	return strings.Join(tokens, " OR ")
+}
+
+// ftsTokens splits q on FTS5/unicode61 token boundaries and quotes each
+// token as its own phrase, shared by FtsEscape (AND) and FtsEscapeOR (OR) so
+// the tokenize-and-quote logic isn't duplicated between the two join
+// strategies.
+func ftsTokens(q string) []string {
 	tokens := strings.FieldsFunc(q, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
@@ -317,11 +352,7 @@ func FtsEscape(q string) string {
 		result = append(result, "\""+escaped+"\"")
 	}
 
-	if len(result) == 0 {
-		return ""
-	}
-
-	return strings.Join(result, " ")
+	return result
 }
 
 // ClampLimit clamps a limit to a range with a default value.

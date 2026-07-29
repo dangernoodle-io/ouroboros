@@ -45,6 +45,13 @@ type Result struct {
 	// backlog
 	ItemsJSON []ItemResult   // IDs fetch, one entry per found id
 	Items     []backlog.Item // filter-list (Get) or query match (Search); caller renders
+	// Relaxed is true when Search's backlog path widened a zero-row
+	// implicit-AND query to OR (OU-346, see backlog.SearchItemsRelaxed) and
+	// Items came from that OR retry. Always false for Get (list/IDs mode).
+	// kb's equivalent signal lives per-row on DocSummaries/DocSummarySets
+	// (store.DocumentSummary.Relaxed) since queries[] batch needs a flag per
+	// query, not one for the whole Result.
+	Relaxed bool
 
 	// roadmap
 	Roadmap *roadmap.Roadmap // structured (Format == "" / "structured")

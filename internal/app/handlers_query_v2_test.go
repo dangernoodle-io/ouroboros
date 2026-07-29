@@ -552,6 +552,73 @@ func TestHandleQueryV2_Search_DomainBacklog_ReturnsMatches(t *testing.T) {
 	assert.Contains(t, mcpx.ResultText(res), "flux capacitor")
 }
 
+// TestHandleQueryV2_Search_DomainBacklog_ORFallback_PartialMatch is the
+// OU-346 regression at the MCP wire level: a multi-term query where AND
+// matches nothing but OR matches something surfaces the partial match, and
+// the response text says so instead of silently reading like an exact hit.
+func TestHandleQueryV2_Search_DomainBacklog_ORFallback_PartialMatch(t *testing.T) {
+	resetAllDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "bb_data egress design", "notes about egress, no bb_event or bb_sink here", "", "", "")
+	require.NoError(t, err)
+
+	res := callQueryV2(t, queryInputV2{Domain: "backlog", Query: "bb_data bb_event bb_sink egress transport"})
+	require.False(t, res.IsError)
+	text := mcpx.ResultText(res)
+	assert.Contains(t, text, "bb_data egress design")
+	assert.Contains(t, text, "relaxed")
+}
+
+// TestHandleQueryV2_Search_DomainBacklog_ANDMatches_NoRelaxedNote confirms
+// an exact AND match's response carries no relaxed note.
+func TestHandleQueryV2_Search_DomainBacklog_ANDMatches_NoRelaxedNote(t *testing.T) {
+	resetAllDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "fix the flux capacitor", "desc", "", "", "")
+	require.NoError(t, err)
+
+	res := callQueryV2(t, queryInputV2{Domain: "backlog", Query: "flux"})
+	require.False(t, res.IsError)
+	assert.NotContains(t, mcpx.ResultText(res), "relaxed")
+}
+
+// TestHandleQueryV2_Search_DomainKB_ORFallback_PartialMatch is the OU-346
+// regression for kb at the MCP wire level: DocumentSummary.Relaxed is
+// visible on the JSON response.
+func TestHandleQueryV2_Search_DomainKB_ORFallback_PartialMatch(t *testing.T) {
+	resetAllDB(t)
+	_, err := store.UpsertDocument(db, store.Document{Type: "note", Project: "acme-corp", Title: "bb_data egress design", Content: "notes about egress, no bb_event or bb_sink here"})
+	require.NoError(t, err)
+
+	res := callQueryV2(t, queryInputV2{Domain: "kb", Query: "bb_data bb_event bb_sink egress transport"})
+	require.False(t, res.IsError)
+
+	var resp []map[string]any
+	require.NoError(t, jsonUnmarshalText(res, &resp))
+	require.Len(t, resp, 1)
+	assert.Equal(t, true, resp[0]["relaxed"])
+}
+
+// TestHandleQueryV2_DomainBacklog_InvertedPriorityRange_Errors is the OU-347
+// regression at the MCP wire level for Get's list mode.
+func TestHandleQueryV2_DomainBacklog_InvertedPriorityRange_Errors(t *testing.T) {
+	resetAllDB(t)
+	res := callQueryV2(t, queryInputV2{Domain: "backlog", PriorityMin: "P2", PriorityMax: "P1"})
+	require.True(t, res.IsError)
+	assert.Contains(t, mcpx.ResultText(res), "invalid priority range")
+}
+
+// TestHandleQueryV2_Search_DomainBacklog_InvertedPriorityRange_Errors is the
+// OU-347 regression at the MCP wire level for Search mode.
+func TestHandleQueryV2_Search_DomainBacklog_InvertedPriorityRange_Errors(t *testing.T) {
+	resetAllDB(t)
+	res := callQueryV2(t, queryInputV2{Domain: "backlog", Query: "flux", PriorityMin: "P2", PriorityMax: "P1"})
+	require.True(t, res.IsError)
+	assert.Contains(t, mcpx.ResultText(res), "invalid priority range")
+}
+
 // TestHandleQueryV2_NoQueryFallsThroughToFilterMode documents a behavior
 // change from the old separate get/search tools: the unified query tool
 // dispatches search mode ONLY when query/queries[] is present (per OU-323),

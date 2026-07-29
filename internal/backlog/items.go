@@ -534,6 +534,40 @@ func SearchItems(d *sql.DB, query string, f ItemFilter) ([]Item, error) {
 		return nil, nil
 	}
 
+	return runItemsFTSQuery(d, ftsQuery, f)
+}
+
+// SearchItemsRelaxed wraps SearchItems with the same one-shot AND->OR
+// relaxation as store.SearchDocumentsRelaxed (OU-346, see FtsEscapeOR):
+// when the implicit-AND query legitimately matches zero rows, it retries
+// once with the same terms OR-joined so a caller sees partial matches
+// instead of a silent empty result. relaxed reports whether the returned
+// items came from the OR retry (false for an exact AND match, and false
+// when the OR retry also matched nothing).
+func SearchItemsRelaxed(d *sql.DB, query string, f ItemFilter) (items []Item, relaxed bool, err error) {
+	items, err = SearchItems(d, query, f)
+	if err != nil || len(items) > 0 {
+		return items, false, err
+	}
+
+	orQuery := store.FtsEscapeOR(query)
+	if orQuery == "" {
+		return items, false, nil
+	}
+
+	items, err = runItemsFTSQuery(d, orQuery, f)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return items, len(items) > 0, nil
+}
+
+// runItemsFTSQuery executes an items FTS search for a pre-escaped FTS5 MATCH
+// expression (either FtsEscape's AND join or FtsEscapeOR's OR join), shared
+// by SearchItems and SearchItemsRelaxed so both build and execute the query
+// identically.
+func runItemsFTSQuery(d *sql.DB, ftsQuery string, f ItemFilter) ([]Item, error) {
 	q := `SELECT items.id, items.project_id, items.priority, items.title, items.component, items.epic, items.description, items.status, items.created, items.updated
 		FROM items
 		JOIN items_fts ON items.rowid = items_fts.rowid

@@ -19,7 +19,7 @@ type queryInputV2 struct {
 	Domain      string   `json:"domain,omitempty" jsonschema:"Required: \"kb\", \"backlog\", or \"roadmap\""`
 	IDs         []any    `json:"ids,omitempty" jsonschema:"IDs to fetch (kb: document IDs, backlog: item IDs); exact match, skips search/filter mode"`
 	Verbose     bool     `json:"verbose,omitempty" jsonschema:"Include notes (ids[] fetch only), default false"`
-	Query       string   `json:"query,omitempty" jsonschema:"Full-text search; present -> search mode (kb/backlog/roadmap)"`
+	Query       string   `json:"query,omitempty" jsonschema:"Full-text search (multi-term = AND, falls back to OR once if AND matches nothing); present -> search mode (kb/backlog/roadmap)"`
 	Queries     []string `json:"queries,omitempty" jsonschema:"Batch full-text search sharing filters, kb only; response is positional [[...], [...]]"`
 	Types       []string `json:"types,omitempty" jsonschema:"Filter by types (kb only)"`
 	Projects    []string `json:"projects,omitempty" jsonschema:"Filter by project names"`

@@ -112,6 +112,20 @@ func TestGet_DomainBacklog_FilterList_BadPriority_Errors(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestGet_DomainBacklog_FilterList_InvertedPriorityRange_Errors is the
+// OU-347 regression on Get's list-mode path (the ticket's reported case):
+// min=P2/max=P1 is unsatisfiable and previously returned zero rows silently.
+func TestGet_DomainBacklog_FilterList_InvertedPriorityRange_Errors(t *testing.T) {
+	db := testutil.TestDB(t)
+	proj, err := backlog.CreateProject(db, "acme-corp", "AC")
+	require.NoError(t, err)
+	_, err = backlog.AddItem(db, proj.ID, proj.Prefix, "P1", "item one", "desc", "", "", "")
+	require.NoError(t, err)
+
+	_, err = Get(db, Request{Domain: "backlog", PriorityMin: "P2", PriorityMax: "P1"})
+	require.EqualError(t, err, "invalid priority range: priority_min P2 is lower severity than priority_max P1 (P0 highest .. P6 lowest)")
+}
+
 func TestGet_DomainBacklog_FilterList_UnknownProject_Errors(t *testing.T) {
 	db := testutil.TestDB(t)
 
